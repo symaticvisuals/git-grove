@@ -226,6 +226,19 @@ test("prunable on a detached worktree holding commits only on its HEAD is loses-
   expect(empty[0]).toMatchObject({ severity: "needs-action", action: "git worktree prune" });
 });
 
+test("prunable on a detached worktree whose commits could not be counted is loses-work with a rescue branch", () => {
+  const head = "d".repeat(40);
+  const sandbox = wt("/r/.worktrees/sandbox", { prunable: true, branch: null, head });
+  const hit = run("prunable", ctx({ worktrees: [sandbox], detachedOnly: new Map([[sandbox.path, null]]) }));
+  expect(hit).toEqual([
+    expect.objectContaining({
+      severity: "loses-work",
+      detail: "/r/.worktrees/sandbox no longer exists on disk; could not check commits on its detached HEAD",
+      action: `git branch rescue/sandbox ${head}`,
+    }),
+  ]);
+});
+
 test("idle fires on a non-main worktree untouched for more than 14 days", () => {
   const old = NOW - 15 * DAY;
   const hit = run("idle", ctx({ worktrees: [wt("/r/a", { touchedAt: old })] }));

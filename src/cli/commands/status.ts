@@ -39,13 +39,12 @@ async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
   return removals;
 }
 
-/** Commits only the detached HEAD of each prunable worktree holds; a worktree git fails on is left out. */
-async function strandedCommits(facts: RepoFacts): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
+/** Commits only the detached HEAD of each prunable worktree holds; null for a worktree git fails to count. */
+async function strandedCommits(facts: RepoFacts): Promise<Map<string, number | null>> {
+  const counts = new Map<string, number | null>();
   for (const worktree of facts.worktrees) {
     if (!worktree.prunable || worktree.branch !== null || worktree.head === null) continue;
-    const count = await unlessGitFails(countDetachedOnly(facts.root, worktree.head), null);
-    if (count !== null) counts.set(worktree.path, count);
+    counts.set(worktree.path, await unlessGitFails(countDetachedOnly(facts.root, worktree.head), null));
   }
   return counts;
 }

@@ -140,3 +140,57 @@ test("a branch with no history in common with the trunk is not merged", async ()
   await repo.git("switch", "main");
   expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(false);
 });
+
+async function squashMergeCoupons(): Promise<string> {
+  await repo.branch("coupons");
+  await commitOn("coupons", "coupons.txt", "coupons work");
+  await repo.git("merge", "--squash", "coupons");
+  await repo.git("commit", "-m", "coupons (#2)");
+  return (await repo.git("rev-parse", "coupons")).trim();
+}
+
+test("a squash merge the trunk has since reverted is not merged", async () => {
+  const tip = await squashMergeCoupons();
+  await repo.git("revert", "--no-edit", "HEAD");
+  expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(false);
+});
+
+test("a squash merge reverted, landed again and then edited by the trunk is merged", async () => {
+  const tip = await squashMergeCoupons();
+  await repo.git("revert", "--no-edit", "HEAD");
+  await repo.git("revert", "--no-edit", "HEAD");
+  await repo.commit("coupons.txt", "coupons work, v2\n", "coupons follow-up");
+  expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(true);
+});
+
+test("a whitespace-only change that differs from the trunk's is not merged", async () => {
+  await repo.commit("f.py", "def f():\n    if x:\n        return 1\n    return 0\n", "add f");
+  await repo.branch("indent");
+  await repo.switch("indent");
+  const tip = await repo.commit("f.py", "def f():\n    if x:\n            return 1\n    return 0\n", "indent return deeper");
+  await repo.switch("main");
+  await repo.commit("f.py", "def f():\n    if x:\n      return 1\n    return 0\n", "indent return shallower");
+  expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(false);
+});
+
+test("a branch whose commits cancel out is merged however the trunk moves on", async () => {
+  await repo.branch("undo");
+  await repo.switch("undo");
+  await repo.commit("base.txt", "base, tried\n", "try");
+  const tip = await repo.commit("base.txt", "base\n", "undo the try");
+  await repo.switch("main");
+  await repo.commit("base.txt", "trunk edit\n", "trunk edit");
+  await repo.git("commit", "--allow-empty", "-m", "empty");
+  expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(true);
+});
+
+test("a squash probe whose git output is too large to read counts as not merged", async () => {
+  const tip = await squashMergeCoupons();
+  await repo.commit("coupons.txt", `coupons work, v2\n${"padding\n".repeat(1000)}`, "coupons follow-up");
+  process.env["GIT_GROVE_MAX_BUFFER"] = "4096";
+  try {
+    expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(false);
+  } finally {
+    delete process.env["GIT_GROVE_MAX_BUFFER"];
+  }
+});

@@ -671,6 +671,24 @@ test("a deletion first seen after the trunk moved on past its squash merge resol
   expect(doc.journal).toEqual([]);
 });
 
+test("a squash merge the trunk reverted leaves the worktree unsafe to remove, and deleting the branch alerts", async () => {
+  await couponsBranch();
+  const path = join(repo.path, ".worktrees", "coupons");
+  await repo.git("worktree", "add", path, "coupons");
+  await grove(["status"]);
+  await squashMergeCoupons();
+  await repo.git("revert", "--no-edit", "HEAD");
+
+  expect(await grove(["check", "remove", ".worktrees/coupons"])).toMatchObject({
+    code: 3,
+    out: "2 commits not pushed or merged\n",
+  });
+  await repo.git("worktree", "remove", path);
+  await repo.git("branch", "-D", "coupons");
+  expect(rulesOf((await statusJson()).findings)).toContain("branch-deleted");
+  expect((await journalEntries()).find((entry) => entry.branch === "coupons")).toMatchObject({ kind: "deleted", acked: false });
+});
+
 test("a parent merged with a merge commit gives the child a Parent merged finding", async () => {
   await repo.switch("main");
   await repo.git("config", "branch.feat.stackparent", "main");
@@ -702,6 +720,21 @@ test("a detached worktree whose folder is gone, with commits only on its HEAD, s
   const head = await goneSandbox("sandbox", 1);
   const prunable = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "prunable");
   expect(prunable).toEqual([expect.objectContaining({ severity: "loses-work", action: `git branch rescue/sandbox ${head}` })]);
+});
+
+test("a detached worktree whose folder is gone and whose HEAD object is missing says how to rescue it", async () => {
+  await goneSandbox("sandbox", 1);
+  const missing = "1234567890abcdef1234567890abcdef12345678";
+  await writeFile(join(repo.path, ".git", "worktrees", "sandbox", "HEAD"), `${missing}\n`);
+
+  const prunable = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "prunable");
+  expect(prunable).toEqual([
+    expect.objectContaining({
+      severity: "loses-work",
+      detail: expect.stringContaining("could not check commits on its detached HEAD"),
+      action: `git branch rescue/sandbox ${missing}`,
+    }),
+  ]);
 });
 
 test("a detached worktree whose folder is gone with nothing of its own can be pruned", async () => {

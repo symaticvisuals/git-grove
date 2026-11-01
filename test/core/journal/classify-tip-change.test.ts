@@ -242,6 +242,21 @@ test("fixup! and squash! commits folded by --autosquash are not lost", async () 
   expect(change).toMatchObject({ kind: "rebased", lost: [] });
 });
 
+test("a fixup! commit dropped by rebase -i while its target stays is lost", async () => {
+  const { fork } = await forkFeature();
+  const fixup = await repo.commit("a.txt", "a, fixed\n", "fixup! add a");
+  const oldTip = await repo.commit("d.txt", "d\n", "add d");
+  await runGit(["rebase", "-i", fork], {
+    cwd: repo.path,
+    write: true,
+    env: { ...IDENTITY, GIT_SEQUENCE_EDITOR: "sed -i.bak '/fixup! add a/d'", GIT_EDITOR: "true" },
+  });
+  expect((await repo.git("log", "--format=%s", "main..feat")).split("\n")).not.toContain("fixup! add a");
+
+  const change = await classify("feat", oldTip, await sha("feat"), fork, fork);
+  expect(change).toMatchObject({ kind: "rewritten", lost: [fixup] });
+});
+
 test("a fixup! commit whose target is gone from the branch is lost", async () => {
   const { fork } = await forkFeature();
   const fixup = await repo.commit("a.txt", "a, fixed\n", "fixup! add a");

@@ -16,7 +16,7 @@ export type Finding = {
 
 /**
  * `removals` is keyed by worktree path; `envMissing` by worktree path to the missing file names;
- * `detachedOnly` by the path of a prunable detached worktree to the commits only its HEAD holds.
+ * `detachedOnly` by the path of a prunable detached worktree to the commits only its HEAD holds, or null when they could not be counted.
  */
 export type RuleContext = {
   facts: RepoFacts;
@@ -24,7 +24,7 @@ export type RuleContext = {
   unresolved: JournalEntry[];
   removals: Map<string, Verdict>;
   envMissing: Map<string, string[]>;
-  detachedOnly: Map<string, number>;
+  detachedOnly: Map<string, number | null>;
   now: number;
 };
 

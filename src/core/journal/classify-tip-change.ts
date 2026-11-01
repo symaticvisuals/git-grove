@@ -49,12 +49,15 @@ function subjectOf(commit: OwnCommit): string {
   return commit.meta.split("\0").slice(2).join("\0");
 }
 
-/** Whether `commit` is a `fixup!`, `squash!` or `amend!` commit whose target subject is on the new branch. */
-function foldedByAutosquash(commit: OwnCommit, newSubjects: ReadonlySet<string>): boolean {
+/**
+ * Whether `commit` is a `fixup!`, `squash!` or `amend!` commit whose target is one of `changedSubjects`:
+ * an old commit matched only by metadata, so its content changed when the fixup was folded in.
+ */
+function foldedByAutosquash(commit: OwnCommit, changedSubjects: ReadonlySet<string>): boolean {
   let target = subjectOf(commit);
   if (!AUTOSQUASH_PREFIX.test(target)) return false;
   while (AUTOSQUASH_PREFIX.test(target)) target = target.replace(AUTOSQUASH_PREFIX, "");
-  return newSubjects.has(target);
+  return changedSubjects.has(target);
 }
 
 /** Patch IDs of the commits the base gained between `oldBase` and `newBase`, such as a hotfix cherry-picked to the trunk. */
@@ -73,7 +76,7 @@ function standsInFor(tip: OwnCommit, candidate: OwnCommit): boolean {
  * Classifies a branch tip move by comparing the branch's own commits before and after.
  * `oldBase..oldTip` and `newBase..newTip` are the own ranges, so commits that belonged to a parent are never counted.
  * An old commit is not lost when the base gained a commit with its patch ID (it reached the trunk another way),
- * or when it is an autosquash commit (`fixup! <subject>` ...) and a new commit has that subject.
+ * or when it is an autosquash commit (`fixup! <subject>` ...) whose target matched a new commit by metadata only.
  * Never returns `deleted`; that kind is for a branch that no longer has a tip.
  */
 export async function classifyTipChange(input: TipChangeInput): Promise<TipChange> {
@@ -91,9 +94,9 @@ export async function classifyTipChange(input: TipChangeInput): Promise<TipChang
   const withPatch = matched.filter((entry) => entry.commit.patchId !== null);
   const unmatched = withPatch.filter((entry) => entry.by === null).map((entry) => entry.commit);
   const upstream = unmatched.length > 0 && oldBase !== newBase ? await patchIdsBetween(cwd, oldBase, newBase) : new Set<string>();
-  const newSubjects = new Set(newOwn.map(subjectOf));
+  const changedSubjects = new Set(matched.filter((entry) => entry.by === "meta").map((entry) => subjectOf(entry.commit)));
   const lost = unmatched
-    .filter((commit) => !(commit.patchId !== null && upstream.has(commit.patchId)) && !foldedByAutosquash(commit, newSubjects))
+    .filter((commit) => !(commit.patchId !== null && upstream.has(commit.patchId)) && !foldedByAutosquash(commit, changedSubjects))
     .map((commit) => commit.sha);
 
   // An unmatched tip is amended only when a new commit stands in for it: same author email, and same author time or subject.
