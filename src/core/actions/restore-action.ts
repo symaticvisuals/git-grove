@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { RepoFacts, Sha, WorktreeFacts } from "../facts/facts.types.js";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
@@ -10,9 +9,12 @@ import { listPins } from "../runner/list-pins.js";
 import { restoreHeld, type RestoreResult } from "../runner/restore-held.js";
 import type { ActionContext, ActionDef, ExecuteResult, Prepared } from "./action.types.js";
 import { branchContext } from "./branch-context.js";
+import { busyIn } from "./busy-in.js";
 import { displayPath } from "./display-path.js";
 import { errorLine } from "./error-line.js";
+import { holderIn } from "./holder-in.js";
 import { InvalidInputError } from "./invalid-input.error.js";
+import { listPaths } from "./list-paths.js";
 import { parseRestoreTargets, type RestoreTargetInput } from "./parse-restore-targets.js";
 import type { Check, Expectation, Plan, RestoreTarget } from "./plan.types.js";
 import { readDirtyPaths } from "./read-dirty-paths.js";
@@ -35,8 +37,6 @@ type Read = {
 
 type Moved = { read: Read; result: RestoreResult };
 
-const MAX_PATHS = 3;
-
 function short(sha: Sha): string {
   return sha.slice(0, 7);
 }
@@ -53,16 +53,6 @@ async function countCommits(cwd: string, args: string[]): Promise<number> {
 async function mergeBase(cwd: string, one: Sha, other: Sha): Promise<Sha> {
   const result = await runGit(["merge-base", one, other], { cwd, allowFailure: true });
   return result.code === 0 ? result.stdout.trim() : other;
-}
-
-function holderIn(facts: RepoFacts, branch: string): WorktreeFacts | undefined {
-  return facts.worktrees.find((worktree) => worktree.branch === branch && !worktree.prunable && existsSync(worktree.path));
-}
-
-function busyIn(facts: RepoFacts, branch: string): WorktreeFacts | undefined {
-  return facts.worktrees.find(
-    (worktree) => worktree.operation !== null && (worktree.operationBranch === branch || worktree.branch === branch),
-  );
 }
 
 async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef }: RestoreTargetInput): Promise<Read> {
@@ -88,11 +78,6 @@ async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef
     busy: busyIn(facts, branch),
     children: facts.edges.filter((edge) => edge.parent === branch && existing.has(edge.branch)).map((edge) => edge.branch),
   };
-}
-
-function listPaths(paths: string[]): string {
-  const shown = paths.slice(0, MAX_PATHS).join(", ");
-  return paths.length > MAX_PATHS ? `${shown} and ${paths.length - MAX_PATHS} more` : shown;
 }
 
 function checksOf(facts: RepoFacts, read: Read): { checks: Check[]; blockers: string[] } {

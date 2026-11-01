@@ -1,8 +1,7 @@
-import type { BranchFacts, RepoFacts, StackEdge } from "../facts/facts.types.js";
-import { isAncestor } from "../git/is-ancestor.js";
+import type { RepoFacts } from "../facts/facts.types.js";
 import { runGit } from "../git/run-git.js";
-import { unlessGitFails } from "../git/unless-git-fails.js";
 import { branchLanded } from "./branch-landed.js";
+import { forkOf } from "./fork-of.js";
 import { groupFeatures } from "./group-features.js";
 import type { Feature, Level } from "./stacks.types.js";
 
@@ -10,11 +9,6 @@ const CONCURRENCY = 8;
 
 async function count(cwd: string, range: string): Promise<number> {
   return Number((await runGit(["rev-list", "--count", range], { cwd })).stdout.trim());
-}
-
-async function forkOf(cwd: string, edge: StackEdge | undefined, branch: BranchFacts, parent: BranchFacts): Promise<string> {
-  if (edge?.forkPoint && (await unlessGitFails(isAncestor(cwd, edge.forkPoint, branch.tip), false))) return edge.forkPoint;
-  return (await runGit(["merge-base", branch.tip, parent.tip], { cwd })).stdout.trim();
 }
 
 async function mapLimited<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {

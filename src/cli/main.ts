@@ -8,8 +8,14 @@ import { pinsCommand } from "./commands/pins.js";
 import { restoreCommand } from "./commands/restore.js";
 import { statusCommand } from "./commands/status.js";
 import { describeError } from "./describe-error.js";
+import { runActionCommand } from "./run-action.js";
 
-type Parsed = { values: { version?: boolean; help?: boolean; json?: boolean }; positionals: string[] };
+type Parsed = {
+  values: { version?: boolean; help?: boolean; json?: boolean; stash?: boolean; "dry-run"?: boolean };
+  positionals: string[];
+};
+
+type Flags = { json: boolean; stash: boolean; dryRun: boolean };
 
 type Command = (io: CliIo) => Promise<number>;
 
@@ -20,9 +26,12 @@ const USAGE = `Usage: git grove <command> [options]
   ack <branch>                      mark a branch's rewrite or deletion as intended
   pins list [<branch>]              list pins, newest first
   check remove <worktree> [--json]  exit 0 when safe to remove, 3 when not
+  restack <feature> [--stash]       move each level of a stack onto its parent;
+          [--dry-run] [--json]        --stash sets uncommitted changes aside
+  stack plan <feature> [--json]     show what restack would do, changing nothing
 `;
 
-const COMMANDS = new Set(["status", "restore", "ack", "pins", "check"]);
+const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack"]);
 
 function hasVersion(value: unknown): value is { version: string } {
   return typeof value === "object" && value !== null && "version" in value && typeof value.version === "string";
@@ -42,12 +51,29 @@ function parse(argv: string[]): Parsed {
   return parseArgs({
     args: argv,
     allowPositionals: true,
-    options: { version: { type: "boolean" }, help: { type: "boolean", short: "h" }, json: { type: "boolean" } },
+    options: {
+      version: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+      json: { type: "boolean" },
+      stash: { type: "boolean" },
+      "dry-run": { type: "boolean" },
+    },
   });
 }
 
-function route(positionals: string[], json: boolean): Command | null {
+function route(positionals: string[], { json, stash, dryRun }: Flags): Command | null {
   const [name, first, second, extra] = positionals;
+  if (name === "restack") {
+    return first !== undefined && second === undefined
+      ? (io) => runActionCommand(io, "restack", { feature: first, stash }, { dryRun, json })
+      : null;
+  }
+  if (stash || dryRun) return null;
+  if (name === "stack") {
+    return first === "plan" && second !== undefined && extra === undefined
+      ? (io) => runActionCommand(io, "restack", { feature: second }, { dryRun: true, json })
+      : null;
+  }
   if (name === "status") return first === undefined ? (io) => statusCommand(io, { json }) : null;
   if (name === "restore") {
     return first !== undefined && extra === undefined && !json ? (io) => restoreCommand(io, first, second) : null;
@@ -85,7 +111,8 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
     return 0;
   }
 
-  const command = route(args.positionals, args.values.json === true);
+  const { json, stash, "dry-run": dryRun } = args.values;
+  const command = route(args.positionals, { json: json === true, stash: stash === true, dryRun: dryRun === true });
   if (command === null) {
     const [name] = args.positionals;
     io.err(name !== undefined && !COMMANDS.has(name) ? `Unknown command: ${name}\n${USAGE}` : USAGE);
