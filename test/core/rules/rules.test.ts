@@ -20,6 +20,7 @@ function wt(path: string, over: Partial<WorktreeFacts> = {}): WorktreeFacts {
     locked: false,
     prunable: false,
     operation: null,
+    operationBranch: null,
     changes: null,
     touchedAt: NOW,
     ...over,
@@ -94,17 +95,19 @@ test("history-rewritten fires on rewritten entries only", () => {
   expect(hit[0]).toMatchObject({
     severity: "loses-work",
     subject: { kind: "branch", id: "feat" },
-    action: "git grove restore feat",
+    action: "git grove restore feat refs/grove/pins/feat/1",
   });
   expect(hit[0]?.detail).toContain("2");
   expect(hit[0]?.detail).toContain("refs/grove/pins/feat/1");
+  expect(hit[0]?.detail).toContain("git grove ack feat");
   expect(run("history-rewritten", ctx({ unresolved: [entry({ kind: "advanced" })] }))).toEqual([]);
 });
 
 test("branch-deleted fires on deleted entries only", () => {
   const hit = run("branch-deleted", ctx({ unresolved: [entry({ kind: "deleted", newTip: null })] }));
   expect(hit).toHaveLength(1);
-  expect(hit[0]).toMatchObject({ severity: "loses-work", action: "git grove restore feat" });
+  expect(hit[0]).toMatchObject({ severity: "loses-work", action: "git grove restore feat refs/grove/pins/feat/1" });
+  expect(hit[0]?.detail).toContain("git grove ack feat");
   expect(run("branch-deleted", ctx({ unresolved: [entry()] }))).toEqual([]);
 });
 

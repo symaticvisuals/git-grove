@@ -114,7 +114,25 @@ test("resetting a squashed branch back to its old tip is journaled acked and pin
   const found = await observe(repo.path, store, NOW + 2000);
   expect(found).toMatchObject([{ branch: "feat", oldTip: squashed, newTip: commits[2], acked: true }]);
   expect(await sha(found[0]?.pinRef ?? "")).toBe(squashed);
-  expect(store.entries(await repoIdOf(), { unresolved: true }).map((entry) => entry.newTip)).toEqual([squashed]);
+  expect(store.entries(await repoIdOf(), { unresolved: true })).toEqual([]);
+  expect(store.entries(await repoIdOf()).find((entry) => entry.newTip === squashed)).toMatchObject({ acked: true });
+});
+
+test("the same rewrite seen again after it was acked opens its entry again", async () => {
+  const { fork, commits } = await forkFeature();
+  await observe(repo.path, store, NOW);
+  await squash(fork);
+  const squashed = await sha("feat");
+  const [entry] = await observe(repo.path, store, NOW + 1000);
+  const repoId = await repoIdOf();
+  store.ack(repoId, entry?.id ?? -1, NOW + 1500);
+  await repo.git("reset", "--hard", commits[2]);
+  await observe(repo.path, store, NOW + 2000);
+  await repo.git("reset", "--hard", squashed);
+
+  const found = await observe(repo.path, store, NOW + 3000);
+  expect(found).toMatchObject([{ id: entry?.id, oldTip: commits[2], newTip: squashed, kind: "rewritten", at: NOW + 3000, acked: false }]);
+  expect(store.entries(repoId, { unresolved: true })).toMatchObject([{ id: entry?.id }]);
 });
 
 test("resetting back after a commit on top of the squash is an unacked rewrite", async () => {

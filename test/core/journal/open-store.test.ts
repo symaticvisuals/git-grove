@@ -57,14 +57,34 @@ test("repoId is stable per common dir", () => {
   }
 });
 
-test("record returns null for a change the journal already holds, and entries read it back", () => {
+test("record of a change the journal already holds updates that entry from the new event", () => {
   const store = openStore();
   try {
     const repoId = store.repoId("/repos/record/.git", "/repos/record");
     const id = store.record(repoId, rewrite);
     expect(id).toEqual(expect.any(Number));
-    expect(store.record(repoId, { ...rewrite, at: 2000, pinRef: "refs/grove/pins/feat/20261101T120000Z-2" })).toBeNull();
     expect(store.entries(repoId)).toEqual([{ ...rewrite, id }]);
+    store.ack(repoId, id, 1500);
+    const again = { ...rewrite, at: 2000, pinRef: "refs/grove/pins/feat/20261101T120000Z-2", lost: ["d".repeat(40)] };
+    expect(store.record(repoId, again)).toBe(id);
+    expect(store.entries(repoId)).toEqual([{ ...again, id }]);
+    expect(store.record(repoId, { ...again, at: 3000, acked: true })).toBe(id);
+    expect(store.entries(repoId, { unresolved: true })).toEqual([]);
+  } finally {
+    store.close();
+  }
+});
+
+test("swapTip acks the entries it names in the same transaction", () => {
+  const store = openStore();
+  try {
+    const repoId = store.repoId("/repos/swap-ack/.git", "/repos/swap-ack");
+    const original = store.record(repoId, rewrite);
+    const tip = (sha: string) => ({ sha, parentSha: "c".repeat(40) });
+    store.swapTip(repoId, { ref: "feat", from: null, to: tip("b".repeat(40)), at: 1, entry: null });
+    const undo: JournalEntry = { ...rewrite, oldTip: "b".repeat(40), newTip: "a".repeat(40), at: 2000, acked: true };
+    store.swapTip(repoId, { ref: "feat", from: "b".repeat(40), to: tip("a".repeat(40)), at: 2000, entry: undo, acks: [original] });
+    expect(store.entries(repoId, { unresolved: true })).toEqual([]);
   } finally {
     store.close();
   }

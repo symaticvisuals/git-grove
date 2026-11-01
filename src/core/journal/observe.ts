@@ -13,8 +13,8 @@ type Move = {
   parentTip: Sha;
   isTrunk: boolean;
   now: number;
-  /** Whether moving this branch from `oldTip` to `newTip` exactly reverses a rewrite already journaled for it. */
-  undoesRewrite: (oldTip: Sha, newTip: Sha) => boolean;
+  /** The ids of the rewrites journaled for this branch that moving it from `oldTip` to `newTip` exactly reverses. */
+  undoesRewrite: (oldTip: Sha, newTip: Sha) => number[];
 };
 
 function entryOf(change: TipChange, pinRef: string | null, at: number): JournalEntry {
@@ -92,12 +92,13 @@ async function journalMove(move: Move): Promise<TipSwap> {
   const { root, branch, last, parentTip, now } = move;
   // A parent tip outside the branch's history would put the next old base below the parent's own commits.
   const parentSha = (await isAncestor(root, parentTip, branch.tip)) ? parentTip : last.parentSha;
-  const swap = (entry: JournalEntry | null): TipSwap => ({
+  const swap = (entry: JournalEntry | null, acks: number[] = []): TipSwap => ({
     ref: branch.name,
     from: last.sha,
     to: { sha: branch.tip, parentSha },
     at: now,
     entry,
+    acks,
   });
   const tips = { branch: branch.name, oldTip: last.sha, newTip: branch.tip };
   const args = ["merge-base", "--is-ancestor", last.sha, branch.tip];
@@ -111,7 +112,8 @@ async function journalMove(move: Move): Promise<TipSwap> {
   }
   const pinRef = await pin(root, branch.name, last.sha, new Date(now));
   const change = await classifyTipChange({ cwd: root, ...tips, ...(await basesOf(move)) });
-  return swap({ ...entryOf(change, pinRef, now), acked: move.undoesRewrite(last.sha, branch.tip) });
+  const undone = move.undoesRewrite(last.sha, branch.tip);
+  return swap({ ...entryOf(change, pinRef, now), acked: undone.length > 0 }, undone);
 }
 
 async function journalDeletion(root: string, branch: string, oldTip: Sha, now: number): Promise<TipSwap> {
@@ -133,9 +135,10 @@ async function journalDeletion(root: string, branch: string, oldTip: Sha, now: n
 /**
  * Journals every local branch whose tip moved or vanished since the last call and resolves to the entries it added.
  * A branch seen for the first time only records its tip. A non-fast-forward move pins the old tip before classifying,
- * and is journaled already acked when it exactly reverses a `rewritten` entry of the same branch (new tip back to
- * that entry's old tip, from its new tip). A vanished branch whose tip nothing else reaches is pinned and journaled
- * as `deleted`.
+ * and is journaled already acked, acking that entry too, when it exactly reverses a `rewritten` entry of the same
+ * branch (new tip back to that entry's old tip, from its new tip) that was journaled before this move. A change the journal already holds is recorded
+ * again from this sighting, so an acked rewrite that happens again alerts again. A vanished branch whose tip nothing
+ * else reaches is pinned and journaled as `deleted`.
  * An old tip git no longer has is replaced without an entry; a branch git fails on keeps its tip until the next call.
  * Each tip is saved by compare-and-swap with its entry, so concurrent calls journal a change once and never roll back.
  */
@@ -147,10 +150,15 @@ export async function observe(cwd: string, store: Store, now: number = Date.now(
   const repoId = store.repoId(facts.commonDir, root);
   const present = new Set(facts.branches.map((branch) => branch.name));
   const parentTips = stackParentTips(facts);
-  let rewrites: JournalEntry[] | null = null;
-  const undoesRewrite = (branch: string, oldTip: Sha, newTip: Sha): boolean => {
-    rewrites ??= store.entries(repoId).filter((entry) => entry.kind === "rewritten");
-    return rewrites.some((entry) => entry.branch === branch && entry.newTip === oldTip && entry.oldTip === newTip);
+  let journal: JournalEntry[] | null = null;
+  // A move the journal already holds is that change happening again, never an undo of the entry that undid it.
+  const undoesRewrite = (branch: string, oldTip: Sha, newTip: Sha): number[] => {
+    journal ??= store.entries(repoId);
+    const ofBranch = journal.filter((entry) => entry.branch === branch && entry.id !== undefined);
+    const again = ofBranch.find((entry) => entry.oldTip === oldTip && entry.newTip === newTip)?.id;
+    return ofBranch
+      .filter((entry) => entry.kind === "rewritten" && entry.newTip === oldTip && entry.oldTip === newTip)
+      .flatMap((entry) => (entry.id === undefined || (again !== undefined && again < entry.id) ? [] : [entry.id]));
   };
   const added: JournalEntry[] = [];
   const commit = (swap: TipSwap | null): void => {
@@ -172,7 +180,7 @@ export async function observe(cwd: string, store: Store, now: number = Date.now(
       commit({ ref: branch.name, from: null, to: { sha: branch.tip, parentSha: parentTip }, at: now, entry: null });
     } else {
       const isTrunk = facts.trunk.ref === `refs/heads/${branch.name}`;
-      const undoes = (oldTip: Sha, newTip: Sha): boolean => undoesRewrite(branch.name, oldTip, newTip);
+      const undoes = (oldTip: Sha, newTip: Sha): number[] => undoesRewrite(branch.name, oldTip, newTip);
       commit(await unlessGitFails(journalMove({ root, branch, last, parentTip, isTrunk, now, undoesRewrite: undoes })));
     }
   }

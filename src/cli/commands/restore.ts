@@ -15,7 +15,18 @@ async function isAncestor(cwd: string, ancestor: Sha, descendant: Sha): Promise<
   return (await runGit(["merge-base", "--is-ancestor", ancestor, descendant], { cwd, allowFailure: true })).code === 0;
 }
 
-/** Saves the restored tip the way `observe` would and acks the branch's open alerts, so the restore is not journaled. */
+/** The pin of the branch's newest unresolved rewrite or deletion, which is the alert status shows last. */
+function alertPin(store: Store, facts: RepoFacts, branch: string): string | undefined {
+  const repoId = store.findRepoId(facts.commonDir);
+  if (repoId === null) return undefined;
+  const entries = store.entries(repoId, { unresolved: true });
+  return entries.filter((entry) => entry.branch === branch && entry.pinRef !== null).at(-1)?.pinRef ?? undefined;
+}
+
+/**
+ * Saves the restored tip the way `observe` would, so the restore is not journaled, and acks the branch's open alerts
+ * whose old tip the restored tip contains. Alerts whose commits are still missing stay open.
+ */
 async function settleJournal(store: Store, facts: RepoFacts, branch: string, tip: Sha): Promise<void> {
   const now = Date.now();
   const repoId = store.repoId(facts.commonDir, facts.root);
@@ -24,25 +35,32 @@ async function settleJournal(store: Store, facts: RepoFacts, branch: string, tip
   const parentSha = (await isAncestor(facts.root, parentTip, tip)) ? parentTip : kept;
   store.saveTip(repoId, branch, tip, parentSha, now);
   for (const entry of store.entries(repoId, { unresolved: true })) {
-    if (entry.branch === branch && entry.id !== undefined) store.ack(repoId, entry.id, now);
+    if (entry.branch !== branch || entry.id === undefined) continue;
+    if (entry.oldTip === tip || (await isAncestor(facts.root, entry.oldTip, tip))) store.ack(repoId, entry.id, now);
   }
 }
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
 function describe(branch: string, result: RestoreResult): string {
-  if (result.kind === "created") return `restored ${branch} at ${result.to.slice(0, 7)} from ${result.pinRef}`;
-  return `restored ${branch}: ${result.from.slice(0, 7)} → ${result.to.slice(0, 7)} (old tip pinned at ${result.pinnedCurrent})`;
+  const restored = `restored ${branch} at ${result.to.slice(0, 7)} from ${result.pinRef} (${plural(result.commitsBack, "commit")} back)`;
+  if (result.kind === "created") return restored;
+  return `${restored}\nprevious tip ${result.from.slice(0, 7)} pinned at ${result.pinnedCurrent}`;
 }
 
 /**
- * Runs `git grove restore <branch> [<pin-ref>]`: moves the branch back to the pin (default: its newest)
- * after pinning its current tip, or recreates a deleted branch there, and records the result in the journal as seen.
+ * Runs `git grove restore <branch> [<pin-ref>]`: moves the branch back to the pin after pinning its current tip,
+ * or recreates a deleted branch there, and records the result in the journal as seen. Without a pin ref it takes
+ * the pin of the branch's newest unresolved alert, else the branch's newest pin.
  * The store is opened first, so a store that cannot be opened leaves the branch untouched.
  */
 export async function restoreCommand(io: CliIo, branch: string, pinRef: string | undefined): Promise<number> {
   const facts = await readRepoFacts(io.cwd);
   const store = openStore();
   try {
-    const result = await restore(facts.root, branch, pinRef);
+    const result = await restore(facts.root, branch, pinRef ?? alertPin(store, facts, branch));
     io.out(`${describe(branch, result)}\n`);
     await settleJournal(store, facts, branch, result.to);
   } finally {

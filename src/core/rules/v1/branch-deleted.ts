@@ -10,7 +10,7 @@ export const branchDeleted: Rule = {
         severity: "loses-work",
         subject: { kind: "branch", id: e.branch },
         title: "Branch deleted",
-        detail: `${e.lost.length} commit(s) only on ${e.branch}${e.pinRef ? `, kept at ${e.pinRef}` : ""}`,
-        action: `git grove restore ${e.branch}`,
+        detail: `${e.lost.length} commit(s) only on ${e.branch}${e.pinRef ? `, kept at ${e.pinRef}` : ""} (if that was intended: git grove ack ${e.branch})`,
+        action: `git grove restore ${e.branch}${e.pinRef ? ` ${e.pinRef}` : ""}`,
       })),
 };

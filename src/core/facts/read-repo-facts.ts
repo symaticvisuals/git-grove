@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { runGit } from "../git/run-git.js";
 import { parseWorktreeList, type RawWorktree } from "../git/parse-worktree-list.js";
@@ -24,6 +24,15 @@ async function mtimeMs(path: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+async function rebaseBranch(gitDir: string): Promise<string | null> {
+  for (const folder of ["rebase-merge", "rebase-apply"]) {
+    const headName = await readFile(join(gitDir, folder, "head-name"), "utf8").catch(() => null);
+    const ref = headName?.trim() ?? "";
+    if (ref.startsWith("refs/heads/")) return ref.slice("refs/heads/".length);
+  }
+  return null;
 }
 
 async function mapLimit<T, R>(items: readonly T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
@@ -63,6 +72,7 @@ async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string
       locked: raw.locked,
       prunable: raw.prunable,
       operation: null,
+      operationBranch: null,
       changes: null,
       touchedAt: null,
     };
@@ -86,6 +96,7 @@ async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string
     locked: raw.locked,
     prunable: false,
     operation: marker ? marker[1] : null,
+    operationBranch: marker?.[1] === "rebase" ? await rebaseBranch(gitDir) : null,
     changes: statusOut?.code === 0 ? countChanges(statusOut.stdout) : null,
     touchedAt: times.length > 0 ? Math.max(...times) : null,
   };

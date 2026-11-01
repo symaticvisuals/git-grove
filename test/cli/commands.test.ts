@@ -125,7 +125,9 @@ test("restore brings the commits back and the next status has no rewrite", async
 
   const result = await grove(["restore", "feat"]);
   expect(result).toMatchObject({ code: 0, err: "" });
-  expect(result.out).toMatch(/^restored feat: [0-9a-f]{7} → [0-9a-f]{7} \(old tip pinned at refs\/grove\/pins\/feat\/\S+\)\n$/);
+  expect(result.out).toMatch(
+    /^restored feat at [0-9a-f]{7} from refs\/grove\/pins\/feat\/\S+ \(3 commits back\)\nprevious tip [0-9a-f]{7} pinned at refs\/grove\/pins\/feat\/\S+\n$/,
+  );
   expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("3");
 
   const doc = await statusJson();
@@ -418,7 +420,7 @@ test("restore recreates a deleted branch at its pin", async () => {
 
   const result = await grove(["restore", "feat"]);
   expect(result).toMatchObject({ code: 0, err: "" });
-  expect(result.out).toMatch(new RegExp(`^restored feat at ${tip.slice(0, 7)} from refs/grove/pins/feat/\\S+\\n$`));
+  expect(result.out).toMatch(new RegExp(`^restored feat at ${tip.slice(0, 7)} from refs/grove/pins/feat/\\S+ \\(3 commits back\\)\\n$`));
   expect((await repo.git("rev-parse", "feat")).trim()).toBe(tip);
   expect(rulesOf((await statusJson()).findings)).not.toContain("branch-deleted");
 });
@@ -472,4 +474,157 @@ test("status actions name paths from the folder status runs in", async () => {
   expect(target).toBe("../old");
   expect(resolve(await realpath(side), target)).toBe(await realpath(old));
   expect((await grove(["check", "remove", target], side)).code).toBe(3);
+});
+
+/** The actions of the history-rewritten findings, from status --json. */
+async function rewrittenActions(): Promise<string[]> {
+  return (await statusJson()).findings
+    .filter((finding) => field(finding, "rule") === "history-rewritten")
+    .map((finding) => String(field(finding, "action")));
+}
+
+test("the history-rewritten action names the alert's own pin", async () => {
+  await grove(["status"]);
+  const original = (await repo.git("rev-parse", "feat")).trim();
+  await squash();
+
+  const [action] = await rewrittenActions();
+  const pinRef = /^git grove restore feat (refs\/grove\/pins\/feat\/\S+)$/.exec(action ?? "")?.[1] ?? "";
+  expect((await repo.git("rev-parse", pinRef)).trim()).toBe(original);
+});
+
+test("restore after a squash and a later amend brings back the original tip and status is clean", async () => {
+  await grove(["status"]);
+  const original = (await repo.git("rev-parse", "feat")).trim();
+  await squash();
+  await grove(["status"]);
+  await writeFile(join(repo.path, "d.txt"), "d\n");
+  await repo.git("add", "d.txt");
+  await repo.git("commit", "--amend", "--no-edit");
+  await grove(["status"]);
+
+  const result = await grove(["restore", "feat"]);
+  expect(result).toMatchObject({ code: 0, err: "" });
+  expect(result.out).toMatch(new RegExp(`^restored feat at ${original.slice(0, 7)} from refs/grove/pins/feat/\\S+ \\(3 commits back\\)\\n`));
+  expect((await repo.git("rev-parse", "feat")).trim()).toBe(original);
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
+  expect(doc.journal).toEqual([]);
+});
+
+test("two rewrites then a restore of the first pin leaves the second alert unresolved", async () => {
+  await grove(["status"]);
+  await squash();
+  await grove(["status"]);
+  const extra = await repo.commit("d.txt", "d\n", "add d");
+  await grove(["status"]);
+  await repo.git("reset", "--hard", "HEAD~1");
+  const actions = await rewrittenActions();
+  expect(actions).toHaveLength(2);
+  const firstPin = (await journalEntries()).find((entry) => entry.kind === "rewritten" && entry.oldTip !== extra)?.pinRef ?? "";
+  expect(actions).toContain(`git grove restore feat ${firstPin}`);
+
+  expect((await grove(["restore", "feat", firstPin])).code).toBe(0);
+
+  const left = await rewrittenActions();
+  expect(left).toHaveLength(1);
+  const secondPin = left[0]?.split(" ").at(-1) ?? "";
+  expect((await repo.git("rev-parse", secondPin)).trim()).toBe(extra);
+});
+
+test("a squash that comes back after a restore alerts again", async () => {
+  await grove(["status"]);
+  await squash();
+  const squashed = (await repo.git("rev-parse", "feat")).trim();
+  await grove(["status"]);
+  await grove(["restore", "feat"]);
+  expect(rulesOf((await statusJson()).findings)).not.toContain("history-rewritten");
+
+  await repo.git("reset", "--hard", squashed);
+  expect(rulesOf((await statusJson()).findings)).toContain("history-rewritten");
+});
+
+test("squash, reset back, squash again and reset back again stays clean", async () => {
+  await grove(["status"]);
+  const original = (await repo.git("rev-parse", "feat")).trim();
+  await squash();
+  const squashed = (await repo.git("rev-parse", "feat")).trim();
+  await grove(["status"]);
+  await repo.git("reset", "--hard", original);
+  await grove(["status"]);
+  await repo.git("reset", "--hard", squashed);
+  expect(rulesOf((await statusJson()).findings)).toContain("history-rewritten");
+  await repo.git("reset", "--hard", original);
+
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
+  expect(doc.journal).toEqual([]);
+});
+
+test("ack dismisses a deliberate squash", async () => {
+  await grove(["status"]);
+  await squash();
+  const status = await grove(["status"]);
+  expect(status.out).toContain("git grove ack feat");
+
+  expect(await grove(["ack", "feat"])).toEqual({ code: 0, out: "acknowledged 1 alert on feat\n", err: "" });
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
+  expect(doc.journal).toEqual([]);
+  expect(await grove(["ack", "feat"])).toEqual({ code: 0, out: "nothing to acknowledge on feat\n", err: "" });
+});
+
+test("ack of a branch with no alerts, or no such branch, has nothing to acknowledge", async () => {
+  expect(await grove(["ack", "feat"])).toEqual({ code: 0, out: "nothing to acknowledge on feat\n", err: "" });
+  expect(await grove(["ack", "nope"])).toEqual({ code: 0, out: "nothing to acknowledge on nope\n", err: "" });
+  expect((await grove(["--help"])).out).toContain("ack <branch>");
+});
+
+test("restore refuses while the branch is mid-rebase in a worktree, and adds no pin", async () => {
+  const path = join(repo.path, ".worktrees", "a");
+  await repo.worktree(path, "a", "main");
+  for (const name of ["a1", "a2"]) {
+    await write(join(path, `${name}.txt`), `${name}\n`);
+    await repo.git("-C", path, "add", `${name}.txt`);
+    await repo.git("-C", path, "commit", "-m", name);
+  }
+  await write(join(path, "base.txt"), "from a\n");
+  await repo.git("-C", path, "commit", "-am", "a edits base");
+  await grove(["status"]);
+  await repo.git("-C", path, "reset", "--soft", "main");
+  await repo.git("-C", path, "commit", "-m", "squashed");
+  await grove(["status"]);
+  const squashed = (await repo.git("rev-parse", "a")).trim();
+  const main = join(repo.path, ".worktrees", "main");
+  await repo.git("worktree", "add", main, "main");
+  await write(join(main, "base.txt"), "from main\n");
+  await repo.git("-C", main, "commit", "-am", "main edits base");
+  await expect(repo.git("-C", path, "rebase", "main")).rejects.toThrow();
+  const pins = await repo.git("for-each-ref", "refs/grove/pins/a");
+
+  const result = await grove(["restore", "a"]);
+  expect(result.code).toBe(1);
+  expect(result.err).toMatch(/^git-grove: a has a rebase in progress in \S+\.worktrees\/a; finish or abort it first\n$/);
+  expect((await repo.git("rev-parse", "a")).trim()).toBe(squashed);
+  expect(await repo.git("for-each-ref", "refs/grove/pins/a")).toBe(pins);
+});
+
+test("restore of a branch whose worktree folder is gone moves the branch", async () => {
+  const path = join(repo.path, ".worktrees", "side");
+  await repo.worktree(path, "side", "main");
+  for (const name of ["s1", "s2", "s3"]) {
+    await write(join(path, `${name}.txt`), `${name}\n`);
+    await repo.git("-C", path, "add", `${name}.txt`);
+    await repo.git("-C", path, "commit", "-m", name);
+  }
+  await grove(["status"]);
+  const original = (await repo.git("rev-parse", "side")).trim();
+  await repo.git("-C", path, "reset", "--soft", "main");
+  await repo.git("-C", path, "commit", "-m", "squashed");
+  await grove(["status"]);
+  await rm(path, { recursive: true, force: true });
+
+  const result = await grove(["restore", "side"]);
+  expect(result).toMatchObject({ code: 0, err: "" });
+  expect((await repo.git("rev-parse", "side")).trim()).toBe(original);
 });

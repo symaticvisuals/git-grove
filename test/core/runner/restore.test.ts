@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { listPins } from "../../../src/core/runner/list-pins.js";
@@ -85,4 +85,41 @@ test("restore refuses without resetting when the tip moves before the move", asy
     }),
   ).rejects.toThrow("moved while restoring");
   expect((await repo.git("rev-parse", "feat/x~1")).trim()).toBe(squashed);
+});
+
+async function conflictWithMain(): Promise<void> {
+  const side = join(repo.path, ".worktrees", "main-side");
+  await repo.git("worktree", "add", side, "main");
+  await writeFile(join(side, "base.txt"), "from main\n");
+  await repo.git("-C", side, "commit", "-am", "main edits base");
+  await writeFile(join(repo.path, "base.txt"), "from feat\n");
+  await repo.git("commit", "-am", "feat edits base");
+}
+
+test("restore refuses when the worktree holding the branch is mid-merge, and pins nothing", async () => {
+  await conflictWithMain();
+  await expect(repo.git("merge", "main")).rejects.toThrow();
+  await expect(restore(repo.path, "feat/x")).rejects.toThrow(
+    `git-grove: feat/x has a merge in progress in ${await realpath(repo.path)}; finish or abort it first`,
+  );
+  expect((await listPins(repo.path, "feat/x")).length).toBe(1);
+});
+
+test("restore refuses when a worktree is mid-rebase of the branch on a detached HEAD", async () => {
+  await conflictWithMain();
+  const tip = (await repo.git("rev-parse", "feat/x")).trim();
+  await expect(repo.git("rebase", "main")).rejects.toThrow();
+  await expect(restore(repo.path, "feat/x")).rejects.toThrow("feat/x has a rebase in progress in");
+  expect((await repo.git("rev-parse", "feat/x")).trim()).toBe(tip);
+  expect((await listPins(repo.path, "feat/x")).length).toBe(1);
+});
+
+test("restore moves a branch whose worktree folder is gone without touching that folder", async () => {
+  await repo.switch("main");
+  const held = join(repo.path, ".worktrees", "held");
+  await repo.git("worktree", "add", held, "feat/x");
+  await rm(held, { recursive: true, force: true });
+  const result = await restore(repo.path, "feat/x");
+  expect(result).toMatchObject({ kind: "moved", to: original, commitsBack: 3 });
+  expect((await repo.git("rev-parse", "feat/x")).trim()).toBe(original);
 });

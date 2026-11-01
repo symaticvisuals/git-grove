@@ -11,6 +11,8 @@ export type WorktreeFacts = {
   locked: boolean;
   prunable: boolean;
   operation: Operation | null;
+  /** The branch an in-progress rebase is rewriting, read from its `head-name`; null otherwise. */
+  operationBranch: string | null;
   changes: { staged: number; unstaged: number; untracked: number } | null;
   touchedAt: number | null;
 };

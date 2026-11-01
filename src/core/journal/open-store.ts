@@ -169,7 +169,12 @@ export function openStore(path: string = defaultPath()): Store {
     deleteTip: db.prepare("DELETE FROM tips WHERE repo_id = ? AND ref = ? AND sha = ?"),
     record: db.prepare(
       `INSERT INTO journal (repo_id, ${CHANGE_COLUMNS})
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (repo_id, ref, old_sha, new_sha) DO UPDATE SET
+         kind = excluded.kind, lost = excluded.lost, matched_by_patch = excluded.matched_by_patch,
+         matched_by_meta = excluded.matched_by_meta, pin_ref = excluded.pin_ref, at = excluded.at,
+         found_later = excluded.found_later, acked_at = excluded.acked_at
+       RETURNING id`,
     ),
     entries: db.prepare(`SELECT ${ENTRY_COLUMNS} FROM journal WHERE repo_id = ? ORDER BY at, id`),
     unresolved: db.prepare(
@@ -179,7 +184,7 @@ export function openStore(path: string = defaultPath()): Store {
     ack: db.prepare("UPDATE journal SET acked_at = ? WHERE repo_id = ? AND id = ? AND acked_at IS NULL"),
   };
 
-  const insertEntry = (repoId: number, entry: JournalEntry): number | null => {
+  const insertEntry = (repoId: number, entry: JournalEntry): number => {
     const row = statements.record.get(
       repoId,
       entry.branch,
@@ -194,7 +199,8 @@ export function openStore(path: string = defaultPath()): Store {
       entry.foundLater ? 1 : 0,
       entry.acked ? entry.at : null,
     );
-    return row === undefined ? null : integer(row, "id");
+    if (row === undefined) throw new StoreCorruptError("journal.id");
+    return integer(row, "id");
   };
 
   const moveTip = (repoId: number, { ref, from, to, at }: TipSwap): boolean => {
@@ -226,7 +232,9 @@ export function openStore(path: string = defaultPath()): Store {
     swapTip(repoId, swap) {
       return inTransaction(db, () => {
         const swapped = moveTip(repoId, swap);
-        return { swapped, entryId: swapped && swap.entry !== null ? insertEntry(repoId, swap.entry) : null };
+        if (!swapped) return { swapped, entryId: null };
+        for (const entryId of swap.acks ?? []) statements.ack.run(swap.at, repoId, entryId);
+        return { swapped, entryId: swap.entry === null ? null : insertEntry(repoId, swap.entry) };
       });
     },
     record: insertEntry,

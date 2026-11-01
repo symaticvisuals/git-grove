@@ -1,4 +1,6 @@
+import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { describeError } from "../../../src/cli/describe-error.js";
 import { GitError } from "../../../src/core/git/git.error.js";
 import { runGit } from "../../../src/core/git/run-git.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
@@ -85,4 +87,12 @@ test("concurrent commits in two repos keep their own clocks", async () => {
   } finally {
     await other.cleanup();
   }
+});
+
+test("a folder that does not exist rejects with a GitError saying so", async () => {
+  const missing = join(repo.path, "gone");
+  const error = await runGit(["status"], { cwd: missing }).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(GitError);
+  expect(error instanceof Error ? error.message : "").toContain(`${missing} does not exist`);
+  expect(describeError(error)).not.toContain("git not found");
 });

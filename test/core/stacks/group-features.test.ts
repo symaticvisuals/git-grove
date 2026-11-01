@@ -12,6 +12,7 @@ function worktree(path: string, branch: string | null, overrides: Partial<Worktr
     locked: false,
     prunable: false,
     operation: null,
+    operationBranch: null,
     changes: null,
     touchedAt: null,
     ...overrides,

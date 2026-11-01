@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { parseArgs } from "node:util";
 import { requireGitVersion } from "../core/git/require-git-version.js";
 import type { CliIo } from "./cli-io.types.js";
+import { ackCommand } from "./commands/ack.js";
 import { checkCommand } from "./commands/check.js";
 import { pinsCommand } from "./commands/pins.js";
 import { restoreCommand } from "./commands/restore.js";
@@ -16,11 +17,12 @@ const USAGE = `Usage: git grove <command> [options]
 
   status [--json]                   what needs you, then one line per worktree
   restore <branch> [<pin-ref>]      move a branch back to a pin
+  ack <branch>                      mark a branch's rewrite or deletion as intended
   pins list [<branch>]              list pins, newest first
   check remove <worktree> [--json]  exit 0 when safe to remove, 3 when not
 `;
 
-const COMMANDS = new Set(["status", "restore", "pins", "check"]);
+const COMMANDS = new Set(["status", "restore", "ack", "pins", "check"]);
 
 function hasVersion(value: unknown): value is { version: string } {
   return typeof value === "object" && value !== null && "version" in value && typeof value.version === "string";
@@ -50,6 +52,7 @@ function route(positionals: string[], json: boolean): Command | null {
   if (name === "restore") {
     return first !== undefined && extra === undefined && !json ? (io) => restoreCommand(io, first, second) : null;
   }
+  if (name === "ack") return first !== undefined && second === undefined && !json ? (io) => ackCommand(io, first) : null;
   if (name === "pins") return first === "list" && extra === undefined && !json ? (io) => pinsCommand(io, second) : null;
   if (name === "check") {
     return first === "remove" && second !== undefined && extra === undefined
