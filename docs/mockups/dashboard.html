@@ -1,324 +1,758 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>grove</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700;800&family=Atkinson+Hyperlegible+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<title>acme-shop · git grove</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700&family=Martian+Mono:wdth,wght@75..112.5,400..600&display=swap" rel="stylesheet">
 <style>
-  :root {
-    --bg: #F3F5F7; --surface: #FFFFFF; --ink: #16202A; --muted: #5B6876; --faint: #8F9BA8; --rule: #DDE3E9; --soft: #EEF2F5; --hover: #F6F8FA;
-    --red: #C2271F; --red-bg: #FCEDEC; --amber: #A85A00; --amber-bg: #FDF2E3; --blue: #2257C9; --blue-bg: #EAF0FC; --green: #23794A; --green-bg: #E7F3EC; --grey: #B7C1CB; --select: #E8EFFA;
-    --mono: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 "Atkinson Hyperlegible Next", system-ui, sans-serif; }
-  button { font: inherit; color: inherit; cursor: pointer; }
-  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
-  .mono { font-family: var(--mono); }
-  .muted { color: var(--muted); }
+:root{
+  --bg:#0F1412;--side:#0B0F0E;--panel:#121816;--raise:#171E1B;--hover:#1A2320;--sel:#1E2925;
+  --line:#1F2825;--line-hi:#2B3732;
+  --text:#E8E4D9;--muted:#8E9893;--faint:#5E6964;
+  --resin:#E3A23B;--ember:#E0573C;--moss:#7DB08A;--fjord:#7FA7C9;
+  --mono:"Martian Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--side);color:var(--text);font:13px/1.4 "Atkinson Hyperlegible Next",system-ui,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
+:focus-visible{outline:1.5px solid var(--resin);outline-offset:1px;border-radius:5px}
+.mono{font-family:var(--mono);font-variation-settings:"wdth" 87.5;font-size:12px}
+kbd{font:500 10.5px var(--mono);font-variation-settings:"wdth" 87.5;color:var(--muted);border:1px solid var(--line-hi);border-bottom-width:2px;border-radius:4px;padding:0 4px;min-width:18px;text-align:center;display:inline-block;line-height:15px}
+.app{display:grid;grid-template-columns:236px 1fr;height:100vh}
 
-  .top { position: sticky; top: 0; z-index: 2; height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--rule); }
-  .crumbs { display: flex; align-items: center; gap: 10px; font-size: 15px; }
-  .wordmark { font-weight: 800; font-size: 19px; letter-spacing: -0.02em; margin-right: 8px; }
-  .crumbs button { border: none; background: none; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
-  .crumbs button:hover { background: var(--soft); color: var(--ink); }
-  .crumbs .here { font-weight: 700; color: var(--ink); padding: 4px 6px; }
-  .crumbs .sep { color: var(--faint); }
-  .top .right { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 14px; }
-  .live { display: inline-flex; align-items: center; gap: 7px; }
-  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
-  .btn { border: 1px solid var(--rule); background: var(--surface); border-radius: 7px; padding: 6px 12px; font-size: 14px; white-space: nowrap; }
-  .btn:hover { background: var(--hover); }
-  .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
-  .btn.small { padding: 3px 9px; font-size: 13px; }
-  .btn[disabled] { color: var(--faint); cursor: not-allowed; background: var(--soft); }
+/* sidebar */
+aside.side{display:flex;flex-direction:column;padding:10px 8px;gap:2px;border-right:1px solid var(--line);min-height:0}
+.ws{display:flex;align-items:center;gap:9px;padding:6px 8px 10px}
+.ws b{font:500 13.5px var(--mono);font-variation-settings:"wdth" 95;letter-spacing:-.01em}
+.ws .local{margin-left:auto;font-size:11px;color:var(--faint);border:1px solid var(--line-hi);border-radius:4px;padding:0 5px}
+.search{display:flex;align-items:center;gap:8px;padding:6px 8px;margin:0 0 8px;border:1px solid var(--line);border-radius:6px;color:var(--faint);background:var(--panel)}
+.search span{flex:1}
+.nav{display:flex;align-items:center;gap:9px;width:100%;padding:5px 8px;border-radius:6px;color:var(--muted);height:28px}
+.nav:hover{background:var(--hover);color:var(--text)}
+.nav.on{background:var(--sel);color:var(--text)}
+.nav svg{flex:none}
+.nav .count{margin-left:auto;font-size:11.5px;color:var(--faint)}
+.nav .count.hot{color:var(--ember)}
+.sec{font-size:11.5px;color:var(--faint);padding:14px 8px 4px;display:flex;align-items:center;justify-content:space-between}
+.repo-sub{padding-left:22px}
+.repo-sub .nav{height:26px}
+.side-foot{margin-top:auto;padding:10px 8px 4px;border-top:1px solid var(--line);display:grid;gap:6px;color:var(--muted);font-size:12px}
+.side-foot div{display:flex;align-items:center;gap:8px}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--moss);box-shadow:0 0 0 0 rgba(125,176,138,.45);animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{to{box-shadow:0 0 0 7px rgba(125,176,138,0)}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
 
-  .view { display: none; max-width: 1240px; margin: 0 auto; padding: 24px 24px 48px; }
-  .view.on { display: block; }
-  h1 { font-size: 26px; line-height: 1.15; margin: 0; letter-spacing: -0.01em; }
-  .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin-bottom: 18px; }
-  .head p { margin: 4px 0 0; color: var(--muted); }
+/* main */
+.main{display:grid;grid-template-rows:auto auto 1fr;min-height:0;background:var(--bg);border-radius:10px 0 0 0;margin-top:6px;border-left:1px solid var(--line);border-top:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:10px;height:44px;padding:0 14px 0 18px;border-bottom:1px solid var(--line)}
+.crumb{display:flex;align-items:center;gap:7px;font-size:13px}
+.crumb .dim{color:var(--muted)}
+.crumb .sep{color:var(--faint)}
+.tabs{display:flex;gap:2px;margin-left:14px}
+.tab{padding:4px 10px;border-radius:6px;color:var(--muted);font-size:12.5px;border:1px solid transparent}
+.tab:hover{color:var(--text)}
+.tab.on{color:var(--text);background:var(--raise);border-color:var(--line-hi)}
+.bar .right{margin-left:auto;display:flex;align-items:center;gap:6px}
+.ghost{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 9px;border-radius:6px;color:var(--muted);font-size:12.5px;border:1px solid var(--line-hi)}
+.ghost:hover{color:var(--text);background:var(--hover)}
+.filters{display:flex;align-items:center;gap:6px;height:38px;padding:0 18px;border-bottom:1px solid var(--line)}
+.fchip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;color:var(--muted);border:1px dashed var(--line-hi)}
+.fchip.on{border-style:solid;color:var(--text);background:var(--raise)}
+.fchip:hover{color:var(--text)}
+.filters .sum{margin-left:auto;color:var(--faint);font-size:12px}
 
-  .chip { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 1px 9px; border-radius: 999px; white-space: nowrap; }
-  .c-red { background: var(--red-bg); color: var(--red); } .c-amber { background: var(--amber-bg); color: var(--amber); } .c-blue { background: var(--blue-bg); color: var(--blue); } .c-green { background: var(--green-bg); color: var(--green); } .c-grey { background: var(--soft); color: var(--muted); }
+.body{display:grid;grid-template-columns:minmax(0,1fr) 392px;min-height:0}
+.list{overflow:auto;min-height:0;padding-bottom:40px}
+.group{position:sticky;top:0;z-index:2;width:100%;display:flex;align-items:center;gap:9px;height:36px;padding:0 18px;background:var(--raise);border-bottom:1px solid var(--line);font-size:12.5px}
+.group b{font-weight:600}
+.group .meta{color:var(--faint)}
+.group .tally{margin-left:auto;display:flex;gap:10px;color:var(--muted);font-size:12px}
+.group .tally span{display:inline-flex;align-items:center;gap:4px}
+.group .caret{color:var(--faint);transition:transform .15s}
+.group.closed .caret{transform:rotate(-90deg)}
+.rows.closed{display:none}
 
-  /* Projects */
-  .urgent { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 22px; }
-  .urg { text-align: left; background: var(--surface); border: 1px solid var(--rule); border-top: 3px solid var(--red); border-radius: 8px; padding: 10px 12px; }
-  .urg.amber { border-top-color: var(--amber); }
-  .urg:hover { background: var(--hover); }
-  .urg .proj { font-size: 12.5px; color: var(--muted); }
-  .urg b { display: block; margin: 2px 0; }
-  .urg span.w { font-size: 13.5px; color: var(--muted); }
-  .ledger { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
-  .prow { display: grid; grid-template-columns: 260px 1fr 150px 110px 110px; align-items: center; gap: 18px; width: 100%; text-align: left; border: none; background: none; padding: 16px 20px; border-top: 1px solid var(--rule); }
-  .prow:first-of-type { border-top: none; }
-  .prow:hover { background: var(--hover); }
-  .prow.headrow { padding-top: 10px; padding-bottom: 10px; font-size: 13px; color: var(--muted); cursor: default; background: var(--soft); }
-  .pname b { display: block; font-size: 17px; }
-  .pname span { font-size: 13.5px; color: var(--muted); }
-  .waffle { display: flex; flex-wrap: wrap; gap: 3px; max-width: 520px; }
-  .waffle i { width: 11px; height: 11px; border-radius: 2px; background: var(--grey); display: block; }
-  .waffle i.r { background: var(--red); } .waffle i.a { background: var(--amber); } .waffle i.b { background: var(--blue); } .waffle i.g { background: var(--green); }
-  .wcap { font-size: 13px; color: var(--muted); margin-top: 6px; }
-  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-top: 12px; }
-  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.row{position:relative;display:grid;grid-template-columns:auto minmax(160px,1fr) auto auto 64px 48px;align-items:center;column-gap:10px;height:40px;width:100%;padding:0 18px 0 18px;border-bottom:1px solid var(--line)}
+.row:hover{background:var(--hover)}
+.row.sel{background:var(--sel)}
+.row.sel::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--resin)}
+.tcell{position:relative;height:40px}
+.tcell svg.gut{position:absolute;left:0;top:0;overflow:visible}
+.tcell .ic{position:absolute;top:13px;display:block}
+.row .br{font-family:var(--mono);font-variation-settings:"wdth" 87.5;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .br .lv{color:var(--faint);margin-right:8px}
+.row .state{font-size:12.5px;color:var(--c);white-space:nowrap}
+.pills{display:flex;gap:5px;justify-content:flex-end}
+.pill{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border-radius:999px;border:1px solid var(--line-hi);font-size:11.5px;color:var(--muted);white-space:nowrap}
+.pill.pin{color:var(--resin);border-color:rgba(227,162,59,.35)}
+.num{font:400 11.5px var(--mono);font-variation-settings:"wdth" 87.5;color:var(--muted);text-align:right;white-space:nowrap}
+.when{color:var(--faint);font-size:12px;text-align:right;display:flex;align-items:center;justify-content:flex-end;gap:7px}
+.av{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font:600 9.5px var(--mono);color:#14100A}
+.av.you{background:var(--text)}
+.av.agent{background:var(--resin)}
 
-  /* Features */
-  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-  .tabs { display: flex; gap: 4px; background: var(--soft); padding: 3px; border-radius: 8px; }
-  .tabs button { border: none; background: none; padding: 5px 12px; border-radius: 6px; font-size: 14px; color: var(--muted); }
-  .tabs button.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(22,32,42,.12); }
-  .search { border: 1px solid var(--rule); border-radius: 7px; padding: 6px 12px; width: 260px; font: inherit; font-size: 14px; background: var(--surface); }
-  .ftable { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
-  .ftable th { text-align: left; font-size: 13px; color: var(--muted); font-weight: 500; padding: 10px 14px; background: var(--soft); }
-  .ftable td { padding: 12px 14px; border-top: 1px solid var(--rule); vertical-align: middle; }
-  .ftable tr.click { cursor: pointer; }
-  .ftable tr.click:hover td { background: var(--hover); }
-  .fname b { display: block; }
-  .fname span { font-size: 13px; color: var(--muted); font-family: var(--mono); }
-  .shape { display: inline-flex; flex-direction: column-reverse; gap: 2px; vertical-align: middle; margin-right: 8px; }
-  .shape i { display: block; width: 28px; height: 6px; border-radius: 2px; background: var(--green); }
-  .shape i.r { background: var(--red); } .shape i.a { background: var(--amber); } .shape i.b { background: var(--blue); } .shape i.x { background: transparent; border: 1.5px dashed var(--faint); height: 6px; } .shape i.n { background: var(--grey); }
-  .shape-label { font-size: 13.5px; color: var(--muted); }
-
-  /* Feature tree */
-  .split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
-  .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
-  .panel-h { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--rule); }
-  .panel-h h2 { font-size: 16px; margin: 0; }
-  .tree { list-style: none; margin: 0; padding: 14px 18px 18px; }
-  .tree ul { list-style: none; margin: 0; padding-left: 30px; }
-  .tree li { position: relative; }
-  .tree ul > li::before { content: ""; position: absolute; left: -18px; top: 0; bottom: 0; border-left: 2px solid var(--rule); }
-  .tree ul > li:last-child::before { bottom: auto; height: 30px; }
-  .tree ul > li::after { content: ""; position: absolute; left: -18px; top: 30px; width: 16px; border-top: 2px solid var(--rule); }
-  .tree li.drift::after { border-top-color: var(--amber); border-top-style: dashed; }
-  .node { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--rule); border-left: 4px solid var(--green); border-radius: 8px; background: var(--surface); cursor: pointer; }
-  .node:hover { background: var(--hover); }
-  .node.sel { background: var(--select); border-color: #B9CBEA; border-left-color: var(--red); }
-  .node.red { border-left-color: var(--red); } .node.amber { border-left-color: var(--amber); } .node.blue { border-left-color: var(--blue); }
-  .node.trunk { border-left-color: var(--ink); background: var(--soft); cursor: default; }
-  .node .l1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .node .lv { font-size: 12.5px; color: var(--muted); }
-  .node .br { font-family: var(--mono); font-size: 14px; font-weight: 500; }
-  .node .meta { grid-column: 1 / 2; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
-  .node .acts { grid-row: 1 / 3; grid-column: 2; display: flex; gap: 6px; }
-  .edge-label { position: absolute; left: -17px; top: 12px; font-size: 11.5px; font-weight: 700; color: var(--amber); background: var(--surface); padding: 0 3px; }
-  .add { margin: 8px 0 0 0; }
-  .stackbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--rule); background: var(--soft); border-radius: 0 0 10px 10px; }
-  .stackbar p { margin: 0; font-size: 14px; }
-
-  .facts { display: grid; grid-template-columns: 130px 1fr; gap: 8px 14px; padding: 14px 18px; font-size: 14px; }
-  .facts dt { color: var(--muted); }
-  .facts dd { margin: 0; }
-  .ok { color: var(--green); font-weight: 600; } .bad { color: var(--red); font-weight: 600; } .warnc { color: var(--amber); font-weight: 600; }
-  .files { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
-  .sect { border-top: 1px solid var(--rule); padding: 12px 18px; }
-  .sect h3 { font-size: 14px; margin: 0 0 8px; }
-  .journal { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--rule); }
-  .journal li { position: relative; padding: 0 0 10px 12px; font-size: 13.5px; }
-  .journal li::before { content: ""; position: absolute; left: -21px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--faint); }
-  .journal li.bad::before { border-color: var(--red); background: var(--red); }
-  .journal li.pin::before { border-color: var(--blue); background: var(--blue); }
-  .journal .t { color: var(--muted); font-size: 12.5px; }
-  .journal code { font-family: var(--mono); font-size: 12.5px; }
-  .actgrid { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--rule); }
-  .why { font-size: 12.5px; color: var(--muted); width: 100%; margin-top: -2px; }
+/* detail */
+.detail{border-left:1px solid var(--line);overflow:auto;min-height:0;background:var(--panel)}
+.d-head{padding:16px 20px 14px;border-bottom:1px solid var(--line)}
+.d-path{font-size:12px;color:var(--faint);display:flex;gap:6px;align-items:center}
+.d-head h2{font:500 15.5px var(--mono);font-variation-settings:"wdth" 92;margin-top:6px;letter-spacing:-.01em}
+.d-sec{padding:16px 20px;border-bottom:1px solid var(--line);display:grid;gap:12px}
+.alert{display:grid;gap:4px;padding:11px 12px;border-radius:8px;background:rgba(224,87,60,.08);border:1px solid rgba(224,87,60,.28)}
+.alert b{display:flex;align-items:center;gap:7px;color:#EE8D78;font-size:13px}
+.alert p{color:var(--text);font-size:12.5px;line-height:1.5}
+.props{display:grid;grid-template-columns:96px 1fr;row-gap:9px;font-size:12.5px;align-items:center}
+.props dt{color:var(--muted)}
+.props dd{display:flex;align-items:center;gap:7px;min-width:0}
+.props dd .mono{font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.label{font-size:12px;color:var(--muted)}
+.lost{display:grid;gap:2px}
+.lost div{display:grid;grid-template-columns:66px 1fr;font:400 11.5px var(--mono);font-variation-settings:"wdth" 87.5;padding:4px 8px;border-radius:5px}
+.lost div:hover{background:var(--hover)}
+.lost span:first-child{color:var(--resin)}
+.pincard{display:flex;gap:11px;align-items:flex-start;padding:11px 12px;border-radius:8px;border:1px dashed rgba(227,162,59,.45);background:rgba(227,162,59,.04)}
+.pincard .ref{font:500 11.5px var(--mono);font-variation-settings:"wdth" 87.5;color:var(--resin);line-height:1.45}
+.pincard .cap{font-size:12px;color:var(--muted);margin-top:3px}
+.acts{display:flex;gap:8px}
+.btn{white-space:nowrap;flex:none;display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 11px;border-radius:7px;font-size:12.5px;border:1px solid var(--line-hi);background:var(--raise)}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--resin);border-color:var(--resin);color:#1A1307;font-weight:600}
+.btn.primary kbd{color:#5A4214;border-color:rgba(26,19,7,.25)}
+.btn.primary:hover{filter:brightness(1.06)}
+.plan{display:none;gap:10px;padding:12px;border-radius:8px;border:1px solid var(--line-hi);background:var(--bg)}
+.plan.on{display:grid}
+.plan ol{padding-left:16px;display:grid;gap:5px;font-size:12.5px;color:var(--text)}
+.plan code{font:500 11.5px var(--mono);font-variation-settings:"wdth" 87.5}
+.plan pre{font:500 11px/1.5 var(--mono);font-variation-settings:"wdth" 87.5;white-space:pre-wrap;word-break:break-all;color:var(--muted);background:var(--side);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.timeline{display:grid;gap:0}
+.ev{display:grid;grid-template-columns:18px 1fr;column-gap:10px;padding:6px 0;font-size:12.5px;position:relative}
+.ev::before{content:"";position:absolute;left:8.5px;top:24px;bottom:-6px;width:1px;background:var(--line-hi)}
+.ev:last-child::before{display:none}
+.ev .t{color:var(--faint);font-size:11.5px}
+.ev code{font:500 11px var(--mono);font-variation-settings:"wdth" 87.5;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.toast{position:fixed;right:20px;bottom:20px;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:9px;background:var(--raise);border:1px solid var(--line-hi);box-shadow:0 12px 30px rgba(0,0,0,.4);font-size:12.5px;opacity:0;transform:translateY(8px);transition:.2s}
+.toast.on{opacity:1;transform:none}
+.banner svg,.safe svg,.check svg,.dlg li svg{flex:none}
+.banner{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border-radius:8px;background:rgba(224,87,60,.08);border:1px solid rgba(224,87,60,.28)}
+.banner b{display:block;color:#EE8D78;font-size:13px}
+.banner p{color:var(--text);font-size:12.5px;line-height:1.5;margin-top:2px}
+.banner.warn{background:rgba(227,162,59,.07);border-color:rgba(227,162,59,.3)}
+.banner.warn b{color:var(--resin)}
+.safe{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:rgba(125,176,138,.07);border:1px solid rgba(125,176,138,.25)}
+.safe b{display:block;color:var(--moss);font-size:12.5px}
+.safe p{font-size:12px;color:var(--muted);line-height:1.5;margin-top:2px}
+.safe .mono{color:var(--resin);font-size:11px}
+.h3{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:baseline}
+.h3 .t{color:var(--faint);font-size:11.5px}
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.detail .compare{grid-template-columns:1fr}
+.lane{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg)}
+.lane .cap{font-size:11.5px;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.commits{display:grid;position:relative}
+.commits::before{content:"";position:absolute;left:6px;top:12px;bottom:12px;width:1.5px;background:var(--line-hi)}
+.cm{position:relative;display:grid;grid-template-columns:13px auto 1fr;gap:8px;align-items:center;height:22px;font:400 11.5px var(--mono);font-variation-settings:"wdth" 87.5;white-space:nowrap}
+.cm .nd{position:relative;width:13px;height:13px;display:grid;place-items:center}
+.cm .nd::after{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.cm.tip .nd::after{width:9px;height:9px;background:var(--text)}
+.cm.base{color:var(--faint)}
+.cm.base .nd::after{background:var(--faint)}
+.cm.lost{color:var(--resin)}
+.cm.lost .nd::after{background:var(--bg);border:1.5px dashed var(--ember);width:8px;height:8px}
+.cm .msg{overflow:hidden;text-overflow:ellipsis}
+.cm .sha{color:var(--muted)}
+.cm.lost .sha{color:var(--resin)}
+.pinring{position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--resin)}
+.lane text{font:400 10.5px var(--mono);font-variation-settings:"wdth" 87.5;fill:var(--text)}
+.lane text.h{fill:var(--resin)}
+.lane text.dim{fill:var(--faint)}
+.checks{display:grid;gap:7px;font-size:12.5px}
+.check{display:grid;grid-template-columns:16px 1fr;gap:8px;align-items:start;line-height:1.45}
+.check .why{color:var(--muted);font-size:12px}
+.check.bad{color:#EE8D78}
+.check code,.opt code,.dlg code{font:500 11px var(--mono);font-variation-settings:"wdth" 87.5;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 4px;color:var(--text)}
+.opts{display:grid;gap:8px}
+.opt{display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;padding:11px 12px;border-radius:8px;border:1px solid var(--line-hi);background:var(--raise)}
+.opt b{font-size:13px}
+.opt p{grid-column:1;font-size:12px;color:var(--muted);line-height:1.45}
+.opt .btn{grid-row:1/3;grid-column:2}
+.receipt{display:grid;gap:8px;padding:12px;border-radius:8px;border:1px solid rgba(125,176,138,.3);background:rgba(125,176,138,.06);font-size:12.5px}
+.receipt b{color:var(--moss)}
+.scrim{position:fixed;inset:0;background:rgba(4,7,6,.62);backdrop-filter:blur(3px);display:none;align-items:flex-start;justify-content:center;padding-top:9vh;z-index:20}
+.scrim.on{display:flex}
+.dlg{width:600px;max-width:calc(100vw - 32px);max-height:82vh;overflow:auto;background:var(--panel);border:1px solid var(--line-hi);border-radius:12px;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.dlg header{padding:16px 20px 14px;border-bottom:1px solid var(--line)}
+.dlg header .k{font-size:11.5px;color:var(--faint)}
+.dlg header h3{font-size:16px;margin-top:4px;font-weight:600}
+.dlg header p{font-size:12.5px;color:var(--muted);margin-top:3px}
+.dlg section{padding:14px 20px;border-bottom:1px solid var(--line);display:grid;gap:10px}
+.dlg ul{list-style:none;display:grid;gap:7px;font-size:12.5px}
+.dlg ul li{display:grid;grid-template-columns:16px 1fr;gap:8px;line-height:1.45}
+.dlg pre{font:500 11px/1.5 var(--mono);font-variation-settings:"wdth" 87.5;white-space:pre-wrap;color:var(--muted);background:var(--side);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
+.dlg footer{display:flex;align-items:center;gap:8px;padding:12px 20px;background:var(--raise);border-radius:0 0 12px 12px}
+.dlg footer .note{font-size:12px;color:var(--muted);margin-right:auto;display:flex;gap:7px;align-items:center}
+.btn[disabled]{opacity:.45;cursor:not-allowed;filter:none}
+.toast .btn{height:24px;font-size:12px}
+.newbtn{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 9px;margin:0 0 6px;border-radius:7px;border:1px solid var(--line-hi);background:var(--raise);font-size:12.5px;color:var(--text)}
+.newbtn:hover{background:var(--hover)}
+.newbtn kbd{margin-left:auto}
+.group{cursor:pointer}
+.gacts{display:flex;gap:4px;margin-left:12px;opacity:0;transition:opacity .12s}
+.group:hover .gacts,.group:focus-within .gacts{opacity:1}
+.gbtn{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;color:var(--muted);border:1px solid var(--line-hi);background:var(--panel)}
+.gbtn:hover{color:var(--text);background:var(--hover)}
+.gbtn.hot{color:var(--resin);border-color:rgba(227,162,59,.4)}
+.row{cursor:pointer}
+.racts{position:absolute;right:10px;top:50%;transform:translateY(-50%);display:none;gap:4px;padding-left:24px;background:linear-gradient(90deg,transparent,var(--hover) 22px)}
+.row.sel .racts{background:linear-gradient(90deg,transparent,var(--sel) 22px)}
+.row:hover .racts,.row.sel .racts{display:flex}
+.ib{display:grid;place-items:center;width:26px;height:26px;border-radius:6px;color:var(--muted);border:1px solid var(--line-hi);background:var(--panel)}
+.ib:hover{color:var(--text);background:var(--raise)}
+.ib.hot{color:#1A1307;background:var(--resin);border-color:var(--resin)}
+.cmds{border-top:1px solid var(--line);padding:10px 20px}
+.cmds summary{cursor:pointer;font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:6px}
+.cmds summary::before{content:"›";display:inline-block;transition:transform .15s}
+.cmds[open] summary::before{transform:rotate(90deg)}
+.cmds pre{margin-top:8px}
+.field{display:grid;gap:6px}
+.field label{font-size:12px;color:var(--muted)}
+.field input,.field select{height:32px;border-radius:7px;border:1px solid var(--line-hi);background:var(--bg);color:var(--text);padding:0 10px;font:13px "Atkinson Hyperlegible Next",sans-serif}
+.field input.mono{font:500 12px var(--mono);font-variation-settings:"wdth" 87.5}
+.field input:focus,.field select:focus{outline:1.5px solid var(--resin);outline-offset:0;border-color:transparent}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.toggle{display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:start;font-size:12.5px;cursor:pointer}
+.toggle input{appearance:none;width:30px;height:18px;border-radius:999px;background:var(--line-hi);position:relative;cursor:pointer;margin-top:1px;transition:background .15s}
+.toggle input::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--text);transition:transform .15s}
+.toggle input:checked{background:var(--resin)}
+.toggle input:checked::after{transform:translateX(12px);background:#1A1307}
+.toggle .why{color:var(--muted);font-size:12px}
+.preview{font:500 11.5px/1.7 var(--mono);font-variation-settings:"wdth" 87.5;color:var(--muted);background:var(--side);border:1px solid var(--line);border-radius:7px;padding:9px 11px}
+.preview b{color:var(--text);font-weight:500}
+.preview .new{color:var(--moss)}
+.pick{display:grid;grid-template-columns:18px 16px 1fr auto;gap:10px;align-items:center;padding:8px 10px;border-radius:7px;border:1px solid var(--line);font-size:12.5px}
+.pick input{accent-color:var(--resin);width:15px;height:15px}
+.pick .mono{font-size:12px}
+.pick .why{color:var(--muted);font-size:12px;text-align:right}
+.pick.off{opacity:.55}
+.steps{list-style:none;display:grid;gap:2px}
+.dlg ul.steps li.step{grid-template-columns:18px 1fr auto}
+.step{display:grid;grid-template-columns:18px 1fr auto;gap:10px;align-items:start;padding:7px 4px;font-size:12.5px;border-radius:6px}
+.step .sub{color:var(--muted);font-size:12px}
+.step .dur{font:400 11px var(--mono);color:var(--faint)}
+.step.pending{color:var(--faint)}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid var(--line-hi);border-top-color:var(--resin);animation:spin .7s linear infinite;margin-top:1px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none;border-color:var(--resin)}}
+.pend{width:14px;height:14px;border-radius:50%;border:1.5px dashed var(--line-hi);margin-top:1px}
+.palette{width:620px;max-width:calc(100vw - 32px);background:var(--panel);border:1px solid var(--line-hi);border-radius:12px;box-shadow:0 30px 80px rgba(0,0,0,.55);overflow:hidden}
+.palette input{width:100%;height:48px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);padding:0 18px;font:14px "Atkinson Hyperlegible Next",sans-serif;outline:none}
+.palette ul{list-style:none;max-height:380px;overflow:auto;padding:6px}
+.palette .sec{padding:8px 10px 4px}
+.palette li button{display:flex;align-items:center;gap:10px;width:100%;height:36px;padding:0 10px;border-radius:7px;font-size:13px;color:var(--text)}
+.palette li button .hint{margin-left:auto;color:var(--faint);font-size:12px}
+.palette li button.on{background:var(--sel)}
 </style>
 </head>
 <body>
-<header class="top">
-  <nav class="crumbs" aria-label="Where you are">
-    <span class="wordmark">grove</span>
-    <span id="c0" class="here">Projects</span>
-    <span id="s1" class="sep" hidden>/</span>
-    <button id="c1" hidden onclick="go('features')">acme-shop</button>
-    <span id="s2" class="sep" hidden>/</span>
-    <span id="c2" class="here" hidden>checkout coupons</span>
-  </nav>
-  <div class="right">
-    <span class="live">Watching 4 projects, scanned 3 s ago</span>
-    <button class="btn">Scan now</button>
-  </div>
-</header>
-
-<!-- 1. Projects -->
-<section class="view on" id="projects">
-  <div class="head">
-    <div><h1>Your projects</h1><p>81 worktrees across 4 repos, using 17.7 GB.</p></div>
-    <button class="btn">Add a repo</button>
-  </div>
-
-  <div class="urgent">
-    <button class="urg" onclick="go('tree')"><span class="proj">acme-shop, checkout coupons</span><b>History rewritten on level 2</b><span class="w">14 commits became 1 at 23:19. Old commits are pinned.</span></button>
-    <button class="urg" onclick="go('features')"><span class="proj">acme-shop, chore/old-onboarding</span><b>Not safe to remove</b><span class="w">Merged, but 2 ignored files exist only here.</span></button>
-    <button class="urg amber"><span class="proj">eval-runs</span><b>41 worktrees idle over 14 days</b><span class="w">37 are safe to remove and would free 8.9 GB.</span></button>
-  </div>
-
-  <div class="ledger">
-    <div class="prow headrow"><span>Project</span><span>Worktrees, one square each</span><span>In flight</span><span>Disk</span><span>Last change</span></div>
-    <button class="prow" onclick="go('features')">
-      <span class="pname"><b>acme-shop</b><span>TypeScript monorepo, trunk main</span></span>
-      <span><span class="waffle"><i class="r"></i><i class="r"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="b"></i><i class="b"></i><i class="g"></i><i class="g"></i><i></i></span><span class="wcap">10 worktrees, 3 need you</span></span>
-      <span>3 stacks, 3 singles</span><span>4.2 GB</span><span>3 min ago</span>
-    </button>
-    <button class="prow">
-      <span class="pname"><b>eval-runs</b><span>Agent run sandboxes, trunk testing</span></span>
-      <span><span class="waffle"><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="a"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="wcap">64 worktrees, 41 idle over 14 days</span></span>
-      <span>1 feature</span><span>9.8 GB</span><span>2 h ago</span>
-    </button>
-    <button class="prow">
-      <span class="pname"><b>mobile-app</b><span>React Native, trunk develop</span></span>
-      <span><span class="waffle"><i class="a"></i><i class="g"></i><i class="g"></i></span><span class="wcap">3 worktrees, 1 is missing its .env</span></span>
-      <span>1 stack</span><span>3.1 GB</span><span>Yesterday</span>
-    </button>
-    <button class="prow">
-      <span class="pname"><b>billing-service</b><span>Go service, trunk main</span></span>
-      <span><span class="waffle"><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i></span><span class="wcap">4 worktrees, all fine</span></span>
-      <span>2 singles</span><span>0.6 GB</span><span>1 h ago</span>
-    </button>
-  </div>
-  <div class="legend"><span><i style="background:var(--red)"></i>Could lose work</span><span><i style="background:var(--amber)"></i>Needs an action</span><span><i style="background:var(--blue)"></i>Waiting on review</span><span><i style="background:var(--green)"></i>Fine</span><span><i style="background:var(--grey)"></i>Idle</span></div>
-</section>
-
-<!-- 2. Features -->
-<section class="view" id="features">
-  <div class="head">
-    <div><h1>acme-shop</h1><p>6 features in flight on 10 worktrees. Trunk main at <span class="mono">4f2c1a9</span>.</p></div>
-    <button class="btn primary">New feature</button>
-  </div>
-  <div class="toolbar">
-    <div class="tabs" role="tablist"><button class="on">All 6</button><button>Needs you 3</button><button>Stacks 3</button><button>Single branches 3</button><button>Merged or idle 2</button></div>
-    <input class="search" placeholder="Find a feature or branch" aria-label="Find a feature or branch">
-  </div>
-  <table class="ftable">
-    <tr><th>Feature</th><th>Shape</th><th>Worst issue</th><th>PRs</th><th>Behind main</th><th>Last change</th></tr>
-    <tr class="click" onclick="go('tree')" tabindex="0">
-      <td class="fname"><b>checkout coupons</b><span>feat/coupons-*</span></td>
-      <td><span class="shape"><i></i><i class="r"></i><i class="g"></i><i class="a"></i></span><span class="shape-label">4 levels</span></td>
-      <td><span class="chip c-red">History rewritten</span></td>
-      <td>#210 #211 #214 #215</td><td>5</td><td>9 min ago</td>
-    </tr>
-    <tr class="click" tabindex="0">
-      <td class="fname"><b>search filters</b><span>feat/search-*</span></td>
-      <td><span class="shape"><i class="x"></i><i class="a"></i></span><span class="shape-label">2 levels, 1 merged</span></td>
-      <td><span class="chip c-amber">Re-base level 2 onto main</span></td>
-      <td>#205 merged, #207</td><td>2</td><td>2 h ago</td>
-    </tr>
-    <tr class="click" tabindex="0">
-      <td class="fname"><b>payments retry</b><span>feat/retry-*</span></td>
-      <td><span class="shape"><i class="b"></i><i class="b"></i></span><span class="shape-label">2 levels</span></td>
-      <td><span class="chip c-blue">Open thread blocks level 2</span></td>
-      <td>#216 #217</td><td>1</td><td>40 min ago</td>
-    </tr>
-    <tr class="click" tabindex="0">
-      <td class="fname"><b>old onboarding</b><span>chore/old-onboarding</span></td>
-      <td><span class="shape"><i class="r"></i></span><span class="shape-label">Single, merged</span></td>
-      <td><span class="chip c-red">Not safe to remove</span></td>
-      <td>#198 merged</td><td>none</td><td>6 days ago</td>
-    </tr>
-    <tr class="click" tabindex="0">
-      <td class="fname"><b>cart rounding</b><span>fix/cart-rounding</span></td>
-      <td><span class="shape"><i></i></span><span class="shape-label">Single</span></td>
-      <td><span class="chip c-green">Fine</span></td>
-      <td>#212</td><td>1</td><td>1 day ago</td>
-    </tr>
-    <tr class="click" tabindex="0">
-      <td class="fname"><b>redis cache spike</b><span>spike/redis-cache</span></td>
-      <td><span class="shape"><i class="n"></i></span><span class="shape-label">Single, no remote</span></td>
-      <td><span class="chip c-grey">Idle 21 days</span></td>
-      <td>none</td><td>38</td><td>21 days ago</td>
-    </tr>
-  </table>
-</section>
-
-<!-- 3. Feature tree -->
-<section class="view" id="tree">
-  <div class="head">
-    <div><h1>checkout coupons</h1><p>A stack of 4 branches in 4 worktrees, on main.</p></div>
-    <div style="display:flex;gap:8px"><button class="btn">Add a level</button><button class="btn primary">Fix this stack</button></div>
-  </div>
-  <div class="split">
-    <div class="panel">
-      <div class="panel-h"><h2>Stack</h2><span class="muted" style="font-size:13.5px">Click a branch to see its worktree</span></div>
-      <ul class="tree">
-        <li>
-          <div class="node trunk"><div class="l1"><span class="br">main</span><span class="lv">trunk at 4f2c1a9</span></div></div>
-          <ul>
-            <li>
-              <div class="node"><div class="l1"><span class="lv">Level 1</span><span class="br">feat/coupons-api</span></div><div class="meta"><span class="chip c-green">PR #210 approved</span><span>5 behind main</span><span>clean</span></div><div class="acts"><button class="btn small">Open</button><button class="btn small">Update from main</button></div></div>
-              <ul>
-                <li class="drift">
-                  <span class="edge-label">+3</span>
-                  <div class="node sel"><div class="l1"><span class="lv">Level 2</span><span class="br">feat/coupons-ui</span></div><div class="meta"><span class="chip c-red">History rewritten</span><span class="chip c-red">PR #211 CI failed</span><span>parent moved 3</span><span>3 changed files</span></div><div class="acts"><button class="btn small">Open</button><button class="btn small">Restore</button></div></div>
-                  <ul>
-                    <li>
-                      <div class="node amber"><div class="l1"><span class="lv">Level 3</span><span class="br">feat/coupons-emails</span></div><div class="meta"><span class="chip c-amber">Restack after level 2</span><span>PR #214 draft</span><span>2 uncommitted files</span></div><div class="acts"><button class="btn small">Open</button></div></div>
-                    </li>
-                  </ul>
-                </li>
-                <li>
-                  <div class="node"><div class="l1"><span class="lv">Level 2</span><span class="br">feat/coupons-admin</span></div><div class="meta"><span class="chip c-green">PR #215 CI ok</span><span>in sync with level 1</span></div><div class="acts"><button class="btn small">Open</button><button class="btn small">Push</button></div></div>
-                </li>
-              </ul>
-            </li>
-          </ul>
-        </li>
-      </ul>
-      <div class="stackbar"><p><b>3 steps to fix:</b> restore level 2, restack levels 2 and 3, push both as merge commits.</p><div style="display:flex;gap:8px"><button class="btn small">Copy commands</button><button class="btn small primary">Review plan</button></div></div>
+<div class="app">
+  <aside class="side">
+    <div class="ws">
+      <svg viewBox="0 3 64 64" width="20" height="20" aria-hidden="true"><path d="M44 9 V44 A12 12 0 0 1 32 56 H27" fill="none" stroke="#E8E4D9" stroke-width="6.5" stroke-linejoin="round"/><circle cx="32" cy="24" r="12" fill="none" stroke="#E3A23B" stroke-width="6.5"/><circle cx="23" cy="56" r="6.5" fill="#E8E4D9"/></svg>
+      <b>git grove</b><span class="local">local</span>
     </div>
+    <button class="search" data-palette><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span>Do or find anything</span><kbd>⌘K</kbd></button>
+    <button class="newbtn" data-new><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>New feature<kbd>N</kbd></button>
+    <button class="nav"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 9.5V13h12V9.5M2 9.5 4 3h8l2 6.5M2 9.5h3.5l1 1.8h3l1-1.8H14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>Needs you<span class="count hot">3</span></button>
+    <button class="nav"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 8h3l2-5 3 10 2-5h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>Activity</button>
+    <button class="nav"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="6.5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.1V15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Pins<span class="count">12</span></button>
+    <div class="sec">Repos</div>
+    <button class="nav on" data-repo>
+      <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3.5" fill="#1E2925" stroke="var(--line-hi)"/><circle cx="8" cy="8" r="2.4" fill="var(--ember)"/></svg>acme-shop<span class="count">10</span></button>
+    <div class="repo-sub">
+      <button class="nav" data-jump="g-coupons">checkout coupons</button>
+      <button class="nav" data-jump="g-export">invoice export</button>
+      <button class="nav" data-jump="g-singles">Singles</button>
+      <button class="nav" data-jump="g-detached">Detached</button>
+    </div>
+    <button class="nav"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3.5" fill="#1E2925" stroke="var(--line-hi)"/><circle cx="8" cy="8" r="2.4" fill="var(--resin)"/></svg>eval-runs<span class="count">64</span></button>
+    <button class="nav"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3.5" fill="#1E2925" stroke="var(--line-hi)"/><circle cx="8" cy="8" r="2.4" fill="var(--resin)"/></svg>mobile-app<span class="count">3</span></button>
+    <button class="nav"><svg width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="3.5" fill="#1E2925" stroke="var(--line-hi)"/><circle cx="8" cy="8" r="2.4" fill="var(--moss)"/></svg>billing-service<span class="count">4</span></button>
+    <div class="side-foot">
+      <div><span class="pulse" aria-hidden="true"></span>Watching 4 repos, 3 s ago</div>
+      <div><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 13.5 4v4.2c0 3.2-2.3 5.6-5.5 6.3-3.2-.7-5.5-3.1-5.5-6.3V4z" fill="none" stroke="var(--moss)" stroke-width="1.5" stroke-linejoin="round"/></svg>Guard on for Claude Code</div>
+    </div>
+  </aside>
 
-    <div class="panel">
-      <div class="panel-h"><h2 class="mono" style="font-size:15px">feat/coupons-ui</h2><span class="chip c-red">Could lose work</span></div>
-      <dl class="facts">
-        <dt>Worktree</dt><dd class="mono" style="font-size:13px">.worktrees/feat-coupons-ui</dd>
-        <dt>Changes</dt><dd>3 files <span class="files">CouponForm.tsx, coupon.schema.ts, coupons.test.ts</span></dd>
-        <dt>Not pushed</dt><dd class="warnc">2 commits</dd>
-        <dt>Parent</dt><dd>feat/coupons-api, which moved 3 commits</dd>
-        <dt>Env files</dt><dd><span class="ok">.env</span>, <span class="ok">apps/api/.env</span>, <span class="bad">apps/web/.env.local missing</span></dd>
-        <dt>Install</dt><dd><span class="ok">Up to date</span>, lockfile unchanged since install</dd>
-        <dt>Running</dt><dd>web dev server on :3001, Claude Code waiting for input for 12 min</dd>
-        <dt>Disk</dt><dd>1.1 GB</dd>
-      </dl>
-      <div class="sect">
-        <h3>History grove recorded</h3>
-        <ul class="journal">
-          <li><span class="t">Today 21:02</span><br>Tip <code>e71c09a</code>, 14 commits</li>
-          <li class="bad"><span class="t">Today 23:19:42</span><br><b style="color:var(--red)">Tip <code>3a9d771</code>, 1 commit. The old tip left its history.</b></li>
-          <li class="pin"><span class="t">Today 23:19:43</span><br>Pinned <code>e71c09a</code>, so its 14 commits stay reachable</li>
-        </ul>
-      </div>
-      <div class="actgrid">
-        <button class="btn small primary">Restore the 14 commits</button>
-        <button class="btn small">Copy env file from main</button>
-        <button class="btn small">Open in editor</button>
-        <button class="btn small">Open terminal</button>
-        <button class="btn small" disabled>Remove worktree</button>
-        <span class="why">Remove is off: 2 commits aren't pushed and the history was rewritten.</span>
-      </div>
+  <div class="main">
+    <div class="bar">
+      <div class="crumb"><span class="dim">acme-shop</span><span class="sep">›</span><b>Worktrees</b></div>
+      <div class="tabs"><button class="tab on">By feature</button><button class="tab">By health</button><button class="tab">Activity</button></div>
+      <div class="right"><button class="ghost"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 4h12M4.5 8h7M7 12h2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Display</button><button class="ghost" id="scan"><svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8A5.5 5.5 0 1 1 11.8 4M13.5 2v3.5H10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Scan now</button></div>
+    </div>
+    <div class="filters">
+      <button class="fchip on" id="f-needs"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="var(--ember)"/></svg>Needs you</button>
+      <button class="fchip">+ Filter</button>
+      <button class="fchip on" data-dialog="cleanup" style="border-color:rgba(227,162,59,.4);color:var(--resin)"><svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2 7 8M4 8.5h6l1.5 5.5h-9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>2 worktrees safe to clean up</button>
+      <span class="sum">10 worktrees, 2 stacks, 2 singles, 3 detached</span>
+    </div>
+    <div class="body">
+      <div class="list" id="list"></div>
+      <section class="detail" id="detail" aria-live="polite"></section>
     </div>
   </div>
-</section>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<div class="scrim" id="scrim"></div>
 
 <script>
-  function go(view) {
-    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === view));
-    const f = view === 'features', t = view === 'tree';
-    document.getElementById('c0').outerHTML = view === 'projects'
-      ? '<span id="c0" class="here">Projects</span>'
-      : '<button id="c0" onclick="go(\'projects\')">Projects</button>';
-    document.getElementById('s1').hidden = !(f || t);
-    const c1 = document.getElementById('c1');
-    c1.hidden = !(f || t);
-    c1.className = f ? 'here' : '';
-    document.getElementById('s2').hidden = !t;
-    document.getElementById('c2').hidden = !t;
-    window.scrollTo(0, 0);
+const H = {
+  loses: { c: "var(--ember)", label: "Could lose work" },
+  action: { c: "var(--resin)", label: "Needs an action" },
+  review: { c: "var(--fjord)", label: "Waiting on review" },
+  fine: { c: "var(--moss)", label: "Fine" },
+  idle: { c: "var(--faint)", label: "Idle" },
+};
+function icon(h) {
+  const c = H[h].c;
+  if (h === "loses") return `<svg width="14" height="14" viewBox="0 0 14 14" aria-label="${H[h].label}"><circle cx="7" cy="7" r="6" fill="${c}"/><path d="M7 3.6v4.1" stroke="#1A0E0A" stroke-width="1.7" stroke-linecap="round"/><circle cx="7" cy="10.1" r=".95" fill="#1A0E0A"/></svg>`;
+  if (h === "action") return `<svg width="14" height="14" viewBox="0 0 14 14" aria-label="${H[h].label}"><circle cx="7" cy="7" r="5.6" fill="none" stroke="${c}" stroke-width="1.6"/><path d="M7 7V2.4A4.6 4.6 0 0 1 11.6 7z" fill="${c}"/></svg>`;
+  if (h === "review") return `<svg width="14" height="14" viewBox="0 0 14 14" aria-label="${H[h].label}"><circle cx="7" cy="7" r="5.6" fill="none" stroke="${c}" stroke-width="1.6"/><path d="M7 7V2.4A4.6 4.6 0 1 1 2.4 7z" fill="${c}"/></svg>`;
+  if (h === "fine") return `<svg width="14" height="14" viewBox="0 0 14 14" aria-label="${H[h].label}"><circle cx="7" cy="7" r="6" fill="${c}"/><path d="M4.4 7.2l1.8 1.8 3.5-3.6" fill="none" stroke="#0E1A12" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  return `<svg width="14" height="14" viewBox="0 0 14 14" aria-label="${H[h].label}"><circle cx="7" cy="7" r="5.6" fill="none" stroke="${c}" stroke-width="1.6" stroke-dasharray="2.2 2"/></svg>`;
+}
+const RING = (s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="4.8" fill="none" stroke="#E3A23B" stroke-width="2.4"/></svg>`;
+
+const groups = [
+  { id: "g-coupons", stack: true, name: "checkout coupons", meta: "stack, 4 levels", rows: [
+    { id: "l1", d: 1, lv: "01", br: "feat/coupons-model", h: "loses", state: "History rewritten", pills: ["pin:3 commits pinned"], num: "↓3", who: "agent", when: "4m" },
+    { id: "l2", d: 2, lv: "02", br: "feat/coupons-ui", h: "action", state: "Parent moved", pills: ["1 change"], num: "+1 parent", who: "you", when: "22m" },
+    { id: "l3", d: 3, lv: "03", br: "feat/coupons-email", h: "review", state: "Waiting on review", pills: ["pushed"], num: "", who: "you", when: "51m" },
+    { id: "l2b", d: 2, lv: "02", br: "feat/coupons-admin", h: "fine", state: "In sync", pills: [], num: "", who: "agent", when: "1h" },
+  ]},
+  { id: "g-export", stack: true, name: "invoice export", meta: "stack, 2 levels", rows: [
+    { id: "e1", d: 1, lv: "01", br: "feat/export-csv", h: "fine", state: "In sync", pills: ["pushed"], num: "↓1", who: "you", when: "2h" },
+    { id: "e2", d: 2, lv: "02", br: "feat/export-pdf", h: "review", state: "Waiting on review", pills: ["pushed"], num: "", who: "agent", when: "2h" },
+  ]},
+  { id: "g-singles", name: "Singles", meta: "branches outside a stack", rows: [
+    { id: "s1", d: 0, br: "fix/invoice-rounding", h: "loses", state: "Not safe to remove", pills: ["merged", "1 ignored file"], num: "", who: "you", when: "6h" },
+    { id: "s2", d: 0, br: "chore/bump-deps", h: "idle", state: "Idle 16 days", pills: [], num: "↓42", who: "you", when: "16d" },
+  ]},
+  { id: "g-detached", name: "Detached", meta: "agent sandboxes", rows: [
+    { id: "x1", d: 0, br: "3 sandboxes, detached", h: "fine", state: "Nothing to keep", pills: [], num: "", who: "agent", when: "35m", plain: true },
+  ]},
+];
+
+const STEP = 22, MID = 20, ROW = 40;
+const cx = (d) => 7 + Math.max(0, d - 1) * STEP;
+function treeCell(rows, i) {
+  const r = rows[i];
+  const d = r.d || 1;
+  const nextSib = (k) => { for (let j = k + 1; j < rows.length; j++) { if (rows[j].d < rows[k].d) return false; if (rows[j].d === rows[k].d) return true; } return false; };
+  const anc = (k, dd) => { for (let j = k - 1; j >= 0; j--) if (rows[j].d === dd) return j; return -1; };
+  const ln = (path) => `<path d="${path}" fill="none" stroke="var(--line-hi)" stroke-width="1.5" stroke-linecap="round"/>`;
+  const p = [];
+  if (r.d) {
+    for (let dd = 2; dd < r.d; dd++) { const a = anc(i, dd); if (a >= 0 && nextSib(a)) p.push(ln(`M${cx(dd)} 0 V${ROW}`)); }
+    if (r.d > 1) {
+      const px = cx(r.d - 1);
+      p.push(ln(`M${px} 0 V${MID - 6} A6 6 0 0 0 ${px + 6} ${MID} H${cx(r.d) - 10}`));
+      if (nextSib(i)) p.push(ln(`M${px} ${MID - 6} V${ROW}`));
+    }
+    if (rows[i + 1] && rows[i + 1].d > r.d) p.push(ln(`M${cx(r.d)} ${MID + 10} V${ROW}`));
   }
+  const w = cx(d) + 7;
+  return `<span class="tcell" style="width:${w}px"><svg class="gut" width="${w}" height="${ROW}" viewBox="0 0 ${w} ${ROW}" aria-hidden="true">${p.join("")}</svg><span class="ic" style="left:${cx(d) - 7}px">${icon(r.h)}</span></span>`;
+}
+
+function pill(p) {
+  if (p.startsWith("pin:")) return `<span class="pill pin">${RING(10)}${p.slice(4)}</span>`;
+  return `<span class="pill">${p}</span>`;
+}
+const ICONS = {
+  editor: `<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  term: `<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5 6.5 8 3 11.5M8.5 12H13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  more: `<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/></svg>`,
+  restack: `<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v6a3 3 0 0 0 3 3h5M10 9l2.5 2.5L10 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  plus: `<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+  back: `<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.5 7.5 6 11M3 7.5h6.5a4 4 0 0 1 0 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  broom: `<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 2 7 8M4 8.5h6l1.5 5.5h-9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`,
+};
+const QUICK = { l1: ["restore", "back", "Bring back 3 commits"], l2: ["restack", "restack", "Restack onto its parent"], s1: ["rescue", "broom", "Copy the file, then remove"] };
+
+function rowHtml(g, i) {
+  const r = g.rows[i];
+  const q = QUICK[r.id];
+  return `<div class="row" role="button" tabindex="0" data-id="${r.id}" style="--c:${H[r.h].c}">
+    ${treeCell(g.rows, i)}
+    <span class="br">${r.lv ? `<span class="lv">${r.lv}</span>` : ""}${r.br}</span>
+    <span class="state">${r.state}</span>
+    <span class="pills">${r.pills.map(pill).join("")}</span>
+    <span class="num">${r.num}</span>
+    <span class="when"><span class="av ${r.who}" title="${r.who === "agent" ? "Claude Code session" : "You"}">${r.who === "agent" ? "C" : "Y"}</span>${r.when}</span>
+    <span class="racts">${q && r.h !== "fine" ? `<button class="ib hot" data-dialog="${q[0]}" title="${q[2]}" aria-label="${q[2]}">${ICONS[q[1]]}</button>` : ""}<button class="ib" data-open="editor" title="Open in editor" aria-label="Open in editor">${ICONS.editor}</button><button class="ib" data-open="terminal" title="Open a terminal here" aria-label="Open a terminal here">${ICONS.term}</button><button class="ib" data-palette title="More actions" aria-label="More actions">${ICONS.more}</button></span>
+  </div>`;
+}
+
+function tally(g) {
+  const counts = {};
+  g.rows.forEach((r) => (counts[r.h] = (counts[r.h] || 0) + 1));
+  return Object.keys(H).filter((h) => counts[h]).map((h) => `<span>${icon(h)}${counts[h]}</span>`).join("");
+}
+function groupActions(g) {
+  if (g.stack) {
+    const needs = g.rows.some((r) => r.state === "Parent moved");
+    return `${needs ? `<button class="gbtn hot" data-dialog="restack">${ICONS.restack}Restack</button>` : ""}<button class="gbtn" data-dialog="addLevel" data-group-id="${g.id}">${ICONS.plus}Add level</button>`;
+  }
+  if (g.id === "g-singles" || g.id === "g-detached") return `<button class="gbtn" data-dialog="cleanup">${ICONS.broom}Clean up</button>`;
+  return "";
+}
+function renderList() {
+  document.getElementById("list").innerHTML = groups.map((g) => `
+    <div class="group ${g.closed ? "closed" : ""}" id="${g.id}" data-group="${g.id}"><svg class="caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><b>${g.name}</b><span class="meta">${g.meta}</span><span class="gacts">${groupActions(g)}</span><span class="tally">${tally(g)}</span></div>
+    <div class="rows ${g.closed ? "closed" : ""}" data-rows="${g.id}">${g.rows.map((_, i) => rowHtml(g, i)).join("")}</div>`).join("");
+  document.querySelectorAll(".row").forEach((el) => el.classList.toggle("sel", el.dataset.id === current));
+}
+
+const PROPS = (o) => `<dl class="props">${o.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>`;
+const OK = `<svg width="14" height="14" viewBox="0 0 14 14" aria-label="done"><circle cx="7" cy="7" r="6" fill="none" stroke="var(--moss)" stroke-width="1.5"/><path d="M4.4 7.2l1.8 1.8 3.5-3.6" fill="none" stroke="var(--moss)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const NO = `<svg width="14" height="14" viewBox="0 0 14 14" aria-label="failed"><circle cx="7" cy="7" r="6" fill="var(--ember)"/><path d="M4.8 4.8l4.4 4.4M9.2 4.8l-4.4 4.4" stroke="#1A0E0A" stroke-width="1.6" stroke-linecap="round"/></svg>`;
+const DOT = `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="var(--muted)"/></svg>`;
+const SHIELD = `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 13.5 4v4.2c0 3.2-2.3 5.6-5.5 6.3-3.2-.7-5.5-3.1-5.5-6.3V4z" fill="none" stroke="var(--moss)" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.6 8.1l1.6 1.6 3.2-3.3" fill="none" stroke="var(--moss)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const check = (ok, text, why) => `<div class="check ${ok ? "" : "bad"}">${ok ? OK : NO}<div>${text}${why ? `<div class="why">${why}</div>` : ""}</div></div>`;
+function lane(commits) {
+  return `<div class="commits">${[...commits].reverse().map((c) => `<div class="cm ${c.lost ? "lost" : ""} ${c.tip ? "tip" : ""} ${c.base ? "base" : ""}">
+    <span class="nd">${c.pin ? '<i class="pinring"></i>' : ""}</span><span class="sha">${c.sha}</span><span class="msg">${c.msg}</span></div>`).join("")}</div>`;
+}
+const BEFORE = [{ sha: "a41c", msg: "main", base: true }, { sha: "bf38", msg: "add coupon model", lost: true }, { sha: "e058", msg: "validate coupon codes", lost: true }, { sha: "d598", msg: "apply coupon at checkout", lost: true, pin: true }];
+const NOW = [{ sha: "a41c", msg: "main", base: true }, { sha: "f01a", msg: "coupons", tip: true }];
+const AFTER = [{ sha: "a41c", msg: "main", base: true }, { sha: "bf38", msg: "add coupon model" }, { sha: "e058", msg: "validate coupon codes" }, { sha: "d598", msg: "apply coupon at checkout", tip: true }];
+
+const DETAIL = {
+  l1: () => `
+    <div class="d-head"><div class="d-path">checkout coupons <span>›</span> level 01</div><h2>feat/coupons-model</h2></div>
+    <div class="d-sec">
+      <div class="banner">${icon("loses")}<div><b>3 commits are no longer on this branch</b><p>At 23:19 a Claude Code session (7f3a) replaced them with one commit. Tests still pass, but the history the reviewers saw is gone from the branch.</p></div></div>
+      <div class="safe">${SHIELD}<div><b>Nothing is lost yet</b><p>Grove pinned all 3 before deciding anything. They stay until you remove the pin.</p></div></div>
+      <div class="opts">
+        <div class="opt"><b>Bring the 3 commits back</b><p>The squash is kept too, so you can undo.</p><button class="btn primary" data-dialog="restore">Bring back <kbd>R</kbd></button></div>
+        <div class="opt"><b>Keep the squash</b><p>Clears the alert. The old commits stay pinned.</p><button class="btn" data-dialog="ack">Keep <kbd>A</kbd></button></div>
+      </div>
+    </div>
+    <div class="d-sec"><div class="h3">What happened</div>
+      <div class="compare"><div class="lane"><div class="cap">${RING(10)}Before, pinned</div>${lane(BEFORE)}</div><div class="lane"><div class="cap">Now</div>${lane(NOW)}</div></div>
+    </div>
+    <div class="d-sec"><div class="h3">Why grove calls it a loss, not a rebase</div>
+      <div class="checks">
+        ${check(false, "0 of 3 old commits found by their change", "A rebase keeps each change, so it would match all 3.")}
+        ${check(false, "0 of 3 found by author, time and message", "This catches a rebase that resolved a conflict.")}
+        ${check(true, "Same base as before", "<code>main</code> didn't move, so this wasn't a restack.")}
+      </div>
+    </div>
+    <div class="d-sec">${PROPS([["Worktree", `<span class="mono">.worktrees/coupons/01-coupons-model</span>`], ["Parent", `<span class="mono">main</span>`], ["Changes", "Clean"], ["Upstream", "No remote"]])}</div>`,
+  l2: () => `
+    <div class="d-head"><div class="d-path">checkout coupons <span>›</span> level 02</div><h2>feat/coupons-ui</h2></div>
+    <div class="d-sec">
+      <div class="banner warn">${icon("action")}<div><b>Built on an old version of its parent</b><p>feat/coupons-model changed under it, so this level's PR would show the parent's old commits again.</p></div></div>
+      <div class="opts"><div class="opt"><b>Restack the whole stack</b><p>Moves this level and the one above it. Your uncommitted change is set aside and put back.</p><button class="btn primary" data-dialog="restack">Restack <kbd>S</kbd></button></div></div>
+    </div>
+    <div class="d-sec"><div class="h3">Before you restack <span class="t">checked 2 s ago</span></div>
+      <div class="checks">
+        ${check(true, "No conflicts expected", "Dry run on both levels, nothing written.")}
+        ${check(true, "2 commits to replay, 1 per level")}
+        ${check(true, "1 uncommitted change will be set aside", "<code>src/cart/badge.tsx</code> goes back exactly as it is now.")}
+      </div>
+    </div>
+    <div class="d-sec">${PROPS([["Worktree", `<span class="mono">.worktrees/coupons/02-coupons-ui</span>`], ["Parent", `<span class="mono">feat/coupons-model</span>`], ["Changes", "1 file"]])}</div>`,
+  s1: () => `
+    <div class="d-head"><div class="d-path">Singles</div><h2>fix/invoice-rounding</h2></div>
+    <div class="d-sec">
+      <div class="banner">${icon("loses")}<div><b>Merged, but removing it would delete a file</b><p>The code is safe in main. One ignored file lives only in this folder.</p></div></div>
+      <div class="opts"><div class="opt"><b>Copy the file to main, then remove</b><p>Nothing in main is overwritten. The branch is kept.</p><button class="btn primary" data-dialog="rescue">Clean up <kbd>R</kbd></button></div></div>
+    </div>
+    <div class="d-sec"><div class="h3">Safe to remove? <span class="t">checked 2 s ago</span></div>
+      <div class="checks">
+        ${check(true, "Merged into main")}
+        ${check(true, "No uncommitted, untracked, stashed or unpushed work")}
+        ${check(true, "No worktree inside this folder")}
+        ${check(false, "1 ignored file exists only here", "<code>.local/seed.sql</code>, 2.1 kB, not in the main checkout")}
+      </div>
+    </div>
+    <div class="d-sec">${PROPS([["Worktree", `<span class="mono">.worktrees/invoice-rounding</span>`], ["Guard", "Blocked an agent's forced removal at 23:21"]])}</div>`,
+};
+const generic = (r, g) => `
+  <div class="d-head"><div class="d-path">${g.name}${r.lv ? ` <span>›</span> level ${r.lv}` : ""}</div><h2>${r.br}</h2></div>
+  <div class="d-sec"><div class="safe">${SHIELD}<div><b>${r.h === "loses" || r.h === "action" ? "Needs a look" : "Nothing needs you here"}</b><p>${r.state}.</p></div></div>
+    <div class="acts"><button class="btn" data-open="editor">${ICONS.editor}Open in editor</button><button class="btn" data-open="terminal">${ICONS.term}Terminal</button></div></div>
+  <div class="d-sec">${PROPS([["Status", `${icon(r.h)} ${H[r.h].label}`], ["Touched", r.when === "now" ? "Just now" : r.when + " ago"]])}</div>`;
+
+const rowById = (id) => { for (const g of groups) { const r = g.rows.find((x) => x.id === id); if (r) return r; } return null; };
+const groupById = (id) => groups.find((g) => g.id === id);
+const slug = (s) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const val = (id) => (document.getElementById(id) || {}).value || "";
+const on = (id) => !!(document.getElementById(id) || {}).checked;
+
+const DIALOGS = {
+  restore: {
+    k: "checkout coupons, level 01", title: "Bring back 3 commits on feat/coupons-model",
+    sub: "The branch goes back to where it was before the squash. Nothing is deleted.",
+    body: () => `<section><div class="compare"><div class="lane"><div class="cap">Now</div>${lane(NOW)}</div><div class="lane"><div class="cap">After</div>${lane(AFTER)}</div></div></section>
+      <section><div class="h3">Grove will also</div><ul>
+        <li>${OK}<span>Keep the squash in its own pin, so you can undo this.</span></li>
+        <li>${OK}<span>Update the files in <code>01-coupons-model</code>. No local edits there to lose.</span></li>
+        <li>${DOT}<span>Offer to restack <code>coupons-ui</code> afterwards.</span></li></ul></section>`,
+    cmds: ["git grove restore feat/coupons-model refs/grove/pins/feat/coupons-model/20261101T173014Z"],
+    primary: "Bring back 3 commits",
+    steps: () => [["Check nothing moved since you looked", "Still at f01aa41, worktree clean"], ["Pin the squash", "refs/grove/pins/…/20261101T173022Z"], ["Move the branch back", "f01aa41 → d598a02"], ["Check all 3 commits are back", "3 of 3 found"]],
+    done: () => { const r = rowById("l1"); r.h = "fine"; r.state = "Restored"; r.pills = ["pin:squash kept"]; r.when = "now"; DETAIL.l1 = () => receiptDetail("feat/coupons-model", "checkout coupons › level 01", "Restored 3 commits", ["Moved from f01aa41 to d598a02", "The squash is pinned, so this can be undone", "3 of 3 commits are back"]); },
+    receipt: "3 commits are back on feat/coupons-model.", undo: true, select: "l1",
+  },
+  ack: {
+    k: "checkout coupons, level 01", title: "Keep the squash on feat/coupons-model",
+    sub: "Nothing in git changes. Only the alert goes away.",
+    body: () => `<section><ul><li>${OK}<span>The branch keeps its single commit.</span></li><li>${OK}<span>The 3 old commits stay pinned, in case you change your mind.</span></li><li>${DOT}<span>If the same thing happens again, grove tells you again.</span></li></ul></section>`,
+    cmds: ["git grove ack feat/coupons-model"], primary: "Keep the squash", note: "Nothing in git changes.",
+    steps: () => [["Mark the change as intended", "1 alert cleared"]],
+    done: () => { const r = rowById("l1"); r.h = "fine"; r.state = "Squash kept"; r.pills = ["pin:old commits pinned"]; r.when = "now"; DETAIL.l1 = () => receiptDetail("feat/coupons-model", "checkout coupons › level 01", "Squash kept", ["Alert cleared", "The 3 old commits are still pinned"]); },
+    receipt: "The squash stays. The old commits stay pinned.", select: "l1",
+  },
+  restack: {
+    k: "checkout coupons", title: "Restack checkout coupons",
+    sub: "Each level moves onto the latest version of the level below it.",
+    body: () => `<section><div class="h3">Levels that move</div><div class="checks">
+        ${check(true, "<code>02 coupons-ui</code> onto <code>01 coupons-model</code>", "1 commit, no conflicts expected")}
+        ${check(true, "<code>03 coupons-email</code> onto <code>02 coupons-ui</code>", "1 commit, no conflicts expected")}
+        ${check(true, "<code>02 coupons-admin</code> is already up to date", "Left alone")}</div></section>
+      <section><label class="toggle"><input type="checkbox" id="opt-stash" checked><span>Set aside my uncommitted change and put it back after<div class="why"><code>src/cart/badge.tsx</code> in coupons-ui. Without this, grove won't touch that level.</div></span></label>
+        <label class="toggle"><input type="checkbox" id="opt-push"><span>Push each level when done<div class="why">Force-push with lease, only branches in this stack.</div></span></label></section>`,
+    valid: () => (on("opt-stash") ? null : "coupons-ui has an uncommitted change. Turn on “set aside” or commit it first."),
+    cmds: ["git -C .worktrees/coupons/02-coupons-ui stash push -m grove", "git -C .worktrees/coupons/02-coupons-ui rebase --onto feat/coupons-model <old parent> feat/coupons-ui", "git -C .worktrees/coupons/03-coupons-email rebase --onto feat/coupons-ui <old parent> feat/coupons-email", "git -C .worktrees/coupons/02-coupons-ui stash pop"],
+    primary: "Restack 2 levels",
+    steps: () => [["Pin every level that moves", "2 pins"], ["Set aside 1 change in coupons-ui", "src/cart/badge.tsx"], ["Move coupons-ui onto coupons-model", "1 of 1 commits replayed"], ["Move coupons-email onto coupons-ui", "1 of 1 commits replayed"], ["Put your change back", "src/cart/badge.tsx, unchanged"], ...(on("opt-push") ? [["Push 2 levels", "with lease"]] : []), ["Check nothing was lost", "every old commit matched"]],
+    done: () => { const r = rowById("l2"); r.h = "fine"; r.state = "In sync"; r.num = ""; r.when = "now"; const e = rowById("l3"); e.when = "now"; delete DETAIL.l2; },
+    receipt: "Both levels are on top of their parents. Your change is back where it was.", undo: true, select: "l2",
+  },
+  rescue: {
+    k: "Singles", title: "Clean up fix/invoice-rounding",
+    sub: "Grove copies the file first, checks the copy, and only then removes the folder.",
+    body: () => `<section><ul><li>${DOT}<span>Copy <code>.local/seed.sql</code> into the main checkout. Main has no file there.</span></li><li>${DOT}<span>Check the copy matches byte for byte. If it doesn't, stop.</span></li><li>${DOT}<span>Remove the folder <code>.worktrees/invoice-rounding</code>. The branch stays.</span></li></ul></section>`,
+    cmds: ["cp .worktrees/invoice-rounding/.local/seed.sql .local/seed.sql", "git grove check remove .worktrees/invoice-rounding", "git worktree remove .worktrees/invoice-rounding"],
+    primary: "Copy, then remove", note: "If the copy doesn't match, grove stops before removing anything.",
+    steps: () => [["Copy .local/seed.sql to main", "2.1 kB"], ["Check the copy matches", "identical"], ["Check it's safe to remove", "nothing else only here"], ["Remove the worktree folder", ".worktrees/invoice-rounding"]],
+    done: () => { const g = groupById("g-singles"); g.rows = g.rows.filter((r) => r.id !== "s1"); },
+    receipt: "seed.sql is in main. The worktree is gone; the branch is kept.", select: "s2",
+  },
+  cleanup: {
+    k: "acme-shop", title: "Clean up worktrees",
+    sub: "Only folders whose work is safe somewhere else. Grove re-checks each one right before removing it.",
+    body: () => `<section style="gap:8px">
+        <label class="pick"><input type="checkbox" checked id="c-s1">${icon("loses")}<span class="mono">fix/invoice-rounding</span><span class="why">copies 1 file to main first</span></label>
+        <label class="pick"><input type="checkbox" checked id="c-x1">${icon("fine")}<span class="mono">3 detached sandboxes</span><span class="why">nothing to keep</span></label>
+        <label class="pick off"><input type="checkbox" disabled>${icon("idle")}<span class="mono">chore/bump-deps</span><span class="why">2 commits only here</span></label></section>`,
+    valid: () => (on("c-s1") || on("c-x1") ? null : "Pick at least one worktree."),
+    cmds: ["git grove check remove <each>", "git worktree remove <each>"],
+    primary: "Clean up", note: "Each folder is re-checked right before it goes. Branches are kept.",
+    steps: () => [...(on("c-s1") ? [["fix/invoice-rounding: copy .local/seed.sql to main", "identical"], ["fix/invoice-rounding: remove folder", "branch kept"]] : []), ...(on("c-x1") ? [["Remove 3 detached sandboxes", "no unique commits, nothing ignored"]] : [])],
+    done: () => {
+      if (on("c-s1")) { const g = groupById("g-singles"); g.rows = g.rows.filter((r) => r.id !== "s1"); }
+      if (on("c-x1")) { groups.splice(groups.findIndex((g) => g.id === "g-detached"), 1); }
+    },
+    receipt: "Freed the folders. Every branch is kept.", select: "s2",
+  },
+  newFeature: {
+    k: "acme-shop", title: "Start a new feature",
+    sub: "Creates the first level of a stack in its own folder.",
+    body: () => `<section>
+        <div class="field"><label for="nf-name">Feature</label><input id="nf-name" value="gift cards" autocomplete="off"></div>
+        <div class="two"><div class="field"><label for="nf-branch">First branch</label><input class="mono" id="nf-branch" value="feat/gift-cards-model" autocomplete="off"></div>
+        <div class="field"><label for="nf-base">Start from</label><select id="nf-base"><option>main</option><option>feat/coupons-model</option></select></div></div>
+        <div class="preview" id="nf-preview"></div></section>
+      <section><label class="toggle"><input type="checkbox" id="nf-env" checked><span>Copy .env files from main<div class="why">.env and .env.local, 2 files</div></span></label>
+        <label class="toggle"><input type="checkbox" id="nf-install"><span>Install dependencies<div class="why">pnpm install, about 40 s</div></span></label>
+        <label class="toggle"><input type="checkbox" id="nf-open" checked><span>Open in my editor when ready</span></label></section>`,
+    live: () => { const f = slug(val("nf-name")) || "feature"; const b = val("nf-branch").replace(/^feat\//, "") || "branch"; document.getElementById("nf-preview").innerHTML = `.worktrees/<br>└ <b>${f}/</b> <span class="new">new</span><br>&nbsp;&nbsp;└ <b>01-${slug(b)}</b> <span class="new">on ${val("nf-base") || "main"}</span>`; },
+    valid: () => (val("nf-name").trim() && val("nf-branch").trim() ? null : "Name the feature and its first branch."),
+    cmds: () => [`git worktree add .worktrees/${slug(val("nf-name"))}/01-${slug(val("nf-branch").replace(/^feat\//, ""))} -b ${val("nf-branch")} ${val("nf-base")}`, `git config branch.${val("nf-branch")}.stackparent ${val("nf-base")}`],
+    primary: "Create", note: "Nothing that exists today is changed.",
+    steps: () => [["Create branch " + val("nf-branch"), "from " + val("nf-base")], ["Create the folder", `.worktrees/${slug(val("nf-name"))}/01-…`], ["Record it as level 01 of " + val("nf-name"), "stack metadata"], ...(on("nf-env") ? [["Copy 2 env files", ".env, .env.local"]] : []), ...(on("nf-install") ? [["Install dependencies", "pnpm install"]] : []), ...(on("nf-open") ? [["Open in your editor", ""]] : [])],
+    done: () => { const name = val("nf-name").trim(); const id = "g-" + slug(name); groups.unshift({ id, name, stack: true, meta: "stack, 1 level", rows: [{ id: id + "-1", d: 1, lv: "01", br: val("nf-branch"), h: "fine", state: "Created", pills: [], num: "", who: "you", when: "now" }] }); DIALOGS.newFeature.selectId = id + "-1"; },
+    receipt: "Ready. Grove watches it from now on.", get select() { return DIALOGS.newFeature.selectId; },
+  },
+  addLevel: {
+    k: "checkout coupons", title: "Add a level to checkout coupons",
+    sub: "A new branch on top of an existing level, in the next numbered folder.",
+    body: () => `<section><div class="two"><div class="field"><label for="al-branch">Branch</label><input class="mono" id="al-branch" value="feat/coupons-analytics" autocomplete="off"></div>
+        <div class="field"><label for="al-on">On top of</label><select id="al-on"><option value="l3">03 coupons-email</option><option value="l2">02 coupons-ui</option><option value="l1">01 coupons-model</option></select></div></div>
+        <div class="preview" id="al-preview"></div></section>
+      <section><label class="toggle"><input type="checkbox" id="al-env" checked><span>Copy .env files from main</span></label></section>`,
+    live: () => { const p = rowById(val("al-on")); const n = String(Number(p.lv) + 1).padStart(2, "0"); document.getElementById("al-preview").innerHTML = `.worktrees/coupons/<br>└ <b>${n}-${slug(val("al-branch").replace(/^feat\//, ""))}</b> <span class="new">new, on ${p.br}</span>`; },
+    valid: () => (val("al-branch").trim() ? null : "Name the branch."),
+    cmds: () => [`git worktree add .worktrees/coupons/… -b ${val("al-branch")} ${rowById(val("al-on")).br}`, `git config branch.${val("al-branch")}.stackparent ${rowById(val("al-on")).br}`],
+    primary: "Add level", note: "Nothing that exists today is changed.",
+    steps: () => [["Create branch " + val("al-branch"), "on " + rowById(val("al-on")).br], ["Create the folder", ".worktrees/coupons/…"], ["Record it in the stack", "stack metadata"], ...(on("al-env") ? [["Copy 2 env files", ""]] : [])],
+    done: () => { const g = groupById("g-coupons"); const pid = val("al-on"); const p = rowById(pid); const idx = g.rows.findIndex((r) => r.id === pid); let end = idx + 1; while (end < g.rows.length && g.rows[end].d > p.d) end++; const id = "n" + Date.now(); g.rows.splice(end, 0, { id, d: p.d + 1, lv: String(Number(p.lv) + 1).padStart(2, "0"), br: val("al-branch"), h: "fine", state: "Created", pills: [], num: "", who: "you", when: "now" }); g.meta = `stack, ${g.rows.length} levels`; DIALOGS.addLevel.selectId = id; },
+    receipt: "The new level is ready.", get select() { return DIALOGS.addLevel.selectId; },
+  },
+};
+
+function receiptDetail(br, path, title, lines) {
+  return `<div class="d-head"><div class="d-path">${path}</div><h2>${br}</h2></div>
+    <div class="d-sec"><div class="receipt"><b>${title}, just now</b><div class="checks">${lines.map((l) => check(true, l)).join("")}</div>
+      <div class="acts"><button class="btn" data-toast="Undone. Everything is back as it was">${ICONS.back}Undo</button><button class="btn" data-open="editor">${ICONS.editor}Open in editor</button></div></div></div>
+    <div class="d-sec"><div class="h3">Branch now</div><div class="lane">${lane(AFTER)}</div></div>`;
+}
+
+const NOTE = "Grove re-checks everything the moment you confirm, and pins every branch it moves.";
+let openDialog = null;
+const scrim = () => document.getElementById("scrim");
+function showDialog(name) {
+  closePalette();
+  const d = DIALOGS[name];
+  openDialog = d;
+  const cmds = typeof d.cmds === "function" ? "" : d.cmds.join("\n");
+  scrim().innerHTML = `<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t">
+    <header><div class="k">${d.k}</div><h3 id="dlg-t">${d.title}</h3><p>${d.sub}</p></header>
+    <div id="dlg-body">${d.body()}<details class="cmds"><summary>Show the git commands</summary><pre id="dlg-cmds">${cmds}</pre></details></div>
+    <footer id="dlg-foot"><span class="note" id="dlg-note">${SHIELD}<span>${d.note || NOTE}</span></span><button class="btn" data-close>Cancel <kbd>Esc</kbd></button><button class="btn primary" data-confirm>${d.primary} <kbd>↵</kbd></button></footer></div>`;
+  scrim().classList.add("on");
+  refreshDialog();
+  const first = scrim().querySelector("input:not([type=checkbox]),[data-confirm]");
+  if (first) first.focus();
+}
+function refreshDialog() {
+  const d = openDialog;
+  if (!d) return;
+  if (d.live) d.live();
+  if (typeof d.cmds === "function") document.getElementById("dlg-cmds").textContent = d.cmds().join("\n");
+  const reason = d.valid ? d.valid() : null;
+  const btn = scrim().querySelector("[data-confirm]");
+  if (btn) btn.disabled = !!reason;
+  const note = document.getElementById("dlg-note");
+  if (note) note.innerHTML = reason ? `${NO}<span style="color:#EE8D78">${reason}</span>` : `${SHIELD}<span>${d.note || NOTE}</span>`;
+}
+function closeDialog() { openDialog = null; scrim().classList.remove("on"); }
+
+function confirmDialog() {
+  const d = openDialog;
+  if (!d || (d.valid && d.valid())) return;
+  const steps = d.steps();
+  d.done();
+  const body = document.getElementById("dlg-body");
+  body.innerHTML = `<section><div class="h3">Steps <span class="t" id="run-t">0 of ${steps.length}</span></div><ul class="steps">${steps.map(([t, s]) => `<li class="step pending"><span class="pend"></span><div>${t}<div class="sub">${s}</div></div><span class="dur"></span></li>`).join("")}</ul></section>`;
+  document.getElementById("dlg-foot").innerHTML = `<span class="note">${SHIELD}<span>You can close this; it keeps going.</span></span><button class="btn" data-close>Hide</button>`;
+  const items = [...body.querySelectorAll(".step")];
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let i = 0;
+  const tick = () => {
+    if (i > 0) { const prev = items[i - 1]; prev.classList.remove("pending"); prev.firstElementChild.outerHTML = OK; prev.querySelector(".dur").textContent = (0.1 + Math.random() * 0.6).toFixed(1) + " s"; }
+    if (i < items.length) { items[i].classList.remove("pending"); items[i].firstElementChild.outerHTML = '<span class="spin"></span>'; document.getElementById("run-t").textContent = `${i + 1} of ${items.length}`; i++; setTimeout(tick, reduced ? 50 : 520); return; }
+    document.getElementById("run-t").textContent = "done";
+    body.insertAdjacentHTML("beforeend", `<section><div class="receipt"><b>Done</b><span>${d.receipt}</span></div></section>`);
+    const box = scrim().querySelector(".dlg"); if (box) box.scrollTop = box.scrollHeight;
+    document.getElementById("dlg-foot").innerHTML = `<span class="note">${SHIELD}<span>${d.undo ? "Every branch that moved was pinned first." : "Recorded in Activity."}</span></span>${d.undo ? `<button class="btn" data-toast="Undone. Everything is back as it was">${ICONS.back}Undo</button>` : ""}<button class="btn primary" data-close>Done <kbd>↵</kbd></button>`;
+    openDialog = { run: closeDialog, done() {}, steps: () => [] };
+    renderList();
+    if (d.select) select(d.select);
+    toast(`${OK} ${d.receipt}`);
+  };
+  tick();
+}
+
+const ACTIONS = [
+  { t: "Start a new feature", hint: "N", run: () => showDialog("newFeature") },
+  { t: "Bring back 3 commits on coupons-model", hint: "R", run: () => showDialog("restore") },
+  { t: "Restack checkout coupons", hint: "S", run: () => showDialog("restack") },
+  { t: "Add a level to checkout coupons", run: () => showDialog("addLevel") },
+  { t: "Clean up worktrees", hint: "2 safe", run: () => showDialog("cleanup") },
+  { t: "Scan now", run: () => toast(`${OK} Scanned 10 worktrees in 0.3 s`) },
+];
+let palIndex = 0;
+function openPalette() {
+  closeDialog();
+  scrim().innerHTML = `<div class="palette" role="dialog" aria-label="Command menu"><input id="pal-q" placeholder="Do something, or jump to a branch" autocomplete="off"><ul id="pal-list"></ul></div>`;
+  scrim().classList.add("on");
+  scrim().dataset.palette = "1";
+  palIndex = 0; drawPalette();
+  document.getElementById("pal-q").focus();
+}
+function palItems() {
+  const q = (document.getElementById("pal-q") || {}).value?.toLowerCase() || "";
+  const branches = groups.flatMap((g) => g.rows.map((r) => ({ t: r.br, hint: g.name, run: () => { closePalette(); select(r.id); } })));
+  return [...ACTIONS.map((a) => ({ ...a, kind: "Actions" })), ...branches.map((b) => ({ ...b, kind: "Go to" }))].filter((a) => a.t.toLowerCase().includes(q));
+}
+function drawPalette() {
+  const items = palItems();
+  palIndex = Math.min(palIndex, Math.max(0, items.length - 1));
+  let last = "";
+  document.getElementById("pal-list").innerHTML = items.map((a, i) => { const head = a.kind !== last ? `<li class="sec">${a.kind}</li>` : ""; last = a.kind; return `${head}<li><button class="${i === palIndex ? "on" : ""}" data-pal="${i}">${a.kind === "Actions" ? ICONS.plus : ICONS.restack}${a.t}${a.hint ? `<span class="hint">${a.hint}</span>` : ""}</button></li>`; }).join("") || '<li class="sec">Nothing matches</li>';
+}
+function closePalette() { if (scrim().dataset.palette) { delete scrim().dataset.palette; scrim().classList.remove("on"); } }
+
+let current = "l1";
+function select(id) {
+  current = id;
+  document.querySelectorAll(".row").forEach((el) => el.classList.toggle("sel", el.dataset.id === id));
+  let r = null, g = null;
+  for (const gg of groups) { const x = gg.rows.find((y) => y.id === id); if (x) { r = x; g = gg; } }
+  if (!r) return;
+  document.getElementById("detail").innerHTML = DETAIL[id] ? DETAIL[id]() : generic(r, g);
+}
+function toast(html) {
+  const t = document.getElementById("toast");
+  t.innerHTML = html; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), 3600);
+}
+
+document.addEventListener("click", (e) => {
+  if (e.target.id === "scrim") { closeDialog(); closePalette(); return; }
+  const t = e.target.closest("button, .row, .group");
+  if (!t) return;
+  if (t.dataset.pal) { const a = palItems()[Number(t.dataset.pal)]; closePalette(); return a.run(); }
+  if (t.dataset.dialog) { e.stopPropagation(); return showDialog(t.dataset.dialog); }
+  if (t.hasAttribute("data-palette")) return openPalette();
+  if (t.dataset.open) return toast(t.dataset.open === "editor" ? `${ICONS.editor} Opened in VS Code` : `${ICONS.term} Opened a terminal in that worktree`);
+  if (t.hasAttribute("data-close")) return closeDialog();
+  if (t.hasAttribute("data-confirm")) return confirmDialog();
+  if (t.dataset.toast) return toast(t.dataset.toast);
+  if (t.dataset.new !== undefined) return showDialog("newFeature");
+  if (t.id === "scan") return toast(`${OK} Scanned 10 worktrees in 0.3 s`);
+  if (t.dataset.jump) return document.getElementById(t.dataset.jump).scrollIntoView({ block: "start", behavior: "smooth" });
+  if (t.classList.contains("row")) return select(t.dataset.id);
+  if (t.classList.contains("group")) { const g = groupById(t.dataset.group); g.closed = !g.closed; return renderList(); }
+});
+document.addEventListener("input", () => refreshDialog());
+document.addEventListener("change", () => refreshDialog());
+document.addEventListener("input", (e) => { if (e.target.id === "pal-q") { palIndex = 0; drawPalette(); } });
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); return openPalette(); }
+  if (scrim().dataset.palette) {
+    const items = palItems();
+    if (e.key === "Escape") return closePalette();
+    if (e.key === "ArrowDown") { e.preventDefault(); palIndex = Math.min(items.length - 1, palIndex + 1); return drawPalette(); }
+    if (e.key === "ArrowUp") { e.preventDefault(); palIndex = Math.max(0, palIndex - 1); return drawPalette(); }
+    if (e.key === "Enter" && items[palIndex]) { e.preventDefault(); const a = items[palIndex]; closePalette(); return a.run(); }
+    return;
+  }
+  if (openDialog) {
+    if (e.key === "Escape") return closeDialog();
+    if (e.key === "Enter" && !(e.target.tagName === "SELECT")) { e.preventDefault(); return openDialog.run ? openDialog.run() : confirmDialog(); }
+    return;
+  }
+  if (e.target.closest && e.target.closest("input,select,textarea")) return;
+  if (e.key === "Enter" && e.target.classList && e.target.classList.contains("row")) return select(e.target.dataset.id);
+  if (e.key === "n") return showDialog("newFeature");
+  if (e.key === "r" && QUICK[current] && rowById(current) && rowById(current).h !== "fine") return showDialog(QUICK[current][0]);
+  if (e.key === "s" && current === "l2" && rowById("l2").h !== "fine") return showDialog("restack");
+  if (e.key === "a" && current === "l1" && rowById("l1").h !== "fine") return showDialog("ack");
+  if (e.key === "j" || e.key === "k") {
+    const rows = [...document.querySelectorAll(".row")];
+    const i = rows.findIndex((r) => r.classList.contains("sel"));
+    const n = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "j" ? 1 : -1)))];
+    if (n) { select(n.dataset.id); n.scrollIntoView({ block: "nearest" }); }
+  }
+});
+renderList();
+select("l1");
 </script>
 </body>
 </html>

@@ -60,7 +60,7 @@ Each as: chose X over Y, because Z; I'd change my mind if W. Use the first five 
 | Own commit range + patch ID + metadata | plain ancestry, or `git cherry` | ancestry alarms on every rebase; `git cherry` alarms on restacks (measured) | "mark as intended" was needed more than a few times a week |
 | Watch automatically, act only when asked | auto-restack and auto-clean | every incident was a tool acting on its own | plans ran clean dozens of times; then offer one-click runs for the boring ones |
 | Guard fails open | failing closed | a grove bug must never stop an agent's ordinary work | the guard proved reliable; then fail closed for `worktree remove --force` and `push --force` only |
-| No background process | a launchd/systemd service | nothing to install or leave running; agent commands keep the journal current through the guard; reflogs cover the rest | people wanted notifications when nothing else is running |
+| A login service (launchd/systemd), installed by the first `git grove ui` | a server that runs only while the dashboard is open | rewrites happen while nobody is looking; the watcher and notifications only help if they are already running | people objected to something running at login; then fall back to on-demand `git grove ui` plus reflog catch-up |
 | No network in the guard | fetching remote state | it runs before every agent command and must answer in 200 ms | stale remote data caused a wrong verdict |
 | `node:sqlite` | JSON files, or better-sqlite3 | several writers at once need WAL; built in, so no native build | Node's SQLite API changed under us |
 

@@ -51,7 +51,7 @@ Anti-goals: it fails if it technically works but
 
 - npm package `git-grove` (name checked free on 2026-11-01; `grove` and `grove-cli` are taken). The bin is `git-grove`, so git exposes it as `git grove`.
 - TypeScript, strict, no `any`. Node ≥ 24. No native modules: storage uses the built-in `node:sqlite`.
-- git ≥ 2.38 (needed for `git merge-tree --write-tree`). `gh` is optional.
+- git ≥ 2.39 (needed for `git merge-tree --write-tree` and `git patch-id --verbatim`). `gh` is optional.
 - macOS and Linux.
 - Bare repositories, including a bare `.bare` with linked worktrees beside it, are not supported yet: every command prints `git-grove: bare repositories are not supported yet` and exits 1.
 - Public repo: every name, branch and file in fixtures, demo and docs is invented. No client code or data.
@@ -83,7 +83,7 @@ Anti-goals: it fails if it technically works but
 
 ## 6. Architecture
 
-One local Node process does the watching when the dashboard runs (`git grove ui`). Every CLI command also works on its own: it scans on demand and reads and writes the same database. SQLite in WAL mode handles the two at once.
+One per-user Node process, started at login by the OS (6.8), does the watching and serves the dashboard. Every CLI command also works on its own, without that process: it scans on demand and reads and writes the same database. SQLite in WAL mode handles both at once.
 
 ```
 CLI ─┐                              ┌─ Dashboard (static SPA in the package)
@@ -135,7 +135,7 @@ For every branch whose tip changed since the last recorded value:
 1. If old is an ancestor of new (`git merge-base --is-ancestor old new`): **advanced**. Record, no alert.
 2. Otherwise pin old at `refs/grove/pins/<branch>/<utc-timestamp>` first, then classify **only the branch's own commits**: old's own range is `<old fork point>..old` and new's is `<new base>..new`, where the base is the stack parent's tip (from 6.4) or the merge-base with trunk. Commits that belonged to the parent are never counted, so restacking after a parent was squash-merged is not a rewrite.
    - Match each old own commit to a new own commit by patch ID (`git patch-id --stable`). When the patch ID differs, match by author, author date and subject; this covers rebases that resolved conflicts.
-   - A commit still unmatched is not lost when the base moved and gained a commit with its patch ID (it reached trunk another way, such as a cherry-picked hotfix), or when it is a `fixup!`, `squash!` or `amend!` commit and a new commit has the subject after the prefix.
+   - A commit still unmatched is not lost when the base moved and gained a commit with its patch ID (it reached trunk another way, such as a cherry-picked hotfix), or when it is a `fixup!`, `squash!` or `amend!` commit whose target is in the new range and matched only by metadata (its content changed, so the fixup was folded in). A fixup dropped while its target stayed unchanged is lost.
    - The base did not move and the only difference is old's tip commit (matched by metadata only, or unmatched because its message was edited): **amended**. Info only.
    - Otherwise, every old own commit matched: **rebased**. Info only.
    - Any other unmatched commit: **rewritten, N changes no longer present**. Loses-work alert, with `git grove restore <branch> <pin>` (the alert's own pin) as the action. A single dropped commit in the middle counts.
@@ -165,7 +165,7 @@ Per-level health, worst first:
 |---|---|
 | Rewritten | an unresolved "rewritten" journal entry on this branch |
 | Not safe | safe-to-remove would say no and the branch is merged (someone will want to delete it) |
-| Parent merged | the parent's changes are already in trunk: `git merge-tree --write-tree <trunk> <parent>` yields trunk's own tree (works for squash merges), or trunk holds a commit with the patch of all the parent's changes since the merge base (`git cherry` against a squash of them, for a squash merge trunk has since built on), or GitHub says the parent's PR merged; a parent that was only created or fast-forwarded (no commit in its reflog) is not merged |
+| Parent merged | the parent's changes are already in trunk: `git merge-tree --write-tree <trunk> <parent>` yields trunk's own tree (works for squash merges), or trunk holds a commit whose verbatim patch ID (`git patch-id --verbatim`, whitespace counted) equals the parent's whole diff since the merge base and no later trunk commit carries its exact inverse (a squash merge trunk has since built on, and not reverted), or GitHub says the parent's PR merged; a parent that was only created or fast-forwarded (no commit in its reflog) is not merged |
 | Parent moved | `git rev-list --count <forkpoint>..<parent>` > 0 (fork point from config, else merge-base) |
 | Blocked | a lower level's PR has an unresolved review thread [needs GitHub] |
 | Behind trunk | `git rev-list --count <branch>..<trunk>` > 0 |
@@ -191,7 +191,7 @@ v1 rules:
 | parent-merged | level | `parentMerged` | needs-action | re-base onto trunk |
 | parent-moved | level | `parentMoved` | needs-action | restack plan |
 | env-missing | worktree | `envMissing` | needs-action | copy from main |
-| prunable | worktree | folder gone | needs-action; loses-work when its detached HEAD holds commits no ref reaches | prune, by hand; for the detached case `git branch rescue/<folder> <sha>` first |
+| prunable | worktree | folder gone | needs-action; loses-work when its detached HEAD holds commits no ref reaches | prune, by hand; for the detached case, including when its commits cannot be counted, `git branch rescue/<folder> <sha>` first |
 | blocked-by-thread | level | a lower level's PR has an open thread [GitHub] | waiting-on-review | open the thread |
 | idle | worktree | no change for 14 days | idle | review for cleanup |
 
@@ -247,9 +247,13 @@ The same ignored-file listing powers "env files missing": ignored files in the m
 - Restack plans (pin all tips → restore rewritten levels → `git rebase <parent>` per level, bottom-up, inside each level's worktree → verify commit counts did not shrink → push as merge commits instead of force) are generated in v1 and copied, not run. Running them is a stretch item: it stops at the first non-zero exit and names the worktree.
 
 ### 6.8 Local server and dashboard
-- `git grove ui` binds `127.0.0.1` on a free port, prints and opens `http://127.0.0.1:<port>/?token=<random>`. Every request needs the token (cookie after first load) and a `Host` of `127.0.0.1:<port>` or `localhost:<port>`; anything else is rejected. This stops other web pages and DNS rebinding from calling it.
+- **Always on at login.** `git grove service install` writes a launchd agent (`~/Library/LaunchAgents/work.grove.server.plist`, macOS) or a systemd user unit (`~/.config/systemd/user/git-grove.service`, Linux) that runs `git-grove serve` at login and restarts it if it exits. The first `git grove ui` or `git grove setup` installs it, prints what it wrote and how to remove it (`git grove service uninstall`). `npm install` never installs it. Windows stays a non-goal.
+- `git grove serve` binds `127.0.0.1:47683` ("grove" on a phone keypad), or the next free port, and records `{ pid, port, version }` in `~/.git-grove/server.json`. Only one runs; a CLI newer than the running server asks it to exit, and the OS restarts it on the new version.
+- Every request needs a token (`~/.git-grove/token`, set as a cookie by the URL `git grove ui` opens) and a `Host` of `127.0.0.1:<port>` or `localhost:<port>`; anything else is rejected. `POST` requests also need the token in a header. This stops other web pages and DNS rebinding from calling it.
+- `git grove ui` opens the dashboard at the feature of the current worktree. `git grove status` ends with the dashboard's address. Without the service, `git grove ui` serves in the foreground until closed.
+- The dashboard is an installable web app (manifest and service worker): Chrome and Edge offer "Install git grove", which gives it a window and a dock icon. While it is open it raises system notifications for loses-work findings and guard blocks.
 - `GET /api/projects`, `/api/repos/:id/features`, `/api/features/:id`, `/api/activity?repo=…`; `POST /api/plans` (preview) and `POST /api/actions` (run). `GET /events` is Server-Sent Events: a new snapshot digest or activity item after each scan.
-- The UI is a prebuilt static bundle inside the package. Screens and visual language follow `docs/mockups/dashboard.html` (Atkinson Hyperlegible Next and Mono, cool neutrals, red/amber/blue/green health colours), plus:
+- The UI is a prebuilt static bundle inside the package. Screens and visual language follow `docs/mockups/dashboard.html` and `docs/brand/` (spruce ground, resin for pins, Martian Mono and Atkinson Hyperlegible Next, ember/resin/fjord/moss health colours), plus:
   - Projects: an activity strip of the latest events across repos.
   - Feature: an activity list for that feature (journal entries and guard decisions, live).
 - Every async surface shows loading, empty and error states.
@@ -262,6 +266,7 @@ One `gh api graphql` query per repo per minute, aliased per open branch: PR numb
 git grove                      # in a repo: add it if new, then open the dashboard
 git grove status [--json]
 git grove ui
+git grove service install | uninstall | status
 git grove add <path> | remove-repo <path>
 git grove stack list | show <feature> | adopt <branch> --parent <b> [--feature <name>] | plan <feature> [--json]
 git grove new <feature> [--from <trunk>]
@@ -323,7 +328,7 @@ If the day runs short, cut from the bottom of the list above the line only after
 - TypeScript on Node ≥ 24 with `node:sqlite`; git called as a CLI rather than through a library.
 - The guard fails open (allows) when grove itself errors.
 - Pins are created for every non-fast-forward change, not only for alarming ones.
-- The dashboard server runs only while `git grove ui` is open; there is no background daemon. Agent activity keeps the journal current through the guard; anything else is caught later from reflogs. (Pending the author's answer.)
+- The server runs always, as a per-user login service the first `git grove ui` installs (author's call, 2026-11-02). Installing it from `npm install` was rejected: install scripts are often skipped and should not change the OS. The dashboard is an installable web app rather than an Electron app, to keep zero runtime dependencies.
 - Reusing gh-stack's git config keys for stack structure.
 - Rewrite classification looks only at a branch's own commits and falls back to author, date and subject when patch IDs differ (6.3).
 - Force pushes are blocked only when they would drop work; `forcePush: "never"` is an option, not the default (6.6).
@@ -332,7 +337,7 @@ If the day runs short, cut from the bottom of the list above the line only after
 - First add of a repo pins past rewrites but reports them as one info item (6.3).
 - Single-branch features are branches with a worktree; detached worktrees are grouped (6.4).
 - Grove never fetches; freshness is shown from `FETCH_HEAD` (6.4).
-- Grove never lazily fetches a partial clone's missing objects (`GIT_NO_LAZY_FETCH=1`); the merged test may leave dangling objects (merge-tree's trees and one squash-probe commit per branch, the same each run).
+- Grove never lazily fetches a partial clone's missing objects (`GIT_NO_LAZY_FETCH=1`); the merged test may leave dangling trees from `merge-tree`, the same each run.
 - The guard logs every git command it sees, locally, so activity can say which agent session did what (6.6).
 
 ## 11. Left to the builder
