@@ -12,8 +12,9 @@ import { verifyCopies, type RescuedFile } from "./verify-copies.js";
 /**
  * Runs a remove plan from `run.firstStep`: copies each precious file to main, checks every copy byte for byte,
  * re-reads the full verdict with the copied files counted as kept, then removes the folder without `--force`, the
- * verdict read once more right before. Any copy that fails or differs, and any new reason to keep the worktree, stops
- * the run before anything is removed; the receipt lists every file already copied. The branch is never touched.
+ * verdict read and every copy compared once more right before. Any copy that fails or differs, and any new reason
+ * to keep the worktree, stops the run before anything is removed; the receipt lists every file already copied. The
+ * branch is never touched.
  */
 export async function runRemove(read: RemoveRead, run: RunContext): Promise<ExecuteResult> {
   const { root } = run.facts;
@@ -58,7 +59,7 @@ export async function runRemove(read: RemoveRead, run: RunContext): Promise<Exec
     });
     removing = true;
     await run.step(index, async () => {
-      const result = await removeWorktreeSafely(root, worktree.path, rescued());
+      const result = await removeWorktreeSafely(root, worktree.path, copied);
       if (!result.removed) {
         held.reasons = result.reasons;
         throw new Error(result.reasons.join("; "));

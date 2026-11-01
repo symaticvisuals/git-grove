@@ -9,6 +9,7 @@ import { copyDetail } from "./copy-detail.js";
 import { readCleanupCandidates } from "./read-cleanup-candidates.js";
 import type { Removal } from "./read-removal.js";
 import { removalCommands } from "./removal-commands.js";
+import { renamedCopyNote } from "./renamed-copy-note.js";
 import { runCleanup } from "./run-cleanup.js";
 
 const SHAPE = "cleanup takes { paths?: [worktree path] }";
@@ -40,7 +41,7 @@ function choiceOf(candidate: Removal, picked: ReadonlySet<string>): Choice {
     detail: detailOf(candidate),
     selectable,
     selected: picked.has(candidate.worktree.path),
-    health: !selectable ? "idle" : candidate.copies.length > 0 ? "loses" : "fine",
+    health: !selectable || candidate.copies.length > 0 ? "loses" : "fine",
   };
 }
 
@@ -79,7 +80,12 @@ function planOf(facts: RepoFacts, candidates: Removal[], picked: Removal[]): Pla
       ]),
     ],
     blockers: blockersOf(candidates, picked),
-    note: "Each folder is re-checked right before it goes. Branches are kept.",
+    note: [
+      "Each folder is re-checked right before it goes. Branches are kept.",
+      renamedCopyNote(picked.flatMap((candidate) => candidate.copies)),
+    ]
+      .filter((line) => line !== null)
+      .join(" "),
     undoable: false,
     moves: [],
     expects: [],

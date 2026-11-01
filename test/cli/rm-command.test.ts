@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
@@ -80,6 +80,33 @@ test("rm of a worktree holding a nested git repository exits 3, with or without 
     expect(result.out).toContain("a git repository of its own inside this folder: .local/clone");
   }
   expect(existsSync(join(clone, ".git"))).toBe(true);
+});
+
+test("E1: a folder in main that is a symlink into the worktree never makes its files safe", async () => {
+  await repo.commit(".gitignore", ".worktrees/\nshared/\n", "ignore shared");
+  const e1 = join(root, ".worktrees", "e1");
+  await repo.git("worktree", "add", "--detach", e1);
+  await write(join(e1, "shared", "notes.md"), "only here\n");
+  await symlink(join(e1, "shared"), join(root, "shared"));
+
+  const check = await grove(["check", "remove", ".worktrees/e1"]);
+  expect(check.code).toBe(3);
+  expect(check.out).toContain("shared/notes.md");
+  expect((await grove(["rm", ".worktrees/e1"])).code).toBe(3);
+  expect(await readFile(join(e1, "shared", "notes.md"), "utf8")).toBe("only here\n");
+});
+
+test("E6: a rescue whose target folder in main points into the worktree stops and removes nothing", async () => {
+  await symlink(join(old, ".local"), join(root, ".local"));
+  expect((await grove(["check", "remove", ".worktrees/old"])).code).toBe(3);
+  expect((await grove(["rm", ".worktrees/old"])).code).toBe(3);
+
+  const result = await grove(["rm", ".worktrees/old", "--rescue"]);
+  expect(result.code).toBe(1);
+  expect(result.out).toContain("Stopped before removing .worktrees/old");
+  expect(result.out).toContain("the target folder in main points into a worktree");
+  expect(existsSync(old)).toBe(true);
+  expect(await readFile(join(old, ".local", "seed.sql"), "utf8")).toBe("insert;\n");
 });
 
 test("rm of the main worktree exits 3", async () => {

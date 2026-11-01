@@ -1,11 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { RescueFailedError } from "../../../src/core/actions/remove/rescue-failed.error.js";
 import { rescueFiles } from "../../../src/core/actions/remove/rescue-files.js";
 import { rescueTarget } from "../../../src/core/actions/remove/rescue-target.js";
+import { makeRepo, type TestRepo } from "../../support/make-repo.js";
 
+let repo: TestRepo;
 let main: string;
 let worktree: string;
 
@@ -15,13 +16,14 @@ async function write(path: string, text: string): Promise<void> {
 }
 
 beforeEach(async () => {
-  const base = await mkdtemp(join(tmpdir(), "git-grove-rescue-"));
-  main = join(base, "main");
-  worktree = join(base, "old");
-  await mkdir(main);
+  repo = await makeRepo();
+  main = await realpath(repo.path);
+  await repo.commit(".gitignore", ".worktrees/\n.local/\n", "ignore");
+  worktree = join(main, ".worktrees", "old");
+  await repo.worktree(worktree, "old");
   await write(join(worktree, ".local", "seed.sql"), "seed\n");
 });
-afterEach(() => rm(dirname(main), { recursive: true, force: true }));
+afterEach(() => repo.cleanup());
 
 test("rescueTarget keeps the path when main has nothing there, else adds .from-<folder>, then -2, -3", () => {
   const taken = new Set<string>();
@@ -61,6 +63,14 @@ test("two files of one batch never land on the same path", async () => {
   ]);
 });
 
+test("a target folder in main that resolves into a worktree is refused before anything is copied", async () => {
+  await symlink(join(worktree, ".local"), join(main, ".local"));
+  await expect(rescueFiles(main, worktree, [".local/seed.sql"])).rejects.toMatchObject({
+    reason: "the target folder in main points into a worktree",
+  });
+  expect(await readFile(join(worktree, ".local", "seed.sql"), "utf8")).toBe("seed\n");
+});
+
 test("a copy whose bytes differ throws RescueFailedError naming the file", async () => {
   const wrong = async (_from: string, to: string): Promise<void> => {
     await write(to, "other\n");
@@ -75,5 +85,10 @@ test("a copy that fails, or a source that is gone, throws RescueFailedError", as
     throw new Error("disk full");
   };
   await expect(rescueFiles(main, worktree, [".local/seed.sql"], broken)).rejects.toThrow(/disk full/);
-  await expect(rescueFiles(main, worktree, [".local/missing.sql"])).rejects.toBeInstanceOf(RescueFailedError);
+  await expect(rescueFiles(main, worktree, [".local/missing.sql"])).rejects.toMatchObject({
+    path: ".local/missing.sql",
+    reason: "it is gone",
+  });
+  await mkdir(join(worktree, ".local", "folder.sql"));
+  await expect(rescueFiles(main, worktree, [".local/folder.sql"])).rejects.toMatchObject({ reason: "it is not a regular file" });
 });

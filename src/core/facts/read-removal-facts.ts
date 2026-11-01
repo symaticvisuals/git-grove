@@ -7,6 +7,7 @@ import { countDetachedOnly } from "./count-detached-only.js";
 import type { RepoFacts, WorktreeFacts } from "./facts.types.js";
 import { listIgnoredFiles } from "./list-ignored-files.js";
 import { MainWorktreeError } from "./main-worktree.error.js";
+import { readLinkedRoots } from "./read-linked-roots.js";
 import { NotAWorktreeError } from "./not-a-worktree.error.js";
 import { sameFileInBoth } from "./same-file-in-both.js";
 
@@ -60,12 +61,13 @@ const NO_PRECIOUS: Precious = { files: [], truncated: false, repos: [] };
 async function readPrecious(worktree: WorktreeFacts, main: WorktreeFacts, others: string[]): Promise<Read<Precious>> {
   try {
     const listing = await listIgnoredFiles(worktree.path, others);
+    const linked = await readLinkedRoots(worktree.path);
     const failed = listing.unreadable.length > 0 ? `ignored files in ${listing.unreadable.join(", ")}` : null;
     const repos = listing.nestedRepos;
     if (listing.truncated) return { value: { files: [], truncated: true, repos }, failed };
     const kept: string[] = [];
     for (const file of listing.files) {
-      if (!(await sameFileInBoth(worktree.path, main.path, file))) kept.push(file);
+      if (!(await sameFileInBoth(worktree.path, main.path, file, linked))) kept.push(file);
     }
     return { value: { files: kept, truncated: false, repos }, failed };
   } catch {
@@ -91,7 +93,8 @@ async function folderExists(path: string): Promise<boolean> {
 /**
  * Gathers everything that deleting a worktree could lose: uncommitted and untracked work,
  * commits that are neither pushed nor merged, commits only a detached HEAD holds, stashes for its branch,
- * ignored files that exist nowhere else, and worktrees and git repositories of their own nested inside it.
+ * ignored files that exist nowhere else (main's copy reached through a symlink into a worktree does not count), and
+ * worktrees and git repositories of their own nested inside it.
  * A read that fails is reported in `unreadable` and never counted as empty; the other reads still count.
  * A prunable worktree whose folder is gone skips the on-disk checks and keeps the repository-level ones;
  * one whose folder still exists is reported as unreadable.

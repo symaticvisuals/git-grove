@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, rm, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -337,4 +337,30 @@ test("a registered worktree nested inside is nested-worktree, never nested-repo"
   await repo.git("worktree", "add", "-b", "guest", join(outer, ".local", "guest"));
   const verdict = await verdictFor(outer);
   expect(verdict.reasons.map((reason) => reason.code)).toEqual(["nested-worktree"]);
+});
+
+test("a main folder that is a symlink into the worktree is the same file seen twice, not a copy", async () => {
+  const wt = await mergedWorktree("looped");
+  await write(join(wt, ".local", "notes.md"), "only here\n");
+  await symlink(join(wt, ".local"), join(root, ".local"));
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons).toEqual([expect.objectContaining({ code: "precious-ignored", paths: [".local/notes.md"] })]);
+});
+
+test("a main folder that is a symlink into another linked worktree is not a copy either", async () => {
+  const wt = await mergedWorktree("first");
+  const other = await mergedWorktree("second");
+  await write(join(wt, ".local", "notes.md"), "same\n");
+  await write(join(other, ".local", "notes.md"), "same\n");
+  await symlink(join(other, ".local"), join(root, ".local"));
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons.map((reason) => reason.code)).toEqual(["precious-ignored"]);
+});
+
+test("a hard link in main is a real copy, so the file is safe", async () => {
+  const wt = await mergedWorktree("hardlinked");
+  await write(join(wt, ".local", "notes.md"), "kept in both\n");
+  await mkdir(join(root, ".local"), { recursive: true });
+  await link(join(wt, ".local", "notes.md"), join(root, ".local", "notes.md"));
+  expect(await verdictFor(wt)).toEqual({ ok: true, reasons: [] });
 });

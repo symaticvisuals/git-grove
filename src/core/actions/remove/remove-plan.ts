@@ -12,6 +12,7 @@ import { describeReason } from "./describe-reason.js";
 import { formatSize } from "./format-size.js";
 import type { Removal } from "./read-removal.js";
 import { removalCommands } from "./removal-commands.js";
+import { renamedCopyNote } from "./renamed-copy-note.js";
 
 /** A remove plan's reading: the worktree, whether to rescue its precious files, and whether its branch has landed. */
 export type RemoveRead = { removal: Removal; rescue: boolean; landed: boolean };
@@ -126,10 +127,14 @@ export function removePlan(facts: RepoFacts, read: RemoveRead): Plan {
       { title: "Remove the worktree folder", detail: shown },
     ],
     blockers: blockersOf(read),
-    note:
+    note: [
       copies.length > 0
         ? "If the copy doesn't match, grove stops before removing anything."
         : "If anything new turns up in the folder, grove stops before removing it.",
+      renamedCopyNote(copies),
+    ]
+      .filter((line) => line !== null)
+      .join(" "),
     undoable: false,
     moves: [],
     expects: removal.expects,

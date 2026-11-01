@@ -18,9 +18,10 @@ async function removalFacts(root: string, path: string, facts: RepoFacts): Promi
 
 /**
  * Reads the full safe-to-remove verdict of the worktree at `path` against `facts`, which the caller has just read, and
- * resolves to every reason it must not be removed, one line each; empty when it is safe. The precious ignored files named in `present`
- * (worktree-relative) count as kept in main; any other precious file, and every other reason, is reported. A worktree
- * that is gone, main, locked, untracked by git or mid-operation is never safe, nor is one git fails to read.
+ * resolves to every reason it must not be removed, one line each; empty when it is safe. The precious ignored files
+ * named in `present` (worktree-relative) count as kept in main, so the caller checks their copies itself; any other
+ * precious file, and every other reason, is reported. A worktree that is gone, main, locked, untracked by git or
+ * mid-operation is never safe, nor is one git fails to read.
  */
 export async function removalReasons(facts: RepoFacts, path: string, present: ReadonlySet<string>): Promise<string[]> {
   const worktree = facts.worktrees.find((candidate) => candidate.path === path);

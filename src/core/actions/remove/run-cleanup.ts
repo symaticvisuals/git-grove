@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readRepoFacts } from "../../facts/read-repo-facts.js";
 import { plural } from "../../rules/plural.js";
 import type { ExecuteResult, RunContext } from "../action.types.js";
@@ -8,7 +9,7 @@ import type { Removal } from "./read-removal.js";
 import { removalReasons } from "./removal-reasons.js";
 import { removeWorktreeSafely } from "./remove-worktree-safely.js";
 import { rescueFiles } from "./rescue-files.js";
-import { verifyCopies, type RescuedFile } from "./verify-copies.js";
+import type { RescuedFile } from "./verify-copies.js";
 
 type Outcome = { removal: Removal; copied: RescuedFile[]; state: "removed" | "skipped" | "kept"; why: string };
 
@@ -54,15 +55,20 @@ async function cleanOne(root: string, removal: Removal, first: number, run: RunC
       return { removal, copied, state: "kept", why: errorLine(error) };
     }
   }
+  const held: { reasons: string[] } = { reasons: [] };
   try {
     await run.step(last, async () => {
-      await verifyCopies(root, worktree.path, copied);
-      const result = await removeWorktreeSafely(root, worktree.path, new Set(copied.map((copy) => copy.from)));
-      if (!result.removed) throw new Error(result.reasons.join("; "));
+      const result = await removeWorktreeSafely(root, worktree.path, copied);
+      if (!result.removed) {
+        held.reasons = result.reasons;
+        throw new Error(result.reasons.join("; "));
+      }
       return worktree.branch === null ? "removed" : "branch kept";
     });
   } catch (error) {
-    return { removal, copied, state: "kept", why: errorLine(error) };
+    if (held.reasons.length > 0) return { removal, copied, state: "kept", why: held.reasons.join("; ") };
+    const left = existsSync(worktree.path) ? "the folder is still there" : "the folder is gone";
+    return { removal, copied, state: "kept", why: `${errorLine(error)}; ${left}` };
   }
   return { removal, copied, state: "removed", why: "" };
 }
@@ -71,7 +77,8 @@ async function cleanOne(root: string, removal: Removal, first: number, run: RunC
  * Runs a clean up plan from `run.firstStep`, one picked worktree after another. Before a worktree's first step it is
  * checked against what the plan read (its head, tip, uncommitted paths and operation) and its full verdict is re-read:
  * any change, or any reason beyond the precious files the plan copies, skips all of its steps. Its files are
- * then copied to main and checked, and the folder is removed only if the verdict, read once more, is still clear.
+ * then copied to main and checked, and the folder is removed only if the verdict, read once more, is still clear and
+ * every copy still matches.
  * A worktree that is skipped or fails stays, and the run carries on with the next; the receipt names each one.
  */
 export async function runCleanup(picked: Removal[], run: RunContext): Promise<ExecuteResult> {

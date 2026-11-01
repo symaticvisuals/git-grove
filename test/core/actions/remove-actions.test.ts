@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -116,10 +116,12 @@ test("rm --rescue copies .local/seed.sql into main, checks it, removes the folde
     "Remove the worktree folder",
   ]);
   expect(plan.commands).toEqual([
-    "cp -n .worktrees/old/.local/seed.sql .local/seed.sql",
-    "git grove check remove .worktrees/old",
+    "mkdir -p .local &&",
+    "cp -n .worktrees/old/.local/seed.sql .local/seed.sql &&",
+    "git grove check remove .worktrees/old &&",
     "git worktree remove .worktrees/old",
   ]);
+  expect(plan.note).toBe("If the copy doesn't match, grove stops before removing anything.");
   expect(plan.moves).toEqual([]);
   expect(plan.undoable).toBe(false);
   expect(receipt.ok).toBe(true);
@@ -148,7 +150,8 @@ test("the plan lists the mockup's safe-to-remove checks, with the file's size", 
 test("a different seed.sql already in main stays, and the copy lands at .local/seed.sql.from-old", async () => {
   await write(join(root, ".local", "seed.sql"), "main's own\n");
   const { plan, receipt } = await run("remove", { worktree: old, rescue: true });
-  expect(plan.commands[0]).toBe("cp -n .worktrees/old/.local/seed.sql .local/seed.sql.from-old");
+  expect(plan.commands.slice(0, 2)).toEqual(["mkdir -p .local &&", "cp -n .worktrees/old/.local/seed.sql .local/seed.sql.from-old &&"]);
+  expect(plan.note).toContain("git grove check remove only counts a copy at the same path, so after the commands above it still names .local/seed.sql");
   expect(receipt.ok).toBe(true);
   expect(await readFile(join(root, ".local", "seed.sql"), "utf8")).toBe("main's own\n");
   expect(await readFile(join(root, ".local", "seed.sql.from-old"), "utf8")).toBe(SEED);
@@ -216,6 +219,20 @@ test("an ignored file added after the plan is caught by the re-check and nothing
     "failed",
     "skipped",
   ]);
+});
+
+test("E2: a rescued file edited after its copy was checked stops the removal, and the folder stays", async () => {
+  const prepared = await prepareAction("remove", ctx, { worktree: old, rescue: true });
+  const checked = prepared.plan.steps.findIndex((step) => step.title === "Check the copy matches");
+  const receipt = await runPrepared(ctx, prepared, (event) => {
+    if (event.index === checked && event.state === "done") writeFileSync(join(old, ".local", "seed.sql"), "edited after the copy\n");
+  });
+  expect(receipt.ok).toBe(false);
+  expect(receipt.title).toBe("Stopped before removing .worktrees/old");
+  expect(receipt.lines).toContain(".local/seed.sql changed after it was copied, so its copy in main no longer matches");
+  expect(await worktreeList()).toContain(old);
+  expect(await readFile(join(old, ".local", "seed.sql"), "utf8")).toBe("edited after the copy\n");
+  expect(await readFile(join(root, ".local", "seed.sql"), "utf8")).toBe(SEED);
 });
 
 test("a copy that does not match stops before removing", async () => {
@@ -354,6 +371,39 @@ test("cleanup skips a merged worktree whose branch moved after the plan", async 
   expect(existsSync(box)).toBe(false);
 });
 
+test("E2 in cleanup: a file edited after its copy keeps that worktree, and the rest still go", async () => {
+  const box = await sandbox("agent-1");
+  const prepared = await prepareAction("cleanup", ctx, {});
+  const copied = prepared.plan.steps.findIndex((step) => step.title === "old: copy .local/seed.sql to main");
+  const receipt = await runPrepared(ctx, prepared, (event) => {
+    if (event.index === copied && event.state === "done") writeFileSync(join(old, ".local", "seed.sql"), "edited after the copy\n");
+  });
+  expect(receipt.ok).toBe(false);
+  expect(receipt.lines).toContain(
+    ".worktrees/old was not removed: .local/seed.sql changed after it was copied, so its copy in main no longer matches",
+  );
+  expect(await readFile(join(old, ".local", "seed.sql"), "utf8")).toBe("edited after the copy\n");
+  expect(existsSync(box)).toBe(false);
+});
+
+test("cleanup says whether the folder is still there when git refuses to remove it", async () => {
+  const lib = await mkdtemp(join(tmpdir(), "git-grove-lib-"));
+  await repo.git("init", "-q", "-b", "main", lib);
+  await write(join(lib, "a.txt"), "a\n");
+  await repo.git("-C", lib, "add", "a.txt");
+  await repo.git("-C", lib, "commit", "-m", "lib");
+  await repo.git("-c", "protocol.file.allow=always", "submodule", "add", lib, "lib");
+  await repo.git("commit", "-m", "add submodule");
+  const box = await sandbox("agent-1");
+  await repo.git("-C", box, "-c", "protocol.file.allow=always", "submodule", "update", "--init");
+
+  const { receipt } = await run("cleanup", { paths: [box] });
+  expect(receipt.ok).toBe(false);
+  expect(receipt.lines.join("\n")).toMatch(/^\.worktrees\/agent-1 was not removed: .*submodules.*; the folder is still there$/m);
+  expect(existsSync(join(box, "lib", "a.txt"))).toBe(true);
+  await rm(lib, { recursive: true, force: true });
+});
+
 test("cleanup with nothing picked is blocked with \"Pick at least one worktree.\"", async () => {
   expect((await prepare("cleanup", { paths: [] })).blockers).toEqual(["Pick at least one worktree."]);
 });
@@ -372,6 +422,6 @@ test("cleanup picks only the paths it is given, and refuses one that is not a ch
 test("cleanup does not offer a merged worktree with uncommitted work, and blocks it when picked", async () => {
   await write(join(old, "feature.txt"), "edited\n");
   const plan = await prepare("cleanup", { paths: [old] });
-  expect(plan.choices?.[0]).toMatchObject({ selectable: false, detail: "1 uncommitted change" });
+  expect(plan.choices?.[0]).toMatchObject({ selectable: false, detail: "1 uncommitted change", health: "loses" });
   expect(plan.blockers).toEqual(["old: 1 uncommitted change"]);
 });
