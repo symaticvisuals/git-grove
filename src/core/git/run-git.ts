@@ -4,6 +4,7 @@ import { GitError } from "./git.error.js";
 export type RunGitOptions = {
   cwd: string;
   input?: string;
+  env?: Record<string, string>;
   write?: boolean;
   allowFailure?: boolean;
 };
@@ -28,7 +29,7 @@ export function runGit(args: readonly string[], options: RunGitOptions): Promise
     const child = execFile(
       "git",
       fullArgs,
-      { cwd: options.cwd, maxBuffer: MAX_BUFFER, encoding: "utf8" },
+      { cwd: options.cwd, maxBuffer: MAX_BUFFER, encoding: "utf8", env: { ...process.env, ...options.env } },
       (error, stdout, stderr) => {
         if (!error) {
           resolve({ stdout, stderr, code: 0 });

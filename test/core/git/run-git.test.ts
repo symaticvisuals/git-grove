@@ -54,3 +54,35 @@ test("makeRepo builds branches and worktrees with deterministic commits", async 
   expect(dates).toEqual(["1793527200", "1793527260"]);
   await repo.git("worktree", "remove", "--force", dir);
 });
+
+test("reads carry --no-optional-locks and writes do not", async () => {
+  const trace = { GIT_TRACE2_PERF: "1" };
+  const read = await runGit(["status"], { cwd: repo.path, env: trace });
+  const write = await runGit(["status"], { cwd: repo.path, write: true, env: trace });
+  expect(read.stderr).toContain("--no-optional-locks");
+  expect(write.stderr).not.toContain("--no-optional-locks");
+});
+
+test("makeRepo applies identity to merges and annotated tags, and does not touch process.env", async () => {
+  const before = process.env["GIT_AUTHOR_NAME"];
+  await repo.commit("a.txt", "a", "one");
+  await repo.branch("side");
+  await repo.switch("side");
+  await repo.commit("b.txt", "b", "two");
+  await repo.switch("main");
+  await repo.commit("c.txt", "c", "three");
+  await repo.git("merge", "--no-ff", "-m", "merge side", "side");
+  await repo.git("tag", "-a", "v1", "-m", "release");
+  expect(process.env["GIT_AUTHOR_NAME"]).toBe(before);
+});
+
+test("concurrent commits in two repos keep their own clocks", async () => {
+  const other = await makeRepo();
+  try {
+    await Promise.all([repo.commit("a.txt", "a", "one"), other.commit("a.txt", "a", "one")]);
+    expect((await repo.git("log", "-1", "--format=%at")).trim()).toBe("1793527200");
+    expect((await other.git("log", "-1", "--format=%at")).trim()).toBe("1793527200");
+  } finally {
+    await other.cleanup();
+  }
+});
