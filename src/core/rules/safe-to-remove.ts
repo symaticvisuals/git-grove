@@ -1,8 +1,5 @@
+import { plural } from "./plural.js";
 import type { Reason, RemovalFacts, Verdict } from "./verdict.types.js";
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
 
 /**
  * Decides whether a worktree can be deleted without losing work.
@@ -30,7 +27,7 @@ export function safeToRemove(facts: RemovalFacts): Verdict {
   } else if (facts.preciousIgnored.length > 0) {
     reasons.push({
       code: "precious-ignored",
-      detail: `${plural(facts.preciousIgnored.length, "ignored file")} that exist only here`,
+      detail: `${plural(facts.preciousIgnored.length, "ignored file")} that ${facts.preciousIgnored.length === 1 ? "exists" : "exist"} only here`,
       paths: facts.preciousIgnored,
     });
   }

@@ -11,7 +11,7 @@ export const envMissing: Rule = {
         severity: "needs-action",
         subject: { kind: "worktree", id: path },
         title: "Env files missing",
-        detail: `${files.join(", ")} exist in the main worktree but not in ${path}`,
+        detail: `${files.join(", ")} ${files.length === 1 ? "exists" : "exist"} in the main worktree but not in ${path}`,
         action: `copy ${files.join(", ")} from the main worktree`,
       });
     }

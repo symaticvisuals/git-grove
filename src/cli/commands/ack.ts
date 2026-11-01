@@ -1,5 +1,6 @@
 import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
 import { openStore } from "../../core/journal/open-store.js";
+import { plural } from "../../core/rules/plural.js";
 import type { CliIo } from "../cli-io.types.js";
 
 /**
@@ -14,8 +15,7 @@ export async function ackCommand(io: CliIo, branch: string): Promise<number> {
     const open = repoId === null ? [] : store.entries(repoId, { unresolved: true }).filter((entry) => entry.branch === branch);
     const now = Date.now();
     for (const entry of open) if (repoId !== null && entry.id !== undefined) store.ack(repoId, entry.id, now);
-    const count = open.length;
-    io.out(count === 0 ? `nothing to acknowledge on ${branch}\n` : `acknowledged ${count} ${count === 1 ? "alert" : "alerts"} on ${branch}\n`);
+    io.out(open.length === 0 ? `nothing to acknowledge on ${branch}\n` : `acknowledged ${plural(open.length, "alert")} on ${branch}\n`);
   } finally {
     store.close();
   }

@@ -1,6 +1,7 @@
-import { basename, relative } from "node:path";
+import { basename, isAbsolute, join, relative } from "node:path";
 import type { RepoFacts, WorktreeFacts } from "../core/facts/facts.types.js";
 import { needsYou } from "../core/rules/needs-you.js";
+import { plural } from "../core/rules/plural.js";
 import type { Finding, Severity } from "../core/rules/rule.types.js";
 import { unsafeMergedWorktree } from "../core/rules/v1/unsafe-merged-worktree.js";
 import type { Verdict } from "../core/rules/verdict.types.js";
@@ -24,10 +25,6 @@ const MARKS: Record<Severity, string> = { "loses-work": "✖", "needs-action": "
 const MAX_PATHS = 3;
 const PATH_START = `(?<![^\\s,(:'"])`;
 const PATH_END = `(?![^/\\s,;:)'"])`;
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
 
 function age(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
@@ -68,9 +65,13 @@ function shortenPaths(text: string, view: StatusView): string {
   }, text);
 }
 
+/** The files a merged worktree's removal would lose, worktree-relative ones prefixed with the worktree's display path. */
 function removalPaths(finding: Finding, view: StatusView): string[] {
   if (finding.rule !== unsafeMergedWorktree.id) return [];
-  const paths = view.removals.get(finding.subject.id)?.reasons.flatMap((reason) => reason.paths) ?? [];
+  const display = fromCwd(finding.subject.id, view.cwd);
+  const paths = (view.removals.get(finding.subject.id)?.reasons.flatMap((reason) => reason.paths) ?? []).map((path) =>
+    isAbsolute(path) ? fromCwd(path, view.cwd) : join(display, path),
+  );
   if (paths.length === 0) return [];
   const shown = paths.slice(0, MAX_PATHS).join(", ");
   return [paths.length > MAX_PATHS ? `${shown} and ${paths.length - MAX_PATHS} more` : shown];

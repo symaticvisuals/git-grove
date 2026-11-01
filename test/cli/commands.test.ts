@@ -222,7 +222,8 @@ test("status lists a merged worktree's files only under its removal alert, with 
 
   const { out } = await grove(["status"]);
   expect(out.match(/\.local\/seed\.sql/g)).toHaveLength(1);
-  expect(out).toContain(".env exist in the main worktree but not in .worktrees/old\n");
+  expect(out).toMatch(/^ +\.worktrees\/old\/\.local\/seed\.sql$/m);
+  expect(out).toContain(".env exists in the main worktree but not in .worktrees/old\n");
   expect(out).toMatch(/^old\s+clean\s+merged\s+0\s/m);
 });
 
@@ -755,4 +756,12 @@ test("a bare-repository worktree layout says it is not supported, on every comma
   } finally {
     await rm(layout, { recursive: true, force: true });
   }
+});
+
+test("a merged worktree's files are shown from the folder status runs in", async () => {
+  const old = await landedWorktree("old");
+  await write(join(old, ".local", "seed.sql"), "insert;\n");
+
+  expect((await grove(["status"], old)).out).toMatch(/^ +\.local\/seed\.sql$/m);
+  expect((await grove(["status"], join(repo.path, ".worktrees"))).out).toMatch(/^ +old\/\.local\/seed\.sql$/m);
 });

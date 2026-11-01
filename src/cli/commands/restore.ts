@@ -4,6 +4,7 @@ import { isAncestor } from "../../core/git/is-ancestor.js";
 import { unlessGitFails } from "../../core/git/unless-git-fails.js";
 import { openStore } from "../../core/journal/open-store.js";
 import type { Store } from "../../core/journal/store.types.js";
+import { plural } from "../../core/rules/plural.js";
 import { restore, type RestoreResult } from "../../core/runner/restore.js";
 import type { CliIo } from "../cli-io.types.js";
 
@@ -37,10 +38,6 @@ async function settleJournal(store: Store, facts: RepoFacts, branch: string, tip
       store.ack(repoId, entry.id, now);
     }
   }
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 function describe(branch: string, result: RestoreResult): string {

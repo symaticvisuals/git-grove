@@ -112,6 +112,24 @@ test("branch-deleted fires on deleted entries only", () => {
   expect(run("branch-deleted", ctx({ unresolved: [entry()] }))).toEqual([]);
 });
 
+test("alert details count commits in plain English", () => {
+  const one = { lost: ["c1"] };
+  expect(run("history-rewritten", ctx({ unresolved: [entry()] }))[0]?.detail).toMatch(/^2 commits no longer on feat, /);
+  expect(run("history-rewritten", ctx({ unresolved: [entry(one)] }))[0]?.detail).toMatch(/^1 commit no longer on feat, /);
+  const deleted = entry({ ...one, kind: "deleted", newTip: null });
+  expect(run("branch-deleted", ctx({ unresolved: [deleted] }))[0]?.detail).toMatch(/^1 commit only on feat, /);
+  const moved = run("parent-moved", ctx({ levels: [level({ parentCommitsSinceFork: 1 })] }));
+  expect(moved[0]?.detail).toBe("f/one has 1 commit not in f/two");
+});
+
+test("env-missing says a single file exists and several exist", () => {
+  const hit = run("env-missing", ctx({ envMissing: new Map([["/r/a", [".env"]], ["/r/b", [".env", ".env.local"]]]) }));
+  expect(hit.map((finding) => finding.detail)).toEqual([
+    ".env exists in the main worktree but not in /r/a",
+    ".env, .env.local exist in the main worktree but not in /r/b",
+  ]);
+});
+
 test("unsafe-merged-worktree fires for a removal verdict that is not ok", () => {
   const bad = new Map([
     ["/r/w", { ok: false, reasons: [{ code: "uncommitted" as const, detail: "2 uncommitted files", paths: [] }] }],

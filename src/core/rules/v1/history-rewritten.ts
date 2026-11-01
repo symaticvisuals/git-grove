@@ -1,3 +1,4 @@
+import { plural } from "../plural.js";
 import type { Rule } from "../rule.types.js";
 
 export const historyRewritten: Rule = {
@@ -10,7 +11,7 @@ export const historyRewritten: Rule = {
         severity: "loses-work",
         subject: { kind: "branch", id: e.branch },
         title: "History rewritten",
-        detail: `${e.lost.length} commit(s) no longer on ${e.branch}${e.pinRef ? `, kept at ${e.pinRef}` : ""} (if that was intended: git grove ack ${e.branch})`,
+        detail: `${plural(e.lost.length, "commit")} no longer on ${e.branch}${e.pinRef ? `, kept at ${e.pinRef}` : ""} (if that was intended: git grove ack ${e.branch})`,
         action: `git grove restore ${e.branch}${e.pinRef ? ` ${e.pinRef}` : ""}`,
       })),
 };

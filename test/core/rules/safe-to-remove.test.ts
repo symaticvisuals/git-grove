@@ -48,6 +48,7 @@ test("a clean merged worktree holding .local/seed.sql is not safe", async () => 
   expect(verdict.reasons).toEqual([
     expect.objectContaining({ code: "precious-ignored", paths: [".local/seed.sql"] }),
   ]);
+  expect(verdict.reasons[0]?.detail).toBe("1 ignored file that exists only here");
 });
 
 test("node_modules and an .env identical to main's are safe", async () => {
@@ -298,4 +299,12 @@ test("a prunable detached worktree still counts the commits only its HEAD holds"
   const sandbox = facts.worktrees.find((w) => w.path === wt);
   expect(sandbox?.head).not.toBeNull();
   expect(await countDetachedOnly(root, sandbox?.head ?? "")).toBe(1);
+});
+
+test("detached sandboxes are not checked for env files, while a branch worktree is", async () => {
+  for (const n of [1, 2, 3, 4, 5]) await repo.git("worktree", "add", "--detach", join(root, ".worktrees", `sandbox-${n}`));
+  const branch = await mergedWorktree("x");
+  const missing = await readEnvMissing(root, await readRepoFacts(root));
+  expect([...missing.keys()]).toEqual([branch]);
+  expect(missing.get(branch)).toEqual([".env"]);
 });

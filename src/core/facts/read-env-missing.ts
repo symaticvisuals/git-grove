@@ -18,7 +18,7 @@ function exists(path: string): Promise<boolean> {
 
 /**
  * Maps each linked worktree's path to the ignored `.env*` files the main worktree has and it lacks.
- * Prunable worktrees are left out, and so are files inside folders of the main worktree that cannot be opened.
+ * Prunable and detached worktrees (agent sandboxes) are left out, and so are files inside folders of the main worktree that cannot be opened.
  */
 export async function readEnvMissing(
   _cwd: string,
@@ -35,7 +35,7 @@ export async function readEnvMissing(
   );
   const envFiles = listing.files;
   for (const worktree of facts.worktrees) {
-    if (worktree.isMain || worktree.prunable) continue;
+    if (worktree.isMain || worktree.prunable || worktree.branch === null) continue;
     const missing: string[] = [];
     for (const file of envFiles) {
       if (!(await exists(join(worktree.path, file)))) missing.push(file);

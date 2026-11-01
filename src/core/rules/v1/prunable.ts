@@ -1,9 +1,6 @@
 import { basename } from "node:path";
+import { plural } from "../plural.js";
 import type { Finding, Rule } from "../rule.types.js";
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
 
 export const prunable: Rule = {
   id: "prunable",

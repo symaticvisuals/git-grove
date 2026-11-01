@@ -24,6 +24,7 @@ git grove status
 ```sh
 git grove status [--json]                    # what needs you, then one line per worktree
 git grove restore <branch> [<pin-ref>]       # move a branch back to a pin, pinning its current tip first
+git grove ack <branch>                       # mark a branch's rewrite or deletion as intended
 git grove pins list [<branch>]               # list pins, newest first
 git grove check remove <worktree> [--json]   # exit 0 when safe to delete, 3 when not
 ```
@@ -31,8 +32,8 @@ git grove check remove <worktree> [--json]   # exit 0 when safe to delete, 3 whe
 For example, after an agent squashes `feat/coupon-ui` into one commit:
 
 ```sh
-git grove status                                   # History rewritten: 3 commit(s) no longer on feat/coupon-ui
-git grove restore feat/coupon-ui                   # the three commits are back
+git grove status                                   # History rewritten: 3 commits no longer on feat/coupon-ui
+git grove restore feat/coupon-ui                   # the three commits are back (or: git grove ack feat/coupon-ui)
 git grove check remove .worktrees/old-onboarding   # lists .local/seed.sql and exits 3
 ```
 
@@ -43,3 +44,4 @@ branch is. Errors print one line on stderr and exit 1.
 
 - Node.js 24 or newer
 - git 2.38 or newer
+- a repository with a working tree (bare repositories are not supported yet)

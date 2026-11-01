@@ -53,6 +53,7 @@ Anti-goals: it fails if it technically works but
 - TypeScript, strict, no `any`. Node ≥ 24. No native modules: storage uses the built-in `node:sqlite`.
 - git ≥ 2.38 (needed for `git merge-tree --write-tree`). `gh` is optional.
 - macOS and Linux.
+- Bare repositories, including a bare `.bare` with linked worktrees beside it, are not supported yet: every command prints `git-grove: bare repositories are not supported yet` and exits 1.
 - Public repo: every name, branch and file in fixtures, demo and docs is invented. No client code or data.
 - Developed with pnpm; published so `npx`/`npm i -g` work.
 
@@ -134,14 +135,16 @@ For every branch whose tip changed since the last recorded value:
 1. If old is an ancestor of new (`git merge-base --is-ancestor old new`): **advanced**. Record, no alert.
 2. Otherwise pin old at `refs/grove/pins/<branch>/<utc-timestamp>` first, then classify **only the branch's own commits**: old's own range is `<old fork point>..old` and new's is `<new base>..new`, where the base is the stack parent's tip (from 6.4) or the merge-base with trunk. Commits that belonged to the parent are never counted, so restacking after a parent was squash-merged is not a rewrite.
    - Match each old own commit to a new own commit by patch ID (`git patch-id --stable`). When the patch ID differs, match by author, author date and subject; this covers rebases that resolved conflicts.
+   - A commit still unmatched is not lost when the base moved and gained a commit with its patch ID (it reached trunk another way, such as a cherry-picked hotfix), or when it is a `fixup!`, `squash!` or `amend!` commit and a new commit has the subject after the prefix.
    - The base did not move and the only difference is old's tip commit (matched by metadata only, or unmatched because its message was edited): **amended**. Info only.
    - Otherwise, every old own commit matched: **rebased**. Info only.
-   - Any other unmatched commit: **rewritten, N changes no longer present**. Loses-work alert, with `git grove restore <branch>` as the action. A single dropped commit in the middle counts.
+   - Any other unmatched commit: **rewritten, N changes no longer present**. Loses-work alert, with `git grove restore <branch> <pin>` (the alert's own pin) as the action. A single dropped commit in the middle counts.
    - Checked on 2026-11-01 with a throwaway repo: rebase onto moved trunk, conflict-resolving rebase and a child restacked after its parent's squash merge all classify as rebased; a 3-into-1 squash classifies as rewritten (3); plain `git cherry new old` wrongly reports the restacked child as 2 changes lost.
 3. A branch that disappears: if its tip is not reachable from any other branch, remote or pin, pin it and raise a loses-work alert ("branch deleted with N unique commits").
 4. A detached worktree HEAD whose previous commits are no longer reachable from any branch, remote, tag, pin or the HEAD itself: pin them and raise a loses-work alert.
 
 A "rewritten" alert resolves in three ways: `git grove restore`, `git grove ack <branch>` (or "Mark as intended" in the UI) for a deliberate squash, or automatically when the branch's changes reach trunk (6.4's merged test) or the branch is deleted with nothing unique. Acknowledged rewrites are left out of restack plans.
+`restore` without a pin ref takes the pin of the branch's newest unresolved alert and resolves only the alerts whose old tip it brings back. An alert resolved by landing on trunk is acknowledged in the journal, so it stays resolved as trunk moves on. The same rewrite seen again (same branch, old and new tip) re-opens its alert; an exact undo of a rewrite is journaled acknowledged and acknowledges that rewrite.
 
 Changes that happened while grove was not running: on startup, read each branch's reflog since the last recorded entry and classify each non-fast-forward step as above, marked "found later". On the first `git grove add` of a repo, the whole reflog (about 90 days) is classified and every past rewrite is pinned, but the result is one info item ("found 7 past rewrites; review them") rather than one red alert each.
 
@@ -162,7 +165,7 @@ Per-level health, worst first:
 |---|---|
 | Rewritten | an unresolved "rewritten" journal entry on this branch |
 | Not safe | safe-to-remove would say no and the branch is merged (someone will want to delete it) |
-| Parent merged | the parent's changes are already in trunk: `git merge-tree --write-tree <trunk> <parent>` yields trunk's own tree (works for squash merges), or GitHub says the parent's PR merged |
+| Parent merged | the parent's changes are already in trunk: `git merge-tree --write-tree <trunk> <parent>` yields trunk's own tree (works for squash merges), or trunk holds a commit with the patch of all the parent's changes since the merge base (`git cherry` against a squash of them, for a squash merge trunk has since built on), or GitHub says the parent's PR merged; a parent that was only created or fast-forwarded (no commit in its reflog) is not merged |
 | Parent moved | `git rev-list --count <forkpoint>..<parent>` > 0 (fork point from config, else merge-base) |
 | Blocked | a lower level's PR has an unresolved review thread [needs GitHub] |
 | Behind trunk | `git rev-list --count <branch>..<trunk>` > 0 |
@@ -179,8 +182,8 @@ v1 rules:
 
 | Rule | Subject | Fires when | Severity | Action |
 |---|---|---|---|---|
-| history-rewritten | branch | an unresolved "rewritten" journal entry | loses-work | restore, or mark as intended |
-| branch-deleted | branch | a deleted branch had unique commits | loses-work | restore from pin |
+| history-rewritten | branch | an unresolved "rewritten" journal entry | loses-work | `restore <branch> <pin>`, or `ack <branch>` if intended |
+| branch-deleted | branch | a deleted branch had unique commits | loses-work | `restore <branch> <pin>`, or `ack <branch>` if intended |
 | detached-orphans | worktree | detached commits became unreachable | loses-work | restore from pin as a branch |
 | unsafe-merged-worktree | worktree | branch merged but `safeToRemove` is false | loses-work | `rm --rescue` |
 | nested-worktree | worktree | another worktree lives inside its folder | needs-action | move the inner one out with `git worktree move`, by hand |
@@ -188,7 +191,7 @@ v1 rules:
 | parent-merged | level | `parentMerged` | needs-action | re-base onto trunk |
 | parent-moved | level | `parentMoved` | needs-action | restack plan |
 | env-missing | worktree | `envMissing` | needs-action | copy from main |
-| prunable | worktree | folder gone | needs-action | prune, by hand |
+| prunable | worktree | folder gone | needs-action; loses-work when its detached HEAD holds commits no ref reaches | prune, by hand; for the detached case `git branch rescue/<folder> <sha>` first |
 | blocked-by-thread | level | a lower level's PR has an open thread [GitHub] | waiting-on-review | open the thread |
 | idle | worktree | no change for 14 days | idle | review for cleanup |
 
@@ -200,11 +203,11 @@ A worktree is not safe to remove if any of these hold (each is reported with det
 - detached HEAD with commits reachable only from it: `git rev-list HEAD --not --branches --remotes --tags` is non-empty;
 - **another worktree inside it** (its path starts with this worktree's path), whatever that worktree's own state. Checked on 2026-11-01 with git 2.55: a level-2 worktree nested inside level 1's folder, holding an uncommitted file, was deleted together with that file by a plain `git worktree remove` of level 1, without `--force`, because git only refuses on changed or untracked files and the nested folder was ignored;
 - stash entries attributed to its branch;
-- **precious ignored files**: `git ls-files --others --ignored --exclude-standard --directory` in the worktree, minus the default dependency and build folders (`node_modules`, `dist`, `build`, `.next`, `.turbo`, `.venv`, `venv`, `__pycache__`, `target`, `.cache`, `coverage`) and the user's `ignore` globs; a remaining file is precious unless a byte-identical file exists at the same relative path in the main worktree.
+- **precious ignored files**: `git ls-files --others --ignored --exclude-standard --directory` in the worktree, minus the default dependency and build folders (`node_modules`, `dist`, `build`, `.next`, `.turbo`, `.venv`, `venv`, `target`, `.cache`, `coverage`) when that folder is itself ignored (a tracked `build/` does not hide a hand-made ignored file in it), OS and tool junk anywhere (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `__pycache__/`, `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/`; `.idea/` stays precious), and the user's `ignore` globs; a remaining file is precious unless a byte-identical file exists at the same relative path in the main worktree.
 
 `git grove rm <worktree>` refuses when not safe. `--rescue` copies precious ignored files into the main worktree at the same relative path (never overwriting: an existing different file is saved as `<name>.from-<worktree>`), then removes the worktree. `--force` removes anyway, but first pins the HEAD, saves uncommitted changes as a pinned stash-like commit, and moves precious ignored files to `~/.git-grove/rescued/<repo>/<worktree>/<timestamp>/`. Nothing is deleted outright.
 
-The same ignored-file listing powers "env files missing": ignored files in the main worktree matching `.env*` that are absent in the worktree.
+The same ignored-file listing powers "env files missing": ignored files in the main worktree matching `.env*` that are absent in the worktree. Detached worktrees (agent sandboxes) are not checked.
 
 ### 6.6 Agent guard
 - `git grove install-guard` adds a Claude Code `PreToolUse` hook (matcher `Bash`) to the user's `~/.claude/settings.json` by default, because Claude Code reads project-local settings from the folder it was started in and an agent started inside a linked worktree would never see a hook written to the main checkout. `--repo` writes the repo's `.claude/settings.local.json` instead. It merges into existing JSON, is idempotent, and `git grove uninstall-guard` removes only its own entry. The builder must confirm the hook schema and stdin fields against the current Claude Code hooks documentation.
@@ -265,6 +268,7 @@ git grove new <feature> [--from <trunk>]
 git grove add-level <feature> <branch> [--on <parent-branch>]
 git grove rm <worktree> [--rescue | --force]
 git grove restore <branch> [<pin-ref>]
+git grove ack <branch>          # mark a branch's rewrite or deletion alerts as intended
 git grove pins list | prune
 git grove check <remove|push|reset|clean> [target] [--json]
 git grove guard --claude        # hook entry point
@@ -328,6 +332,7 @@ If the day runs short, cut from the bottom of the list above the line only after
 - First add of a repo pins past rewrites but reports them as one info item (6.3).
 - Single-branch features are branches with a worktree; detached worktrees are grouped (6.4).
 - Grove never fetches; freshness is shown from `FETCH_HEAD` (6.4).
+- Grove never lazily fetches a partial clone's missing objects (`GIT_NO_LAZY_FETCH=1`); the merged test may leave dangling objects (merge-tree's trees and one squash-probe commit per branch, the same each run).
 - The guard logs every git command it sees, locally, so activity can say which agent session did what (6.6).
 
 ## 11. Left to the builder
