@@ -1,11 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { DatabaseSync, type SQLOutputValue } from "node:sqlite";
+import { DatabaseSync, type SQLOutputValue, type StatementResultingChanges } from "node:sqlite";
 import type { Sha } from "../facts/facts.types.js";
 import type { ChangeKind } from "./classify-tip-change.js";
 import { StoreCorruptError } from "./store-corrupt.error.js";
-import type { JournalEntry, LastTip, Store } from "./store.types.js";
+import type { JournalEntry, LastTip, Store, TipSwap } from "./store.types.js";
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -101,6 +101,22 @@ function readEntry(row: Row): JournalEntry {
   };
 }
 
+function changed(result: StatementResultingChanges): boolean {
+  return Number(result.changes) > 0;
+}
+
+function inTransaction<T>(db: DatabaseSync, work: () => T): T {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = work();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function defaultPath(): string {
   return join(process.env["GIT_GROVE_HOME"] ?? join(homedir(), ".git-grove"), "grove.db");
 }
@@ -121,12 +137,19 @@ export function openStore(path: string = defaultPath()): Store {
     repoId: db.prepare(
       "INSERT INTO repos (common_dir, root) VALUES (?, ?) ON CONFLICT (common_dir) DO UPDATE SET root = excluded.root RETURNING id",
     ),
+    findRepoId: db.prepare("SELECT id FROM repos WHERE common_dir = ?"),
     lastTips: db.prepare("SELECT ref, sha, parent_sha FROM tips WHERE repo_id = ?"),
     saveTip: db.prepare(
       `INSERT INTO tips (repo_id, ref, sha, parent_sha, seen_at) VALUES (?, ?, ?, ?, ?)
        ON CONFLICT (repo_id, ref) DO UPDATE SET sha = excluded.sha, parent_sha = excluded.parent_sha, seen_at = excluded.seen_at`,
     ),
-    dropTip: db.prepare("DELETE FROM tips WHERE repo_id = ? AND ref = ?"),
+    insertTip: db.prepare(
+      "INSERT INTO tips (repo_id, ref, sha, parent_sha, seen_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+    ),
+    updateTip: db.prepare(
+      "UPDATE tips SET sha = ?, parent_sha = ?, seen_at = ? WHERE repo_id = ? AND ref = ? AND sha = ?",
+    ),
+    deleteTip: db.prepare("DELETE FROM tips WHERE repo_id = ? AND ref = ? AND sha = ?"),
     record: db.prepare(
       `INSERT INTO journal (repo_id, ${CHANGE_COLUMNS})
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING id`,
@@ -139,11 +162,39 @@ export function openStore(path: string = defaultPath()): Store {
     ack: db.prepare("UPDATE journal SET acked_at = ? WHERE repo_id = ? AND id = ? AND acked_at IS NULL"),
   };
 
+  const insertEntry = (repoId: number, entry: JournalEntry): number | null => {
+    const row = statements.record.get(
+      repoId,
+      entry.branch,
+      entry.oldTip,
+      entry.newTip ?? "",
+      entry.kind,
+      JSON.stringify(entry.lost),
+      entry.matchedByPatch,
+      entry.matchedByMeta,
+      entry.pinRef,
+      entry.at,
+      entry.foundLater ? 1 : 0,
+      entry.acked ? entry.at : null,
+    );
+    return row === undefined ? null : integer(row, "id");
+  };
+
+  const moveTip = (repoId: number, { ref, from, to, at }: TipSwap): boolean => {
+    if (to === null) return from !== null && changed(statements.deleteTip.run(repoId, ref, from));
+    if (from === null) return changed(statements.insertTip.run(repoId, ref, to.sha, to.parentSha, at));
+    return changed(statements.updateTip.run(to.sha, to.parentSha, at, repoId, ref, from));
+  };
+
   return {
     repoId(commonDir, root) {
       const row = statements.repoId.get(commonDir, root);
       if (row === undefined) throw new StoreCorruptError("repos.id");
       return integer(row, "id");
+    },
+    findRepoId(commonDir) {
+      const row = statements.findRepoId.get(commonDir);
+      return row === undefined ? null : integer(row, "id");
     },
     lastTips(repoId) {
       const tips = new Map<string, LastTip>();
@@ -155,26 +206,13 @@ export function openStore(path: string = defaultPath()): Store {
     saveTip(repoId, ref, sha, parentSha, at) {
       statements.saveTip.run(repoId, ref, sha, parentSha, at);
     },
-    dropTip(repoId, ref) {
-      statements.dropTip.run(repoId, ref);
+    swapTip(repoId, swap) {
+      return inTransaction(db, () => {
+        const swapped = moveTip(repoId, swap);
+        return { swapped, entryId: swapped && swap.entry !== null ? insertEntry(repoId, swap.entry) : null };
+      });
     },
-    record(repoId, entry) {
-      const row = statements.record.get(
-        repoId,
-        entry.branch,
-        entry.oldTip,
-        entry.newTip ?? "",
-        entry.kind,
-        JSON.stringify(entry.lost),
-        entry.matchedByPatch,
-        entry.matchedByMeta,
-        entry.pinRef,
-        entry.at,
-        entry.foundLater ? 1 : 0,
-        entry.acked ? entry.at : null,
-      );
-      return row === undefined ? null : integer(row, "id");
-    },
+    record: insertEntry,
     entries(repoId, options = {}) {
       return (options.unresolved ? statements.unresolved : statements.entries).all(repoId).map(readEntry);
     },

@@ -1,9 +1,10 @@
 import type { BranchFacts, RepoFacts, Sha } from "../facts/facts.types.js";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
-import { runGit } from "../git/run-git.js";
+import { GitError } from "../git/git.error.js";
+import { runGit, type RunGitResult } from "../git/run-git.js";
 import { pin } from "../runner/pin.js";
 import { classifyTipChange, type TipChange } from "./classify-tip-change.js";
-import type { JournalEntry, LastTip, Store } from "./store.types.js";
+import type { JournalEntry, LastTip, Store, TipSwap } from "./store.types.js";
 
 type Move = { root: string; branch: BranchFacts; last: LastTip; parentTip: Sha; isTrunk: boolean; now: number };
 
@@ -11,11 +12,49 @@ function entryOf(change: TipChange, pinRef: string | null, at: number): JournalE
   return { ...change, pinRef, at, foundLater: false, acked: false };
 }
 
+async function commitExists(cwd: string, sha: Sha): Promise<boolean> {
+  return (await runGit(["cat-file", "-e", `${sha}^{commit}`], { cwd, allowFailure: true })).code === 0;
+}
+
+/** Resolves when one of `shas` is no longer a commit; otherwise throws the failed call as a GitError. */
+async function throwUnlessGone(cwd: string, args: string[], result: RunGitResult, shas: Sha[]): Promise<void> {
+  for (const sha of shas) if (!(await commitExists(cwd, sha))) return;
+  throw new GitError(args, result.code, result.stderr);
+}
+
+async function isAncestor(cwd: string, ancestor: Sha, descendant: Sha): Promise<boolean> {
+  const args = ["merge-base", "--is-ancestor", ancestor, descendant];
+  const result = await runGit(args, { cwd, allowFailure: true });
+  if (result.code > 1) throw new GitError(args, result.code, result.stderr);
+  return result.code === 0;
+}
+
 /** Resolves to the merge base, to `parentTip` when the two share no history, or null when either is not a commit. */
 async function mergeBase(cwd: string, tip: Sha, parentTip: Sha): Promise<Sha | null> {
-  const result = await runGit(["merge-base", tip, parentTip], { cwd, allowFailure: true });
+  const args = ["merge-base", tip, parentTip];
+  const result = await runGit(args, { cwd, allowFailure: true });
   if (result.code === 0) return result.stdout.trim();
-  return result.code === 1 ? parentTip : null;
+  if (result.code === 1) return parentTip;
+  await throwUnlessGone(cwd, args, result, [tip, parentTip]);
+  return null;
+}
+
+async function unlessGitFails(work: Promise<TipSwap>): Promise<TipSwap | null> {
+  try {
+    return await work;
+  } catch (error) {
+    if (error instanceof GitError) return null;
+    throw error;
+  }
+}
+
+async function savedTips(cwd: string, store: Store): Promise<Map<string, LastTip>> {
+  const probe = await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+    cwd,
+    allowFailure: true,
+  }).catch(() => null);
+  const repoId = probe?.code === 0 ? store.findRepoId(probe.stdout.trim()) : null;
+  return repoId === null ? new Map() : store.lastTips(repoId);
 }
 
 function stackParentTips(facts: RepoFacts): Map<string, Sha> {
@@ -40,31 +79,45 @@ async function basesOf({ root, branch, last, parentTip, isTrunk }: Move): Promis
   return { oldBase, newBase };
 }
 
-async function journalMove(move: Move): Promise<JournalEntry | null> {
-  const { root, branch, last, now } = move;
+async function journalMove(move: Move): Promise<TipSwap> {
+  const { root, branch, last, parentTip, now } = move;
+  // A parent tip outside the branch's history would put the next old base below the parent's own commits.
+  const parentSha = (await isAncestor(root, parentTip, branch.tip)) ? parentTip : last.parentSha;
+  const swap = (entry: JournalEntry | null): TipSwap => ({
+    ref: branch.name,
+    from: last.sha,
+    to: { sha: branch.tip, parentSha },
+    at: now,
+    entry,
+  });
   const tips = { branch: branch.name, oldTip: last.sha, newTip: branch.tip };
-  const ancestry = await runGit(["merge-base", "--is-ancestor", last.sha, branch.tip], { cwd: root, allowFailure: true });
+  const args = ["merge-base", "--is-ancestor", last.sha, branch.tip];
+  const ancestry = await runGit(args, { cwd: root, allowFailure: true });
   if (ancestry.code === 0) {
-    return entryOf({ ...tips, kind: "advanced", lost: [], matchedByPatch: 0, matchedByMeta: 0 }, null, now);
+    return swap(entryOf({ ...tips, kind: "advanced", lost: [], matchedByPatch: 0, matchedByMeta: 0 }, null, now));
   }
-  if (ancestry.code !== 1) return null;
+  if (ancestry.code > 1) {
+    await throwUnlessGone(root, args, ancestry, [last.sha]);
+    return swap(null);
+  }
   const pinRef = await pin(root, branch.name, last.sha, new Date(now));
   const change = await classifyTipChange({ cwd: root, ...tips, ...(await basesOf(move)) });
-  return entryOf(change, pinRef, now);
+  return swap(entryOf(change, pinRef, now));
 }
 
-async function journalDeletion(root: string, branch: string, oldTip: Sha, now: number): Promise<JournalEntry | null> {
-  const unique = await runGit(
-    ["rev-list", "--reverse", oldTip, "--not", "--branches", "--remotes", "--tags", "--glob=refs/grove"],
-    { cwd: root, allowFailure: true },
-  );
-  const lost = unique.code === 0 ? unique.stdout.split("\n").filter((line) => line !== "") : [];
-  if (lost.length === 0) return null;
+async function journalDeletion(root: string, branch: string, oldTip: Sha, now: number): Promise<TipSwap> {
+  const swap = (entry: JournalEntry | null): TipSwap => ({ ref: branch, from: oldTip, to: null, at: now, entry });
+  const args = ["rev-list", "--reverse", oldTip, "--not", "--branches", "--remotes", "--tags", "--glob=refs/grove"];
+  const unique = await runGit(args, { cwd: root, allowFailure: true });
+  if (unique.code !== 0) {
+    await throwUnlessGone(root, args, unique, [oldTip]);
+    return swap(null);
+  }
+  const lost = unique.stdout.split("\n").filter((line) => line !== "");
+  if (lost.length === 0) return swap(null);
   const pinRef = await pin(root, branch, oldTip, new Date(now));
-  return entryOf(
-    { branch, oldTip, newTip: null, kind: "deleted", lost, matchedByPatch: 0, matchedByMeta: 0 },
-    pinRef,
-    now,
+  return swap(
+    entryOf({ branch, oldTip, newTip: null, kind: "deleted", lost, matchedByPatch: 0, matchedByMeta: 0 }, pinRef, now),
   );
 }
 
@@ -72,39 +125,39 @@ async function journalDeletion(root: string, branch: string, oldTip: Sha, now: n
  * Journals every local branch whose tip moved or vanished since the last call and resolves to the entries it added.
  * A branch seen for the first time only records its tip. A non-fast-forward move pins the old tip before classifying;
  * a vanished branch whose tip nothing else reaches is pinned and journaled as `deleted`.
- * An old tip git no longer has is replaced without an entry.
- * Concurrent calls on separate connections journal each change once.
+ * An old tip git no longer has is replaced without an entry; a branch git fails on keeps its tip until the next call.
+ * Each tip is saved by compare-and-swap with its entry, so concurrent calls journal a change once and never roll back.
  */
 export async function observe(cwd: string, store: Store, now: number = Date.now()): Promise<JournalEntry[]> {
+  // Saved tips are read before git's, so a tip saved meanwhile by another call fails the swap instead of being undone.
+  const lastTips = await savedTips(cwd, store);
   const facts = await readRepoFacts(cwd);
   const { root } = facts;
   const repoId = store.repoId(facts.commonDir, root);
-  const lastTips = store.lastTips(repoId);
   const present = new Set(facts.branches.map((branch) => branch.name));
   const parentTips = stackParentTips(facts);
   const added: JournalEntry[] = [];
-  const keep = (entry: JournalEntry | null): void => {
-    if (entry === null) return;
-    const id = store.record(repoId, entry);
-    if (id !== null) added.push({ ...entry, id });
+  const commit = (swap: TipSwap | null): void => {
+    if (swap === null) return;
+    const { entryId } = store.swapTip(repoId, swap);
+    if (swap.entry !== null && entryId !== null) added.push({ ...swap.entry, id: entryId });
   };
 
   // Vanished branches go first, so pins taken for moved branches in this call never hide their commits.
   for (const [branch, last] of lastTips) {
-    if (present.has(branch)) continue;
-    keep(await journalDeletion(root, branch, last.sha, now));
-    store.dropTip(repoId, branch);
+    if (!present.has(branch)) commit(await unlessGitFails(journalDeletion(root, branch, last.sha, now)));
   }
 
   for (const branch of facts.branches) {
     const last = lastTips.get(branch.name);
     if (last?.sha === branch.tip) continue;
     const parentTip = parentTips.get(branch.name) ?? facts.trunk.sha;
-    if (last !== undefined) {
+    if (last === undefined) {
+      commit({ ref: branch.name, from: null, to: { sha: branch.tip, parentSha: parentTip }, at: now, entry: null });
+    } else {
       const isTrunk = facts.trunk.ref === `refs/heads/${branch.name}`;
-      keep(await journalMove({ root, branch, last, parentTip, isTrunk, now }));
+      commit(await unlessGitFails(journalMove({ root, branch, last, parentTip, isTrunk, now })));
     }
-    store.saveTip(repoId, branch.name, branch.tip, parentTip, now);
   }
 
   return added;

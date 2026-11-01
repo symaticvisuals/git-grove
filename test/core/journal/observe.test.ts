@@ -1,15 +1,17 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { observe } from "../../../src/core/journal/observe.js";
 import { openStore } from "../../../src/core/journal/open-store.js";
-import type { Store } from "../../../src/core/journal/store.types.js";
+import type { JournalEntry, Store } from "../../../src/core/journal/store.types.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
 
 const NOW = Date.UTC(2026, 10, 1, 12, 0, 0);
 const MISSING_SHA = "1234567890abcdef1234567890abcdef12345678";
+const IDENTITY = { GIT_COMMITTER_NAME: "Test Author", GIT_COMMITTER_EMAIL: "author@example.com" };
 
 const savedHome = process.env["GIT_GROVE_HOME"];
 let home: string;
@@ -53,6 +55,23 @@ async function forkFeature(): Promise<{ fork: string; commits: [string, string, 
   const b = await repo.commit("b.txt", "b\n", "add b");
   const c = await repo.commit("c.txt", "c\n", "add c");
   return { fork, commits: [a, b, c] };
+}
+
+/** Commits a base on main, `parent` with p1 and p2, and `child` on it with k1 and k2, recorded as a stack; ends on main. */
+async function forkStack(): Promise<{ p1: string; p2: string }> {
+  await repo.commit("base.txt", "base\n", "base");
+  await repo.branch("parent");
+  await repo.switch("parent");
+  const p1 = await repo.commit("p1.txt", "p1\n", "add p1");
+  const p2 = await repo.commit("p2.txt", "p2\n", "add p2");
+  await repo.branch("child");
+  await repo.switch("child");
+  await repo.commit("k1.txt", "k1\n", "add k1");
+  await repo.commit("k2.txt", "k2\n", "add k2");
+  await repo.git("config", "branch.parent.stackparent", "main");
+  await repo.git("config", "branch.child.stackparent", "parent");
+  await repo.switch("main");
+  return { p1, p2 };
 }
 
 async function squash(fork: string): Promise<void> {
@@ -169,18 +188,7 @@ test("a deleted branch with nothing unique records nothing and forgets its tip",
 });
 
 test("a child restacked onto trunk after its parent was squash-merged and deleted is rebased", async () => {
-  await repo.commit("base.txt", "base\n", "base");
-  await repo.branch("parent");
-  await repo.switch("parent");
-  const p1 = await repo.commit("p1.txt", "p1\n", "add p1");
-  const p2 = await repo.commit("p2.txt", "p2\n", "add p2");
-  await repo.branch("child");
-  await repo.switch("child");
-  await repo.commit("k1.txt", "k1\n", "add k1");
-  await repo.commit("k2.txt", "k2\n", "add k2");
-  await repo.git("config", "branch.parent.stackparent", "main");
-  await repo.git("config", "branch.child.stackparent", "parent");
-  await repo.switch("main");
+  const { p1, p2 } = await forkStack();
   await observe(repo.path, store, NOW);
 
   await repo.git("merge", "--squash", "parent");
@@ -223,4 +231,89 @@ test("a last parent tip git no longer has falls back to the current parent", asy
   await squash(fork);
 
   expect(await observe(repo.path, store, NOW + 1000)).toMatchObject([{ branch: "feat", kind: "rewritten", lost: commits }]);
+});
+
+test("a child that gained a commit while its parent was amended, then was restacked onto it, is rebased", async () => {
+  const { p2 } = await forkStack();
+  await observe(repo.path, store, NOW);
+  await repo.switch("parent");
+  await writeFile(join(repo.path, "p2.txt"), "p2, review fix\n");
+  await repo.git("add", "p2.txt");
+  await repo.git("commit", "--amend", "--no-edit");
+  await observe(repo.path, store, NOW + 1000);
+  await repo.switch("child");
+  await repo.commit("k3.txt", "k3\n", "add k3");
+  await observe(repo.path, store, NOW + 2000);
+  await repo.git("rebase", "--onto", "parent", p2, "child");
+
+  expect(await observe(repo.path, store, NOW + 3000)).toMatchObject([{ branch: "child", kind: "rebased", lost: [] }]);
+  expect(store.entries(await repoIdOf(), { unresolved: true })).toEqual([]);
+});
+
+/**
+ * Moves `feat` on from the baseline, then observes while another connection moves it further and saves that tip,
+ * just before or just after the observer reads its saved tips.
+ */
+async function observeRacingSave(saveBeforeRead: boolean): Promise<{ found: JournalEntry[]; newer: string; repoId: number }> {
+  const { fork } = await forkFeature();
+  await observe(repo.path, store, NOW);
+  const moved = await repo.commit("d.txt", "d\n", "add d");
+  const newer = await repo.commit("e.txt", "e\n", "add e");
+  await repo.git("reset", "--hard", moved);
+  const repoId = await repoIdOf();
+  const other = openStore();
+  const saveNewer = (id: number): void => {
+    execFileSync("git", ["update-ref", "refs/heads/feat", newer], { cwd: repo.path, env: { ...process.env, ...IDENTITY } });
+    other.saveTip(id, "feat", newer, fork, NOW + 500);
+  };
+  const racing: Store = {
+    ...store,
+    lastTips(id) {
+      if (saveBeforeRead) saveNewer(id);
+      const tips = store.lastTips(id);
+      if (!saveBeforeRead) saveNewer(id);
+      return tips;
+    },
+  };
+  try {
+    return { found: await observe(repo.path, racing, NOW + 1000), newer, repoId };
+  } finally {
+    other.close();
+  }
+}
+
+test.each([
+  { when: "after", saveBeforeRead: false },
+  { when: "before", saveBeforeRead: true },
+])("a tip another connection saves $when the observer reads its tips is neither journaled again nor rolled back", async ({
+  saveBeforeRead,
+}) => {
+  const { found, newer, repoId } = await observeRacingSave(saveBeforeRead);
+  expect(found).toEqual([]);
+  expect(store.entries(repoId)).toEqual([]);
+  expect(store.lastTips(repoId).get("feat")?.sha).toBe(newer);
+});
+
+test("a deletion check git cannot run keeps the tip, and the deletion is journaled once it can", async () => {
+  await repo.commit("base.txt", "base\n", "base");
+  await repo.branch("feat");
+  await repo.switch("feat");
+  const a = await repo.commit("a.txt", "a\n", "add a");
+  const b = await repo.commit("b.txt", "b\n", "add b");
+  await repo.switch("main");
+  await observe(repo.path, store, NOW);
+  const stale = join(repo.path, ".git", "refs", "remotes", "origin", "stale");
+  await mkdir(dirname(stale), { recursive: true });
+  await writeFile(stale, `${MISSING_SHA}\n`);
+  await repo.git("branch", "-D", "feat");
+  await repo.commit("m.txt", "m\n", "add m");
+
+  expect(await observe(repo.path, store, NOW + 1000)).toMatchObject([{ branch: "main", kind: "advanced" }]);
+  const repoId = await repoIdOf();
+  expect(store.lastTips(repoId).get("feat")?.sha).toBe(b);
+
+  await rm(stale);
+  const found = await observe(repo.path, store, NOW + 2000);
+  expect(found).toMatchObject([{ branch: "feat", oldTip: b, newTip: null, kind: "deleted", lost: [a, b] }]);
+  expect(await sha(found[0]?.pinRef ?? "")).toBe(b);
 });

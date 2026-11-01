@@ -81,3 +81,34 @@ test("a deleted entry reads back with no new tip", () => {
     store.close();
   }
 });
+
+test("swapTip moves a tip only from the expected sha, and records its entry only when it does", () => {
+  const store = openStore();
+  try {
+    const repoId = store.repoId("/repos/swap/.git", "/repos/swap");
+    const a = "a".repeat(40);
+    const b = "b".repeat(40);
+    const c = "c".repeat(40);
+    const tip = (sha: string) => ({ sha, parentSha: c });
+    expect(store.swapTip(repoId, { ref: "feat", from: null, to: tip(a), at: 1, entry: null })).toEqual({
+      swapped: true,
+      entryId: null,
+    });
+    expect(store.swapTip(repoId, { ref: "feat", from: null, to: tip(b), at: 2, entry: null }).swapped).toBe(false);
+    expect(store.swapTip(repoId, { ref: "feat", from: b, to: tip(c), at: 3, entry: rewrite })).toEqual({
+      swapped: false,
+      entryId: null,
+    });
+    expect(store.entries(repoId)).toEqual([]);
+
+    const moved = store.swapTip(repoId, { ref: "feat", from: a, to: tip(b), at: 4, entry: rewrite });
+    expect(moved).toEqual({ swapped: true, entryId: expect.any(Number) });
+    expect(store.entries(repoId)).toEqual([{ ...rewrite, id: moved.entryId }]);
+    expect(store.lastTips(repoId).get("feat")).toEqual(tip(b));
+
+    expect(store.swapTip(repoId, { ref: "feat", from: b, to: null, at: 5, entry: null }).swapped).toBe(true);
+    expect(store.lastTips(repoId).has("feat")).toBe(false);
+  } finally {
+    store.close();
+  }
+});
