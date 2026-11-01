@@ -7,19 +7,18 @@ import { alertPin } from "../journal/alert-pin.js";
 import { settleRestoredTip } from "../journal/settle-restored-tip.js";
 import { plural } from "../rules/plural.js";
 import { listPins } from "../runner/list-pins.js";
-import { PINS_PREFIX } from "../runner/pins-prefix.js";
-import { restoreHeld, type RestoreResult } from "../runner/restore.js";
-import type { ActionContext, ActionDef, Prepared } from "./action.types.js";
+import { restoreHeld, type RestoreResult } from "../runner/restore-held.js";
+import type { ActionContext, ActionDef, ExecuteResult, Prepared } from "./action.types.js";
 import { branchContext } from "./branch-context.js";
 import { displayPath } from "./display-path.js";
+import { errorLine } from "./error-line.js";
 import { InvalidInputError } from "./invalid-input.error.js";
+import { parseRestoreTargets, type RestoreTargetInput } from "./parse-restore-targets.js";
 import type { Check, Expectation, Plan, RestoreTarget } from "./plan.types.js";
 import { readDirtyPaths } from "./read-dirty-paths.js";
 import { readLane } from "./read-lane.js";
+import { StalePlanError } from "./stale-plan.error.js";
 
-type Target = { branch: string; pinRef?: string };
-
-/** One target as the plan read it. `from` is the branch's tip, null when the branch is gone. */
 type Read = {
   branch: string;
   pinRef: string;
@@ -34,37 +33,12 @@ type Read = {
   children: string[];
 };
 
-const MAX_PATHS = 3;
+type Moved = { read: Read; result: RestoreResult };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+const MAX_PATHS = 3;
 
 function short(sha: Sha): string {
   return sha.slice(0, 7);
-}
-
-function parseTarget(item: unknown): Target {
-  const branch = isRecord(item) ? item["branch"] : undefined;
-  if (!isRecord(item) || typeof branch !== "string" || branch === "" || branch.startsWith("-")) {
-    throw new InvalidInputError("each restore target needs a branch");
-  }
-  const pinRef = item["pinRef"];
-  if (pinRef === undefined) return { branch };
-  if (typeof pinRef !== "string" || !pinRef.startsWith(PINS_PREFIX)) throw new InvalidInputError(`not a grove pin: ${String(pinRef)}`);
-  return { branch, pinRef };
-}
-
-function parseTargets(raw: unknown): Target[] {
-  const list: unknown = isRecord(raw) ? raw["targets"] : undefined;
-  if (!Array.isArray(list)) throw new InvalidInputError("restore takes { targets: [{ branch, pinRef? }] }");
-  const items: unknown[] = list;
-  if (items.length === 0) throw new InvalidInputError("restore needs at least one target");
-  const targets = items.map(parseTarget);
-  if (new Set(targets.map((target) => target.branch)).size !== targets.length) {
-    throw new InvalidInputError("each branch can be restored once");
-  }
-  return targets;
 }
 
 async function revParse(cwd: string, rev: string): Promise<Sha | null> {
@@ -81,7 +55,17 @@ async function mergeBase(cwd: string, one: Sha, other: Sha): Promise<Sha> {
   return result.code === 0 ? result.stdout.trim() : other;
 }
 
-async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef }: Target): Promise<Read> {
+function holderIn(facts: RepoFacts, branch: string): WorktreeFacts | undefined {
+  return facts.worktrees.find((worktree) => worktree.branch === branch && !worktree.prunable && existsSync(worktree.path));
+}
+
+function busyIn(facts: RepoFacts, branch: string): WorktreeFacts | undefined {
+  return facts.worktrees.find(
+    (worktree) => worktree.operation !== null && (worktree.operationBranch === branch || worktree.branch === branch),
+  );
+}
+
+async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef }: RestoreTargetInput): Promise<Read> {
   const pin = pinRef ?? alertPin(ctx.store, facts, branch) ?? (await listPins(facts.root, branch))[0]?.ref;
   if (pin === undefined) throw new InvalidInputError(`no pin found for ${branch}`);
   const to = await revParse(facts.root, pin);
@@ -89,7 +73,7 @@ async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef
   const from = facts.branches.find((candidate) => candidate.name === branch)?.tip ?? null;
   const parent = facts.edges.find((edge) => edge.branch === branch)?.parent ?? facts.trunk.name;
   const parentTip = facts.branches.find((candidate) => candidate.name === parent)?.tip ?? facts.trunk.sha;
-  const holder = facts.worktrees.find((worktree) => worktree.branch === branch && !worktree.prunable && existsSync(worktree.path));
+  const holder = holderIn(facts, branch);
   const existing = new Set(facts.branches.map((candidate) => candidate.name));
   return {
     branch,
@@ -101,9 +85,7 @@ async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef
     back: await countCommits(facts.root, from === null ? [to, "--not", "--branches", "--remotes", "--tags"] : [`${from}..${to}`]),
     holder,
     dirty: holder !== undefined && from !== null ? await readDirtyPaths(holder.path) : [],
-    busy: facts.worktrees.find(
-      (worktree) => worktree.operation !== null && (worktree.operationBranch === branch || worktree.branch === branch),
-    ),
+    busy: busyIn(facts, branch),
     children: facts.edges.filter((edge) => edge.parent === branch && existing.has(edge.branch)).map((edge) => edge.branch),
   };
 }
@@ -169,7 +151,6 @@ function describeMove(result: RestoreResult): string {
   return result.kind === "moved" ? `${short(result.from)} → ${short(result.to)}` : `created at ${short(result.to)}`;
 }
 
-/** Prefixes each detail with its branch when there is more than one. */
 function joined(reads: Read[], detail: (read: Read) => string): string {
   return reads.map((read) => (reads.length > 1 ? `${read.branch}: ${detail(read)}` : detail(read))).join("; ");
 }
@@ -232,22 +213,62 @@ async function lanesOf(facts: RepoFacts, reads: Read[]): Promise<Pick<Plan, "bef
   };
 }
 
-function receiptLines(results: { read: Read; result: RestoreResult }[], total: number): string[] {
+function movedLines(results: Moved[], several: boolean): string[] {
+  return results.flatMap(({ read, result }) =>
+    result.kind === "created"
+      ? [`Created ${read.branch} at ${short(result.to)}`]
+      : [
+          `Moved ${read.branch} from ${short(result.from)} to ${short(result.to)}`,
+          `The previous tip${several ? ` of ${read.branch}` : ""} is pinned, so this can be undone`,
+        ],
+  );
+}
+
+function undoOf(results: Moved[]): RestoreTarget[] | null {
+  const undo = results.flatMap(({ read, result }) =>
+    result.kind === "moved" ? [{ branch: read.branch, pinRef: result.pinnedCurrent }] : [],
+  );
+  return undo.length > 0 ? undo : null;
+}
+
+function holderChange(facts: RepoFacts, read: Read, now: WorktreeFacts | undefined): string | null {
+  if (now?.path === read.holder?.path) return null;
+  if (now === undefined) return `${displayPath(facts.root, read.holder?.path ?? "")} no longer has ${read.branch} checked out`;
+  if (read.holder === undefined) return `${displayPath(facts.root, now.path)} now has ${read.branch} checked out`;
+  return `${read.branch} is now checked out in ${displayPath(facts.root, now.path)}`;
+}
+
+async function recheck(facts: RepoFacts, reads: Read[]): Promise<string[]> {
   const lines: string[] = [];
-  for (const { read, result } of results) {
-    if (result.kind === "created") lines.push(`Created ${read.branch} at ${short(result.to)}`);
-    else {
-      lines.push(`Moved ${read.branch} from ${short(result.from)} to ${short(result.to)}`);
-      lines.push(`The previous tip${results.length > 1 ? ` of ${read.branch}` : ""} is pinned, so this can be undone`);
-    }
+  for (const read of reads) {
+    if ((await revParse(facts.root, read.pinRef)) !== read.to) lines.push(`${read.pinRef} no longer points at ${short(read.to)}`);
+    const moved = holderChange(facts, read, holderIn(facts, read.branch));
+    if (moved !== null) lines.push(moved);
+    const busy = busyIn(facts, read.branch);
+    if (busy?.operation) lines.push(`${read.branch} has a ${busy.operation} in progress in ${displayPath(facts.root, busy.path)}`);
   }
-  if (total > 0) lines.push(`${total} of ${total} commits are back`);
-  for (const { read } of results) for (const child of read.children) lines.push(`${child} is still on the old ${read.branch}; restack it next`);
   return lines;
 }
 
+async function stillAt(root: string, read: Read): Promise<void> {
+  const now = await revParse(root, `refs/heads/${read.branch}`);
+  if (now === read.from) return;
+  const was = read.from === null ? "nothing" : short(read.from);
+  throw new StalePlanError([`${read.branch} moved: was ${was}, now ${now === null ? "deleted" : short(now)}`]);
+}
+
+async function verify(root: string, results: Moved[], total: number): Promise<string> {
+  for (const { read, result } of results) {
+    const at = await revParse(root, `refs/heads/${read.branch}`);
+    if (at !== result.to) throw new Error(`${read.branch} is at ${at === null ? "nothing" : short(at)}, not ${short(result.to)}`);
+  }
+  const back = results.reduce((sum, { result }) => sum + result.commitsBack, 0);
+  if (back !== total) throw new Error(`${back} of ${total} commits are back`);
+  return total > 0 ? `${back} of ${total} found` : "at the pin";
+}
+
 async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
-  const targets = parseTargets(raw);
+  const targets = parseRestoreTargets(raw);
   const facts = await readRepoFacts(ctx.root);
   const reads: Read[] = [];
   for (const target of targets) reads.push(await readTarget(ctx, facts, target));
@@ -258,31 +279,43 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   return {
     plan,
     async execute(run) {
-      const results: { read: Read; result: RestoreResult }[] = [];
-      await run.step(run.firstStep, async () => {
-        for (const read of reads) {
-          const result = await restoreHeld(run.facts, read.branch, read.pinRef);
-          results.push({ read, result });
-          await settleRestoredTip(ctx.store, run.facts, read.branch, result.to);
-        }
-        return results.map(({ result }) => describeMove(result)).join("; ");
+      const results: Moved[] = [];
+      const several = reads.length > 1;
+      const stop = (index: number, error: unknown, prefix: string): ExecuteResult => ({
+        ok: false,
+        title: `Stopped: ${plan.steps[index]?.title ?? "the run"}`,
+        lines: [...movedLines(results, several), `${prefix}${errorLine(error)}`],
+        undo: undoOf(results),
       });
-      await run.step(run.firstStep + 1, async () => {
-        for (const { read, result } of results) {
-          const missing = await countCommits(run.facts.root, [result.to, "--not", `refs/heads/${read.branch}`]);
-          if (missing > 0) throw new Error(`${plural(missing, "commit")} of ${read.branch}'s pin are not on it`);
-        }
-        const back = results.reduce((sum, { result }) => sum + result.commitsBack, 0);
-        return total > 0 ? `${back} of ${total} found` : "at the pin";
-      });
-      const undo: RestoreTarget[] = results.flatMap(({ read, result }) =>
-        result.kind === "moved" ? [{ branch: read.branch, pinRef: result.pinnedCurrent }] : [],
-      );
+      try {
+        await run.step(run.firstStep, async () => {
+          const mismatches = await recheck(run.facts, reads);
+          if (mismatches.length > 0) throw new StalePlanError(mismatches);
+          for (const read of reads) {
+            const result = await restoreHeld(run.facts, read.branch, read.pinRef, () => stillAt(run.facts.root, read));
+            results.push({ read, result });
+            await settleRestoredTip(ctx.store, run.facts, read.branch, result.to);
+          }
+          return results.map(({ result }) => describeMove(result)).join("; ");
+        });
+      } catch (error) {
+        if (results.length === 0) throw error;
+        const failed = reads[results.length];
+        return stop(run.firstStep, error, failed ? `${failed.branch} was not restored: ` : "");
+      }
+      try {
+        await run.step(run.firstStep + 1, () => verify(run.facts.root, results, total));
+      } catch (error) {
+        return stop(run.firstStep + 1, error, "");
+      }
+      const back = results.reduce((sum, { result }) => sum + result.commitsBack, 0);
+      const lines = [...movedLines(results, several), ...(total > 0 ? [`${back} of ${total} commits are back`] : [])];
+      for (const { read } of results) for (const child of read.children) lines.push(`${child} is still on the old ${read.branch}; restack it next`);
       return {
         ok: true,
-        title: total > 0 ? `Restored ${plural(total, "commit")} on ${where}` : `Moved ${where} back`,
-        lines: receiptLines(results, total),
-        undo: undo.length > 0 ? undo : null,
+        title: back > 0 ? `Restored ${plural(back, "commit")} on ${where}` : `Moved ${where} back`,
+        lines,
+        undo: undoOf(results),
       };
     },
   };

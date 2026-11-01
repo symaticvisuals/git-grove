@@ -3,7 +3,8 @@ import { alertPin } from "../../core/journal/alert-pin.js";
 import { openStore } from "../../core/journal/open-store.js";
 import { settleRestoredTip } from "../../core/journal/settle-restored-tip.js";
 import { plural } from "../../core/rules/plural.js";
-import { restore, type RestoreResult } from "../../core/runner/restore.js";
+import { restore } from "../../core/runner/restore.js";
+import type { RestoreResult } from "../../core/runner/restore-held.js";
 import type { CliIo } from "../cli-io.types.js";
 
 function describe(branch: string, result: RestoreResult): string {

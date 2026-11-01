@@ -2,11 +2,13 @@ import type { Sha } from "../facts/facts.types.js";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
 import { runGit } from "../git/run-git.js";
 import { ackAlerts } from "../journal/ack-alerts.js";
+import type { Store } from "../journal/store.types.js";
 import { plural } from "../rules/plural.js";
 import type { ActionContext, ActionDef, Prepared } from "./action.types.js";
 import { branchContext } from "./branch-context.js";
 import { InvalidInputError } from "./invalid-input.error.js";
 import type { Plan } from "./plan.types.js";
+import { StalePlanError } from "./stale-plan.error.js";
 
 function parseBranch(raw: unknown): string {
   const branch = typeof raw === "object" && raw !== null && "branch" in raw ? raw.branch : undefined;
@@ -16,6 +18,12 @@ function parseBranch(raw: unknown): string {
 
 function oldCommits(count: number, verb: { one: string; many: string }): string {
   return count === 1 ? `The old commit ${verb.one}` : `The ${count} old commits ${verb.many}`;
+}
+
+function openIds(store: Store, repoId: number, branch: string): number[] {
+  return store
+    .entries(repoId, { unresolved: true })
+    .flatMap((entry) => (entry.branch === branch && entry.id !== undefined ? [entry.id] : []));
 }
 
 async function ownCount(cwd: string, parentTip: Sha, tip: Sha): Promise<number> {
@@ -32,6 +40,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const parentTip = facts.branches.find((candidate) => candidate.name === parent)?.tip ?? facts.trunk.sha;
   const own = tip === null ? 0 : await ownCount(facts.root, parentTip, tip);
   const lost = new Set(open.flatMap((entry) => entry.lost)).size;
+  const shown = new Set(open.flatMap((entry) => (entry.id === undefined ? [] : [entry.id])));
 
   const plan: Plan = {
     action: "ack",
@@ -68,6 +77,9 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
       const id = ctx.store.repoId(run.facts.commonDir, run.facts.root);
       let acked = 0;
       await run.step(run.firstStep, async () => {
+        const now = openIds(ctx.store, id, branch);
+        if (now.some((entryId) => !shown.has(entryId))) throw new StalePlanError([`${branch} has a new alert since you looked`]);
+        if (now.length !== shown.size) throw new StalePlanError([`An alert on ${branch} was cleared since you looked`]);
         acked = ackAlerts(ctx.store, id, branch);
         return `${plural(acked, "alert")} cleared`;
       });
@@ -83,6 +95,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
 
 /**
  * Marks a branch's open rewrite and deletion alerts as intended: `{ branch }`. Changes nothing in git, and is
- * blocked when the branch has no open alert. Refuses at run time when the branch moved since the plan.
+ * blocked when the branch has no open alert. Refuses at run time when the branch moved since the plan, or when its
+ * open alerts are no longer the ones the plan showed.
  */
 export const ackAction: ActionDef = { name: "ack", prepare };

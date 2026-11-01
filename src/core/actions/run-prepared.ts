@@ -7,6 +7,7 @@ import { RepoLockedError } from "../runner/repo-locked.error.js";
 import { withRepoLock } from "../runner/with-repo-lock.js";
 import type { ActionContext, ExecuteResult, Prepared } from "./action.types.js";
 import { checkExpectations } from "./check-expectations.js";
+import { errorLine } from "./error-line.js";
 import type { Plan, Receipt, StepEvent } from "./plan.types.js";
 import { StalePlanError } from "./stale-plan.error.js";
 
@@ -16,13 +17,10 @@ function refused(title: string, lines: string[]): Outcome {
   return { ok: false, refused: true, title, lines, undo: null };
 }
 
-function messageOf(error: unknown): string {
-  if (error instanceof StalePlanError) return error.mismatches.join("; ");
-  const message = error instanceof Error ? error.message : String(error);
-  return (message.split("\n")[0] ?? message).replace(/^git-grove: /, "");
+async function readCommonDir(root: string): Promise<string> {
+  return (await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: root })).stdout.trim();
 }
 
-/** The one branch the plan is about, or null when it names none or several. */
 function branchOf(plan: Plan): string | null {
   const tips = plan.expects.flatMap((expect) => (expect.kind === "tip" ? [expect.branch] : []));
   const branches = new Set([...plan.moves, ...tips]);
@@ -33,7 +31,8 @@ function branchOf(plan: Plan): string | null {
  * Runs a prepared action and resolves to its receipt; refusals and stops are receipts, never throws.
  * A plan with blockers runs nothing. Otherwise it takes the repo lock, reads the repository and checks every
  * expectation (step 0), pins each branch in `moves` at its current tip (step 1), then runs `execute` from the next
- * step. Steps never reported are emitted as skipped, and the receipt is recorded as activity.
+ * step. Steps never reported are emitted as skipped, and the receipt is recorded as activity; a receipt that could
+ * not be recorded says so in its last line.
  */
 export async function runPrepared(
   ctx: ActionContext,
@@ -41,8 +40,6 @@ export async function runPrepared(
   emit: (event: StepEvent) => void,
 ): Promise<Receipt> {
   const { plan } = prepared;
-  const probe = await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: ctx.root });
-  const commonDir = probe.stdout.trim();
   const reported = new Set<number>();
   const pins = new Map<string, string>();
   let failedAt: number | null = null;
@@ -61,7 +58,7 @@ export async function runPrepared(
       return value;
     } catch (error) {
       failedAt = index;
-      send({ index, state: "failed", detail: messageOf(error), ms: elapsed() });
+      send({ index, state: "failed", detail: errorLine(error), ms: elapsed() });
       throw error;
     }
   };
@@ -96,22 +93,28 @@ export async function runPrepared(
     return { ...(await prepared.execute({ facts, pins, firstStep, step, skip })), refused: false };
   };
 
+  const outcomeOf = (error: unknown): Outcome => {
+    if (error instanceof RepoLockedError) {
+      return refused("Another grove action is running in this repo", [
+        `${error.lockPath} is held. Wait for that action to finish, then try again.`,
+        `If no grove action is running, remove ${error.lockPath} and try again.`,
+      ]);
+    }
+    if (error instanceof StalePlanError) return refused("Changed since you looked", error.mismatches);
+    if (error instanceof RefusedError) return refused(`Refused: ${stepTitle()}`, [errorLine(error)]);
+    return { ok: false, refused: false, title: `Stopped: ${stepTitle()}`, lines: [errorLine(error)], undo: null };
+  };
+
   let outcome: Outcome;
+  let commonDir: string | null = null;
   if (plan.blockers.length > 0) {
     outcome = refused("Not run", plan.blockers);
   } else {
     try {
+      commonDir = await readCommonDir(ctx.root);
       outcome = await withRepoLock(commonDir, run);
     } catch (error) {
-      if (error instanceof RepoLockedError) {
-        outcome = refused("Another grove action is running in this repo", ["Wait for it to finish, then try again."]);
-      } else if (error instanceof StalePlanError) {
-        outcome = refused("Changed since you looked", error.mismatches);
-      } else if (error instanceof RefusedError) {
-        outcome = refused(`Refused: ${stepTitle()}`, [messageOf(error)]);
-      } else {
-        outcome = { ok: false, refused: false, title: `Stopped: ${stepTitle()}`, lines: [messageOf(error)], undo: null };
-      }
+      outcome = outcomeOf(error);
     }
   }
 
@@ -127,16 +130,21 @@ export async function runPrepared(
     title: outcome.title,
     lines: outcome.lines,
     pins: [...pins.values()],
-    undo: outcome.ok ? outcome.undo : null,
+    undo: outcome.undo,
     at: ctx.now(),
   };
-  const repoId = ctx.store.findRepoId(commonDir) ?? ctx.store.repoId(commonDir, ctx.root);
-  ctx.store.addActivity(repoId, {
-    kind: "action",
-    branch: branchOf(plan),
-    title: receipt.title,
-    detail: receipt.lines.join("; "),
-    at: receipt.at,
-  });
-  return receipt;
+  try {
+    const dir = commonDir ?? (await readCommonDir(ctx.root));
+    const repoId = ctx.store.findRepoId(dir) ?? ctx.store.repoId(dir, ctx.root);
+    ctx.store.addActivity(repoId, {
+      kind: "action",
+      branch: branchOf(plan),
+      title: receipt.title,
+      detail: receipt.lines.join("; "),
+      at: receipt.at,
+    });
+    return receipt;
+  } catch {
+    return { ...receipt, lines: [...receipt.lines, "This action was not recorded in Activity"] };
+  }
 }

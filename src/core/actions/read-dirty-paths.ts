@@ -1,6 +1,5 @@
 import { runGit } from "../git/run-git.js";
 
-/** How many space-separated fields come before the path, by porcelain v2 record type. */
 const FIELDS_BEFORE_PATH: Record<string, number> = { "1": 8, "2": 9, u: 10, "?": 1 };
 
 /**
