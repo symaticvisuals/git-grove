@@ -80,6 +80,33 @@ test("an entry journaled by a separate status run is delivered once", async () =
   expect(delivered.map((entries) => entries.length)).toEqual([1, 0]);
 });
 
+test("an acked rewrite that happens again is delivered again", async () => {
+  const repoId = (await readSnapshot(fixture.repo.path, store, clock)).repoId;
+  const snapshots = createSnapshots(store, () => clock);
+  await snapshots.refresh(repoId);
+  const delivered: JournalEntry[][] = [];
+  snapshots.onRefresh((_snapshot, entries) => delivered.push(entries));
+  const level = (...args: string[]): Promise<string> => fixture.repo.git("-C", fixture.level1, ...args);
+  const before = (await level("rev-parse", "HEAD")).trim();
+  await fixture.squash();
+  const after = (await level("rev-parse", "HEAD")).trim();
+  const step = async (): Promise<void> => {
+    clock += 1000;
+    await snapshots.refresh(repoId);
+  };
+  await step();
+  const first = delivered.flat().find((entry) => entry.kind === "rewritten");
+  expect(first).toMatchObject({ oldTip: before, newTip: after });
+  store.ack(repoId, first?.id ?? 0, clock);
+  await level("reset", "--hard", before);
+  await step();
+  await level("reset", "--hard", after);
+  delivered.length = 0;
+  await step();
+  const again = delivered.flat().find((entry) => entry.kind === "rewritten" && entry.oldTip === before && entry.newTip === after);
+  expect(again).toMatchObject({ id: first?.id, acked: false });
+});
+
 test("a forced refresh waits for the read in progress and runs one more", async () => {
   const repoId = (await readSnapshot(fixture.repo.path, store, clock)).repoId;
   let release: () => void = () => undefined;

@@ -22,7 +22,7 @@ export type Snapshots = {
   error(repoId: number): string | null;
   /**
    * Calls `listener` after every successful refresh with the snapshot and `delivered`: the journal entries newer than
-   * the repository's delivery cursor, so entries from a failed scan or another process's `status` still arrive once.
+   * the repository's delivery cursor, by `(at, id)` so a re-opened entry arrives again, so entries from a failed scan or another process's `status` still arrive once.
    * Returns the unsubscribe function.
    */
   onRefresh(listener: RefreshListener): () => void;
@@ -31,6 +31,14 @@ export type Snapshots = {
 const FRESH_MS = 2000;
 const FAILURE_MS = 5000;
 const MAX_SCANS = 2;
+
+type Cursor = { at: number; id: number };
+
+function newest(entries: JournalEntry[], from: Cursor): Cursor {
+  let top = from;
+  for (const { at, id = 0 } of entries) if (at > top.at || (at === top.at && id > top.id)) top = { at, id };
+  return top;
+}
 
 type Flight = { running: Promise<Snapshot>; queued: Promise<Snapshot> | null };
 
@@ -43,7 +51,7 @@ export function createSnapshots(store: Store, now: () => number = Date.now, read
   const snapshots = new Map<number, Snapshot>();
   const flights = new Map<number, Flight>();
   const failures = new Map<number, { message: string; at: number }>();
-  const cursors = new Map<number, number>();
+  const cursors = new Map<number, Cursor>();
   const listeners = new Set<RefreshListener>();
   const waiting: (() => void)[] = [];
   let scanning = 0;
@@ -83,14 +91,15 @@ export function createSnapshots(store: Store, now: () => number = Date.now, read
   const scan = async (repoId: number): Promise<Snapshot> => {
     const repo = repos().find((candidate) => candidate.id === repoId);
     if (repo === undefined) throw new Error(`unknown repository ${repoId}`);
-    if (!cursors.has(repoId)) cursors.set(repoId, Math.max(0, ...store.entries(repoId).map((entry) => entry.id ?? 0)));
+    if (!cursors.has(repoId)) cursors.set(repoId, newest(store.entries(repoId), { at: -1, id: 0 }));
     await slot();
     try {
       const snapshot = await read(repo.root, store, now());
       snapshots.set(repoId, snapshot);
       failures.delete(repoId);
-      const delivered = store.entries(repoId, { afterId: cursors.get(repoId) ?? 0 });
-      cursors.set(repoId, Math.max(cursors.get(repoId) ?? 0, ...delivered.map((entry) => entry.id ?? 0)));
+      const cursor = cursors.get(repoId) ?? { at: -1, id: 0 };
+      const delivered = store.entries(repoId, { after: cursor });
+      cursors.set(repoId, newest(delivered, cursor));
       notify(snapshot, delivered);
       return snapshot;
     } catch (error) {

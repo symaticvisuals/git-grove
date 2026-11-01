@@ -289,16 +289,16 @@ export function openStore(path: string = defaultPath()): Store {
     },
     record: insertEntry,
     entries(repoId, options = {}) {
-      const { afterId, branches, limit } = options;
-      if (afterId === undefined && branches === undefined && limit === undefined) {
+      const { after, branches, limit } = options;
+      if (after === undefined && branches === undefined && limit === undefined) {
         return (options.unresolved ? statements.unresolved : statements.entries).all(repoId).map(readEntry);
       }
       const where = ["repo_id = ?"];
       const params: (number | string)[] = [repoId];
       if (options.unresolved) where.push("kind IN ('rewritten', 'deleted') AND acked_at IS NULL");
-      if (afterId !== undefined) {
-        where.push("id > ?");
-        params.push(afterId);
+      if (after !== undefined) {
+        where.push("(at > ? OR (at = ? AND id > ?))");
+        params.push(after.at, after.at, after.id);
       }
       if (branches !== undefined) {
         where.push(`ref IN (${branches.map(() => "?").join(", ")})`);

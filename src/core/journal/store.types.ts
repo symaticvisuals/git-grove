@@ -44,12 +44,11 @@ export type Store = {
   /** Returns the entry's id. A change the journal already holds (same branch, old and new tip) takes `entry`'s values. */
   record(repoId: number, entry: JournalEntry): number;
   /**
-   * Oldest first. `unresolved` keeps `rewritten` and `deleted` entries that are not acked; `afterId` keeps entries with a
-   * greater id; `branches` keeps those of the named branches; `limit` keeps the newest that many.
+   * Oldest first. `unresolved` keeps `rewritten` and `deleted` entries that are not acked; `after` keeps entries newer by `(at, id)`; `branches` keeps those of the named branches; `limit` keeps the newest that many.
    */
   entries(
     repoId: number,
-    options?: { unresolved?: boolean; afterId?: number; branches?: readonly string[]; limit?: number },
+    options?: { unresolved?: boolean; after?: { at: number; id: number }; branches?: readonly string[]; limit?: number },
   ): JournalEntry[];
   ack(repoId: number, entryId: number, at: number): void;
   /** Returns the item's id. */
