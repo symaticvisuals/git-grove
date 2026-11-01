@@ -1,14 +1,16 @@
-import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { InvalidInputError } from "../core/actions/invalid-input.error.js";
 import { requireGitVersion } from "../core/git/require-git-version.js";
 import type { CliIo } from "./cli-io.types.js";
 import { ackCommand } from "./commands/ack.js";
 import { checkCommand } from "./commands/check.js";
 import { pinsCommand } from "./commands/pins.js";
 import { restoreCommand } from "./commands/restore.js";
+import { serveCommand } from "./commands/serve.js";
 import { statusCommand } from "./commands/status.js";
 import { describeError } from "./describe-error.js";
+import { packageVersion } from "./package-version.js";
 import { runActionCommand } from "./run-action.js";
 
 type Parsed = {
@@ -25,6 +27,7 @@ type Parsed = {
     install?: boolean;
     open?: boolean;
     rescue?: boolean;
+    port?: string;
   };
   positionals: string[];
 };
@@ -40,6 +43,7 @@ type Flags = {
   install: boolean;
   open: boolean;
   rescue: boolean;
+  port: string | undefined;
 };
 
 type Command = (io: CliIo) => Promise<number>;
@@ -63,18 +67,17 @@ const USAGE = `Usage: git grove <command> [options]
   rm <worktree> [--rescue]          remove a worktree's folder when nothing would
           [--dry-run] [--json]        be lost, keeping its branch; --rescue first
                                     copies ignored files only it has into main
+  serve [--port <n>]                run the dashboard server in the foreground,
+                                    on port 47683 or the next free one
 `;
 
-const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm"]);
+const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm", "serve"]);
 
-function hasVersion(value: unknown): value is { version: string } {
-  return typeof value === "object" && value !== null && "version" in value && typeof value.version === "string";
-}
-
-function packageVersion(): string {
-  const pkg: unknown = createRequire(import.meta.url)("../../package.json");
-  if (!hasVersion(pkg)) throw new Error("git-grove: package.json has no version");
-  return pkg.version;
+function parsePort(text: string | undefined): number | undefined {
+  if (text === undefined) return undefined;
+  const port = Number(text);
+  if (!/^\d{1,5}$/.test(text) || port > 65535) throw new InvalidInputError("--port must be a whole number from 0 to 65535");
+  return port;
 }
 
 function isParseError(error: unknown): error is TypeError {
@@ -98,6 +101,7 @@ function parse(argv: string[]): Parsed {
       install: { type: "boolean" },
       open: { type: "boolean" },
       rescue: { type: "boolean" },
+      port: { type: "string" },
     },
   });
 }
@@ -109,6 +113,7 @@ function route(positionals: string[], flags: Flags): Command | null {
   const options = { dryRun, json };
   const level = { env: !flags.skipEnv, install: flags.install, open: flags.open };
   if (flags.rescue && name !== "rm") return null;
+  if (flags.port !== undefined && name !== "serve") return null;
   if (name === "new") {
     return first !== undefined && second === undefined && !stash && flags.on === undefined
       ? (io) => runActionCommand(io, "new", { feature: first, branch: flags.branch, from: flags.from, ...level }, options)
@@ -131,6 +136,7 @@ function route(positionals: string[], flags: Flags): Command | null {
       : null;
   }
   if (stash || dryRun) return null;
+  if (name === "serve") return first === undefined && !json ? (io) => serveCommand(io, { port: parsePort(flags.port) }) : null;
   if (name === "stack") {
     return first === "plan" && second !== undefined && extra === undefined
       ? (io) => runActionCommand(io, "restack", { feature: second }, { dryRun: true, json })
@@ -185,6 +191,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
     install: values.install === true,
     open: values.open === true,
     rescue: values.rescue === true,
+    port: values.port,
   });
   if (command === null) {
     const [name] = args.positionals;

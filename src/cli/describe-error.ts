@@ -8,12 +8,14 @@ import { StoreCorruptError } from "../core/journal/store-corrupt.error.js";
 import { StoreUnavailableError } from "../core/journal/store-unavailable.error.js";
 import { RefusedError } from "../core/runner/refused.error.js";
 import { RepoLockedError } from "../core/runner/repo-locked.error.js";
+import { PortsInUseError } from "../server/http/ports-in-use.error.js";
 
 const ONE_LINE_ERRORS = [
   BareRepoError,
   NotARepoError,
   NotAWorktreeError,
   GitVersionError,
+  PortsInUseError,
   InvalidInputError,
   RefusedError,
   RepoLockedError,
