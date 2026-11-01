@@ -719,3 +719,17 @@ test("check remove of an orphan-history worktree with a local commit exits 3 wit
   const result = await grove(["check", "remove", ".worktrees/pages"]);
   expect(result).toMatchObject({ code: 3, err: "", out: "1 commit not pushed or merged\n" });
 });
+
+test("a hotfix cherry-picked to main, then the branch rebased onto main, raises no alert", async () => {
+  await repo.commit("fix.txt", "fix\n", "hotfix for prod");
+  await repo.commit("d.txt", "d\n", "add d");
+  await grove(["status"]);
+  await repo.switch("main");
+  await repo.git("cherry-pick", "feat~1");
+  await repo.switch("feat");
+  await repo.git("rebase", "main");
+
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
+  expect((await journalEntries()).find((entry) => entry.branch === "feat")).toMatchObject({ kind: "rebased", lost: [] });
+});

@@ -208,3 +208,47 @@ test("amending the tip with its message edited, below a merge commit, is amended
   const change = await classify("feat", oldTip, await sha("feat"), fork, fork);
   expect(change).toMatchObject({ kind: "amended", lost: [] });
 });
+
+test("a commit cherry-picked to main and then dropped by a rebase onto main is rebased", async () => {
+  const { fork, commits } = await forkFeature();
+  await repo.switch("main");
+  await repo.git("cherry-pick", commits[1]);
+  const main = await sha("main");
+  await repo.switch("feat");
+  await repo.git("rebase", "main");
+  expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("2");
+
+  const change = await classify("feat", commits[2], await sha("feat"), fork, main);
+  expect(change).toMatchObject({ kind: "rebased", lost: [] });
+});
+
+/** Runs `git rebase -i --autosquash <onto>` with the todo list accepted as generated. */
+async function autosquash(onto: string): Promise<void> {
+  await runGit(["rebase", "-i", "--autosquash", onto], {
+    cwd: repo.path,
+    write: true,
+    env: { ...IDENTITY, GIT_SEQUENCE_EDITOR: "true", GIT_EDITOR: "true" },
+  });
+}
+
+test("fixup! and squash! commits folded by --autosquash are not lost", async () => {
+  const { fork } = await forkFeature();
+  await repo.commit("a.txt", "a, fixed\n", "fixup! add a");
+  const oldTip = await repo.commit("c.txt", "c, more\n", "squash! add c");
+  await autosquash(fork);
+  expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("3");
+
+  const change = await classify("feat", oldTip, await sha("feat"), fork, fork);
+  expect(change).toMatchObject({ kind: "rebased", lost: [] });
+});
+
+test("a fixup! commit whose target is gone from the branch is lost", async () => {
+  const { fork } = await forkFeature();
+  const fixup = await repo.commit("a.txt", "a, fixed\n", "fixup! add a");
+  await repo.git("reset", "--hard", fork);
+  const newTip = await repo.commit("d.txt", "d\n", "add d");
+
+  const change = await classify("feat", fixup, newTip, fork, fork);
+  expect(change.kind).toBe("rewritten");
+  expect(change.lost).toContain(fixup);
+});
