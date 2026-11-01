@@ -12,6 +12,8 @@ export type StatusView = {
   findings: Finding[];
   /** Removal verdicts of the merged worktrees, by path. */
   removals: Map<string, Verdict>;
+  /** The folder status runs in; printed paths are relative to it. */
+  cwd: string;
   now: number;
   elapsedMs: number;
 };
@@ -20,6 +22,8 @@ type Row = { worktree: WorktreeFacts | null; level: Level | null };
 
 const MARKS: Record<Severity, string> = { "loses-work": "✖", "needs-action": "▲", "waiting-on-review": "●", idle: "·" };
 const MAX_PATHS = 3;
+const PATH_START = `(?<![^\\s,(:'"])`;
+const PATH_END = `(?![^/\\s,;:)'"])`;
 
 function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -44,15 +48,24 @@ function subjectLabel(finding: Finding, view: StatusView): string {
     return id;
   }
   const worktree = view.facts.worktrees.find((candidate) => candidate.path === id);
-  return worktree?.branch ?? (relative(view.facts.root, id) || ".");
+  return worktree?.branch ?? fromCwd(id, view.cwd);
 }
 
-function shortenPaths(text: string, facts: RepoFacts): string {
-  const linked = facts.worktrees
-    .map((worktree) => worktree.path)
-    .filter((path) => path !== facts.root)
-    .sort((a, b) => b.length - a.length);
-  return linked.reduce((out, path) => out.replaceAll(path, relative(facts.root, path)), text);
+function fromCwd(path: string, cwd: string): string {
+  return relative(cwd, path) || ".";
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Rewrites each worktree path standing alone in `text` relative to the caller's folder, longest path first. */
+function shortenPaths(text: string, view: StatusView): string {
+  const paths = view.facts.worktrees.map((worktree) => worktree.path).sort((a, b) => b.length - a.length);
+  return paths.reduce((out, path) => {
+    const standalone = new RegExp(`${PATH_START}${escapeRegExp(path)}${PATH_END}`, "g");
+    return out.replace(standalone, () => fromCwd(path, view.cwd));
+  }, text);
 }
 
 function removalPaths(finding: Finding, view: StatusView): string[] {
@@ -73,7 +86,7 @@ function needsYouLines(view: StatusView): string[] {
   for (const { finding, label } of labelled) {
     lines.push(` ${MARKS[finding.severity]} ${label.padEnd(width)}  ${finding.title}`);
     const extras = [finding.detail, ...removalPaths(finding, view), ...(finding.action === null ? [] : [finding.action])];
-    lines.push(...extras.map((extra) => `${indent}${shortenPaths(extra, view.facts)}`));
+    lines.push(...extras.map((extra) => `${indent}${shortenPaths(extra, view)}`));
   }
   return lines;
 }
@@ -96,8 +109,8 @@ function rowsInOrder(view: StatusView): Row[] {
   return rows;
 }
 
-function labelCell({ worktree, level }: Row, root: string): string {
-  const name = level?.branch ?? worktree?.branch ?? `${relative(root, worktree?.path ?? root) || "."} (detached)`;
+function labelCell({ worktree, level }: Row, cwd: string): string {
+  const name = level?.branch ?? worktree?.branch ?? `${fromCwd(worktree?.path ?? cwd, cwd)} (detached)`;
   const depth = level?.depth ?? 1;
   return depth > 1 ? `${"  ".repeat(depth - 1)}└ ${name}` : name;
 }
@@ -147,7 +160,7 @@ function alignColumns(rows: string[][]): string[] {
 /**
  * Renders `git grove status` as plain text: a header, the "Needs you" block (needs-action or worse, worst first)
  * with each finding's detail and action, then one line per worktree, stack levels indented under their parent.
- * Worktree paths in finding text are shown relative to the repository root.
+ * Worktree paths are shown relative to `cwd`, so a printed command works from where status ran.
  */
 export function renderStatus(view: StatusView): string {
   const { facts } = view;
@@ -158,7 +171,7 @@ export function renderStatus(view: StatusView): string {
   const table = [
     ["Worktree", "Changes", "Origin", `Behind ${facts.trunk.name}`, "Touched"],
     ...rowsInOrder(view).map((row) => [
-      labelCell(row, facts.root),
+      labelCell(row, view.cwd),
       changesCell(row.worktree),
       originCell(row, view),
       behindCell(row.level, facts.trunk.name),

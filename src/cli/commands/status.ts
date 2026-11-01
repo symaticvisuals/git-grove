@@ -1,9 +1,11 @@
+import { realpath } from "node:fs/promises";
 import { branchWasCommittedTo } from "../../core/facts/branch-was-committed-to.js";
 import type { RepoFacts, Sha } from "../../core/facts/facts.types.js";
 import { readEnvMissing } from "../../core/facts/read-env-missing.js";
 import { readRemovalFacts } from "../../core/facts/read-removal-facts.js";
 import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
 import { GitError } from "../../core/git/git.error.js";
+import { runGit } from "../../core/git/run-git.js";
 import { observe } from "../../core/journal/observe.js";
 import { openStore } from "../../core/journal/open-store.js";
 import type { JournalEntry } from "../../core/journal/store.types.js";
@@ -24,6 +26,11 @@ async function landed(facts: RepoFacts, sha: Sha): Promise<boolean> {
   }
 }
 
+async function isAncestor(facts: RepoFacts, ancestor: Sha, descendant: Sha): Promise<boolean> {
+  const args = ["merge-base", "--is-ancestor", ancestor, descendant];
+  return (await runGit(args, { cwd: facts.root, allowFailure: true })).code === 0;
+}
+
 async function verdictFor(facts: RepoFacts, path: string): Promise<Verdict> {
   try {
     return safeToRemove(await readRemovalFacts(facts.root, path, facts));
@@ -33,12 +40,13 @@ async function verdictFor(facts: RepoFacts, path: string): Promise<Verdict> {
   }
 }
 
-/** Verdicts for the linked worktrees whose branch has been committed to and has landed on the trunk. */
+/** Verdicts for the linked worktrees, off the trunk, whose branch has been committed to and has landed on it. */
 async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
   const removals = new Map<string, Verdict>();
   for (const worktree of facts.worktrees) {
     const branch = facts.branches.find((candidate) => candidate.name === worktree.branch);
-    if (worktree.isMain || branch === undefined || !(await landed(facts, branch.tip))) continue;
+    if (worktree.isMain || branch === undefined || branch.name === facts.trunk.name) continue;
+    if (!(await landed(facts, branch.tip))) continue;
     if (!(await branchWasCommittedTo(facts.root, branch.name))) continue;
     removals.set(worktree.path, await verdictFor(facts, worktree.path));
   }
@@ -46,13 +54,15 @@ async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
 }
 
 /**
- * Keeps the entries whose lost tip has not landed on the trunk. A `deleted` entry, or one whose branch is gone,
- * resolves once its lost tip lands; one whose branch still exists also needs the branch's current tip landed.
+ * Keeps the entries whose lost commits are neither back on their branch nor landed on the trunk.
+ * A `deleted` entry, or one whose branch is gone, resolves once its lost tip lands;
+ * one whose branch still exists also needs the branch's current tip landed.
  */
 async function stillUnresolved(facts: RepoFacts, entries: JournalEntry[]): Promise<JournalEntry[]> {
   const kept: JournalEntry[] = [];
   for (const entry of entries) {
     const branch = facts.branches.find((candidate) => candidate.name === entry.branch);
+    if (branch !== undefined && (await isAncestor(facts, entry.oldTip, branch.tip))) continue;
     const resolved =
       (await landed(facts, entry.oldTip)) &&
       (entry.kind === "deleted" || branch === undefined || (await landed(facts, branch.tip)));
@@ -74,7 +84,7 @@ export async function statusCommand(io: CliIo, options: { json: boolean }): Prom
     const facts = await readRepoFacts(io.cwd);
     const features = await readStackFacts(facts.root, facts);
     const removals = await mergedRemovals(facts);
-    const envMissing = await readEnvMissing(facts.root, facts);
+    const envMissing = await readEnvMissing(facts.root, facts).catch(() => new Map<string, string[]>());
     const repoId = store.repoId(facts.commonDir, facts.root);
     const journal = await stillUnresolved(facts, store.entries(repoId, { unresolved: true }));
     const findings = evaluate({ facts, features, unresolved: journal, removals, envMissing, now });
@@ -82,7 +92,8 @@ export async function statusCommand(io: CliIo, options: { json: boolean }): Prom
       const doc = { repo: { root: facts.root, commonDir: facts.commonDir }, trunk: facts.trunk, features, findings, journal };
       io.out(`${JSON.stringify(doc, null, 2)}\n`);
     } else {
-      io.out(renderStatus({ facts, features, findings, removals, now, elapsedMs: Date.now() - now }));
+      const cwd = await realpath(io.cwd).catch(() => io.cwd);
+      io.out(renderStatus({ facts, features, findings, removals, cwd, now, elapsedMs: Date.now() - now }));
     }
     return 0;
   } finally {

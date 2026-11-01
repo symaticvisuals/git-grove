@@ -41,6 +41,7 @@ git grove status > /dev/null
 git reset --quiet --soft main
 git commit --quiet -m "squash feat"
 
-report="$(git grove status)"
+report="$(git grove status 2> "$work/stderr")"
 echo "$report"
 grep -qi "history rewritten" <<< "$report" || { echo "expected: history rewritten" >&2; exit 1; }
+[ ! -s "$work/stderr" ] || { echo "expected no stderr, got:" >&2; cat "$work/stderr" >&2; exit 1; }

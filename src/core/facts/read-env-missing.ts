@@ -18,7 +18,7 @@ function exists(path: string): Promise<boolean> {
 
 /**
  * Maps each linked worktree's path to the ignored `.env*` files the main worktree has and it lacks.
- * Prunable worktrees are left out.
+ * Prunable worktrees are left out, and so are files inside folders of the main worktree that cannot be opened.
  */
 export async function readEnvMissing(
   _cwd: string,

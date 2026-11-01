@@ -5,6 +5,7 @@ import { DatabaseSync, type SQLOutputValue, type StatementResultingChanges } fro
 import type { Sha } from "../facts/facts.types.js";
 import type { ChangeKind } from "./classify-tip-change.js";
 import { StoreCorruptError } from "./store-corrupt.error.js";
+import { StoreUnavailableError } from "./store-unavailable.error.js";
 import type { JournalEntry, LastTip, Store, TipSwap } from "./store.types.js";
 
 type Row = Record<string, SQLOutputValue>;
@@ -121,17 +122,33 @@ function defaultPath(): string {
   return join(process.env["GIT_GROVE_HOME"] ?? join(homedir(), ".git-grove"), "grove.db");
 }
 
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? (error.message.split("\n")[0] ?? error.message) : String(error);
+}
+
+function openDatabase(path: string): DatabaseSync {
+  let db: DatabaseSync | null = null;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    db = new DatabaseSync(path);
+    db.exec("PRAGMA busy_timeout = 2000");
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec(SCHEMA);
+    return db;
+  } catch (error) {
+    if (db?.isOpen) db.close();
+    throw new StoreUnavailableError(path, reasonOf(error));
+  }
+}
+
 /**
  * Opens grove's SQLite database (default `$GIT_GROVE_HOME/grove.db`, else `~/.git-grove/grove.db`),
  * creating the folder and tables. WAL with a 2 s busy timeout lets several processes share it.
- * Throws StoreCorruptError when a row holds a value of the wrong shape.
+ * Throws StoreUnavailableError when the database cannot be created or opened (a file where the folder should be,
+ * no permission, a corrupt or busy file), and StoreCorruptError when a row holds a value of the wrong shape.
  */
 export function openStore(path: string = defaultPath()): Store {
-  mkdirSync(dirname(path), { recursive: true });
-  const db = new DatabaseSync(path);
-  db.exec("PRAGMA busy_timeout = 2000");
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec(SCHEMA);
+  const db = openDatabase(path);
 
   const statements = {
     repoId: db.prepare(

@@ -32,8 +32,27 @@ test("restore brings back the commits and pins the squashed tip", async () => {
   const result = await restore(repo.path, "feat/x");
   expect(result).toMatchObject({ from: squashed, to: original });
   expect((await repo.git("rev-list", "--count", "main..feat/x")).trim()).toBe("3");
+  if (result.kind !== "moved") throw new Error("expected the existing branch to move");
   expect((await repo.git("rev-parse", result.pinnedCurrent)).trim()).toBe(squashed);
   expect((await listPins(repo.path, "feat/x")).length).toBe(2);
+});
+
+test("restore recreates a deleted branch at its newest pin and pins nothing", async () => {
+  await repo.switch("main");
+  await repo.git("branch", "-D", "feat/x");
+  const result = await restore(repo.path, "feat/x");
+  expect(result).toMatchObject({ kind: "created", to: original });
+  expect((await repo.git("rev-parse", "feat/x")).trim()).toBe(original);
+  expect((await listPins(repo.path, "feat/x")).length).toBe(1);
+});
+
+test("restore refuses to recreate a branch a worktree still has checked out", async () => {
+  await repo.switch("main");
+  await repo.worktree(join(repo.path, ".worktrees", "held"), "held");
+  await pin(repo.path, "held", original, new Date(Date.UTC(2026, 10, 1, 2, 0, 0)));
+  await repo.git("update-ref", "-d", "refs/heads/held");
+  await expect(restore(repo.path, "held")).rejects.toThrow("checked out but the branch is gone");
+  expect(await repo.git("show-ref", "--verify", "--quiet", "refs/heads/held").catch(() => "missing")).toBe("missing");
 });
 
 test("restore moves a branch that is not checked out anywhere", async () => {

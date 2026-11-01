@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { run } from "../../src/cli/main.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
@@ -293,4 +293,148 @@ test("a missing git binary exits 1 with one line", async () => {
     if (savedPath === undefined) delete process.env["PATH"];
     else process.env["PATH"] = savedPath;
   }
+});
+
+/** Runs `work` with GIT_GROVE_HOME pointing at `path`, then points it back at the suite's home. */
+async function withHome(path: string, work: () => Promise<void>): Promise<void> {
+  process.env["GIT_GROVE_HOME"] = path;
+  try {
+    await work();
+  } finally {
+    process.env["GIT_GROVE_HOME"] = home;
+  }
+}
+
+/** Runs `work` with `folder` unreadable, restoring its permissions afterwards. */
+async function withLocked(folder: string, work: () => Promise<void>): Promise<void> {
+  await write(join(folder, "secret.txt"), "x\n");
+  await chmod(folder, 0o000);
+  try {
+    await work();
+  } finally {
+    await chmod(folder, 0o755);
+  }
+}
+
+test("status survives an unreadable ignored folder in the main worktree", async () => {
+  await withLocked(join(repo.path, ".local", "locked"), async () => {
+    const result = await grove(["status"]);
+    expect(result).toMatchObject({ code: 0, err: "" });
+  });
+});
+
+test("check remove names an unreadable ignored folder and refuses", async () => {
+  const path = await landedWorktree("old");
+  await withLocked(join(path, ".local", "locked"), async () => {
+    const result = await grove(["check", "remove", ".worktrees/old"]);
+    expect(result.code).toBe(3);
+    expect(result.out).toContain(".local/locked/");
+  });
+});
+
+test("a linked worktree on the trunk is not checked for removal", async () => {
+  const path = join(repo.path, ".worktrees", "trunk");
+  await repo.git("worktree", "add", path, "main");
+  await writeFile(join(path, "base.txt"), "edited\n");
+
+  expect(rulesOf((await statusJson()).findings)).not.toContain("unsafe-merged-worktree");
+});
+
+test("a branch only fast-forwarded or rebased onto main is not checked for removal", async () => {
+  const cases: [string, string[]][] = [
+    ["caught-up", ["merge", "--ff-only", "main"]],
+    ["rebased", ["rebase", "main"]],
+  ];
+  for (const [name, args] of cases) {
+    const path = join(repo.path, ".worktrees", name);
+    await repo.worktree(path, name, "main~1");
+    await repo.git("-C", path, ...args);
+    await write(join(path, "draft.txt"), "wip\n");
+  }
+
+  expect(rulesOf((await statusJson()).findings)).not.toContain("unsafe-merged-worktree");
+});
+
+test("a landed branch whose reflog was expired is still checked for removal", async () => {
+  const path = await landedWorktree("old");
+  await repo.git("reflog", "expire", "--expire=now", "--expire-unreachable=now", "refs/heads/old");
+  await write(join(path, ".local", "seed.sql"), "insert;\n");
+
+  expect(rulesOf((await statusJson()).findings)).toContain("unsafe-merged-worktree");
+});
+
+test("a rewrite alert clears once the lost commits are back on the branch", async () => {
+  await grove(["status"]);
+  const original = (await repo.git("rev-parse", "feat")).trim();
+  await squash();
+  await grove(["status"]);
+  await repo.git("reset", "--hard", original);
+
+  const doc = await statusJson();
+  expect(doc.journal.map((entry) => field(entry, "oldTip"))).not.toContain(original);
+});
+
+test("restore recreates a deleted branch at its pin", async () => {
+  await grove(["status"]);
+  const tip = (await repo.git("rev-parse", "feat")).trim();
+  await repo.switch("main");
+  await repo.git("branch", "-D", "feat");
+  expect(rulesOf((await statusJson()).findings)).toContain("branch-deleted");
+
+  const result = await grove(["restore", "feat"]);
+  expect(result).toMatchObject({ code: 0, err: "" });
+  expect(result.out).toMatch(new RegExp(`^restored feat at ${tip.slice(0, 7)} from refs/grove/pins/feat/\\S+\\n$`));
+  expect((await repo.git("rev-parse", "feat")).trim()).toBe(tip);
+  expect(rulesOf((await statusJson()).findings)).not.toContain("branch-deleted");
+});
+
+test("an unusable grove home or a corrupt grove.db exits 1 with one line", async () => {
+  const file = join(home, "not-a-folder");
+  await writeFile(file, "x\n");
+  await withHome(file, async () => {
+    const result = await grove(["status"]);
+    expect(result.code).toBe(1);
+    expect(result.err).toMatch(/^git-grove: [^\n]+\n$/);
+  });
+
+  const corrupt = await mkdtemp(join(tmpdir(), "git-grove-corrupt-"));
+  try {
+    await writeFile(join(corrupt, "grove.db"), "this is not a database, it is a long enough line of text\n".repeat(100));
+    await withHome(corrupt, async () => {
+      const result = await grove(["status"]);
+      expect(result.code).toBe(1);
+      expect(result.err).toMatch(/^git-grove: [^\n]+\n$/);
+    });
+  } finally {
+    await rm(corrupt, { recursive: true, force: true });
+  }
+});
+
+test("restore opens the store before it moves the branch", async () => {
+  await grove(["status"]);
+  await squash();
+  await grove(["status"]);
+  const squashed = (await repo.git("rev-parse", "feat")).trim();
+  const file = join(home, "not-a-folder");
+  await writeFile(file, "x\n");
+
+  await withHome(file, async () => {
+    const result = await grove(["restore", "feat"]);
+    expect(result).toMatchObject({ code: 1, out: "" });
+    expect(result.err).toMatch(/^git-grove: [^\n]+\n$/);
+  });
+  expect((await repo.git("rev-parse", "feat")).trim()).toBe(squashed);
+});
+
+test("status actions name paths from the folder status runs in", async () => {
+  const old = await landedWorktree("old");
+  await write(join(old, ".local", "seed.sql"), "insert;\n");
+  const side = join(repo.path, ".worktrees", "side");
+  await repo.worktree(side, "side", "main");
+
+  const { out } = await grove(["status"], side);
+  const target = /git grove check remove (\S+)/.exec(out)?.[1] ?? "";
+  expect(target).toBe("../old");
+  expect(resolve(await realpath(side), target)).toBe(await realpath(old));
+  expect((await grove(["check", "remove", target], side)).code).toBe(3);
 });

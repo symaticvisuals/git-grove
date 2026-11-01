@@ -3,7 +3,7 @@ import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
 import { runGit } from "../../core/git/run-git.js";
 import { openStore } from "../../core/journal/open-store.js";
 import type { Store } from "../../core/journal/store.types.js";
-import { restore } from "../../core/runner/restore.js";
+import { restore, type RestoreResult } from "../../core/runner/restore.js";
 import type { CliIo } from "../cli-io.types.js";
 
 function parentTipOf(facts: RepoFacts, branch: string): Sha {
@@ -28,17 +28,23 @@ async function settleJournal(store: Store, facts: RepoFacts, branch: string, tip
   }
 }
 
+function describe(branch: string, result: RestoreResult): string {
+  if (result.kind === "created") return `restored ${branch} at ${result.to.slice(0, 7)} from ${result.pinRef}`;
+  return `restored ${branch}: ${result.from.slice(0, 7)} → ${result.to.slice(0, 7)} (old tip pinned at ${result.pinnedCurrent})`;
+}
+
 /**
- * Runs `git grove restore <branch> [<pin-ref>]`: moves the branch back to the pin (default: its newest),
- * after pinning its current tip, and records the move in the journal as seen.
+ * Runs `git grove restore <branch> [<pin-ref>]`: moves the branch back to the pin (default: its newest)
+ * after pinning its current tip, or recreates a deleted branch there, and records the result in the journal as seen.
+ * The store is opened first, so a store that cannot be opened leaves the branch untouched.
  */
 export async function restoreCommand(io: CliIo, branch: string, pinRef: string | undefined): Promise<number> {
   const facts = await readRepoFacts(io.cwd);
-  const { from, to, pinnedCurrent } = await restore(facts.root, branch, pinRef);
-  io.out(`restored ${branch}: ${from.slice(0, 7)} → ${to.slice(0, 7)} (old tip pinned at ${pinnedCurrent})\n`);
   const store = openStore();
   try {
-    await settleJournal(store, facts, branch, to);
+    const result = await restore(facts.root, branch, pinRef);
+    io.out(`${describe(branch, result)}\n`);
+    await settleJournal(store, facts, branch, result.to);
   } finally {
     store.close();
   }

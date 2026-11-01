@@ -48,12 +48,13 @@ async function readUntracked(worktree: WorktreeFacts, nested: string[]): Promise
 async function readPrecious(worktree: WorktreeFacts, main: WorktreeFacts, others: string[]): Promise<Read<{ files: string[]; truncated: boolean }>> {
   try {
     const listing = await listIgnoredFiles(worktree.path, others);
-    if (listing.truncated) return { value: { files: [], truncated: true }, failed: null };
+    const failed = listing.unreadable.length > 0 ? `ignored files in ${listing.unreadable.join(", ")}` : null;
+    if (listing.truncated) return { value: { files: [], truncated: true }, failed };
     const kept: string[] = [];
     for (const file of listing.files) {
       if (!(await sameFileInBoth(worktree.path, main.path, file))) kept.push(file);
     }
-    return { value: { files: kept, truncated: false }, failed: null };
+    return { value: { files: kept, truncated: false }, failed };
   } catch {
     return { value: { files: [], truncated: false }, failed: "ignored files" };
   }
