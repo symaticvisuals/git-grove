@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grove: two shapes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --page: #E9EEF2; --panel: #FFFFFF; --ink: #1E2A36; --muted: #5E6B7A; --rule: #D5DCE3;
+    --term: #1B2430; --t-text: #D8DEE6; --t-dim: #7F8B99; --t-red: #FF7A7A; --t-amber: #F2B84B; --t-green: #82C995; --t-blue: #7DB8FF;
+    --red: #C62828; --amber: #A86200; --green: #2E7D32; --blue: #1F5FBF;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.5 "IBM Plex Sans", system-ui, sans-serif; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 40px 28px 64px; }
+  h1 { font-size: 30px; line-height: 1.15; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 70ch; }
+  .shape { margin-bottom: 44px; border: 2px solid transparent; border-radius: 12px; padding: 4px; cursor: pointer; }
+  .shape.selected { border-color: var(--blue); }
+  .shape > h2 { font-size: 20px; margin: 8px 8px 2px; }
+  .shape > p { color: var(--muted); margin: 0 8px 14px; max-width: 80ch; }
+
+  .term { background: var(--term); color: var(--t-text); border-radius: 10px; padding: 18px 22px; font: 13px/1.6 "JetBrains Mono", ui-monospace, monospace; overflow-x: auto; white-space: pre; }
+  .term .p { color: var(--t-dim); } .term .r { color: var(--t-red); } .term .a { color: var(--t-amber); } .term .g { color: var(--t-green); } .term .b { color: var(--t-blue); } .term .d { color: var(--t-dim); } .term .h { font-weight: 700; }
+  .terms { display: grid; grid-template-columns: 1fr; gap: 14px; }
+
+  .dash { background: var(--panel); border-radius: 10px; box-shadow: 0 1px 0 var(--rule), 0 14px 32px -24px rgba(30,42,54,.5); overflow: hidden; }
+  .dash-top { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 20px; border-bottom: 1px solid var(--rule); }
+  .dash-top strong { font-size: 16px; }
+  .dash-top span { color: var(--muted); font-size: 13.5px; }
+  .dash-body { display: grid; grid-template-columns: 360px 1fr; }
+  .needs { border-right: 1px solid var(--rule); padding: 16px 18px; }
+  .needs h3, .lanes h3, .table h3 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+  .alert { border-left: 3px solid var(--red); padding: 6px 0 6px 12px; margin-bottom: 14px; }
+  .alert.amber { border-color: var(--amber); } .alert.blue { border-color: var(--blue); }
+  .alert b { display: block; font-size: 14.5px; }
+  .alert span { display: block; color: var(--muted); font-size: 13.5px; }
+  .alert code { font: 12px "JetBrains Mono", monospace; background: #EEF2F6; padding: 1px 6px; border-radius: 3px; color: var(--ink); }
+  .right { padding: 16px 20px; }
+  .lanes svg { width: 100%; height: auto; display: block; }
+  .table { margin-top: 18px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--rule); }
+  td { padding: 7px 8px; border-bottom: 1px solid #EDF1F4; }
+  td.mono { font: 12.5px "JetBrains Mono", monospace; }
+  .tag { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+  .t-red { background: #FDECEC; color: var(--red); } .t-amber { background: #FDF3E1; color: var(--amber); } .t-green { background: #E8F4EA; color: var(--green); } .t-grey { background: #EEF1F4; color: var(--muted); }
+  @media (max-width: 900px) { .dash-body { grid-template-columns: 1fr; } .needs { border-right: none; border-bottom: 1px solid var(--rule); } }
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>grove: watch your worktrees, act only when you say so</h1>
+  <p class="lede">Placeholder name. Same engine, two ways to show it. The demo repo is invented: a shop app with nine worktrees, two of them a stack. Click the one you'd rather build and demo.</p>
+
+  <section class="shape" data-choice="cli" onclick="toggleSelect(this)">
+    <h2>A. A command-line tool only</h2>
+    <p>Everything happens in the terminal: a status report, a refusal when removal would lose work, and a watch mode that prints alerts as they happen.</p>
+    <div class="terms">
+<div class="term"><span class="p">$</span> grove status
+<span class="d">acme-shop, trunk main, 9 worktrees, scanned in 0.8 s</span>
+
+<span class="h">Needs you</span>
+ <span class="r">✖ feat/coupon-ui</span>        history rewritten at 23:19:42: 14 commits became 1
+                         old commits kept at <span class="b">refs/grove/pins/feat-coupon-ui/1</span>
+                         undo with <span class="b">grove restore feat/coupon-ui</span>
+ <span class="r">✖ chore/old-onboarding</span>  merged, but 2 ignored files exist only here
+                         .local/seed.sql, docs/plans/onboarding-ledger.md
+ <span class="a">▲ feat/coupon-ui</span>        its parent feat/checkout-coupons moved 3 commits; restack it
+ <span class="b">● fix/cart-rounding</span>     PR #212 passes CI but has 1 open review thread
+
+<span class="h">Worktree                  Changes    Origin      Behind main   PR              Touched</span>
+feat/checkout-coupons     clean      in sync     5             #210 <span class="g">CI ok</span>       2 h
+  └ feat/coupon-ui        <span class="a">3 files</span>    <span class="a">2 unpushed</span>  <span class="a">parent +3</span>     #211 <span class="r">CI failed</span>   9 min
+fix/cart-rounding         clean      in sync     1             #212 <span class="b">1 thread</span>    1 d
+feat/search-filters       <span class="a">12 files</span>   <span class="a">no remote</span>   0             none            20 min
+spike/redis-cache         clean      <span class="a">no remote</span>   <span class="r">38</span>            none            <span class="d">21 d, stale</span>
+chore/old-onboarding      clean      merged      none          #198 merged     6 d
+<span class="d">3 more in sync and clean</span></div>
+<div class="term"><span class="p">$</span> grove rm chore/old-onboarding
+<span class="r">Refused.</span> These ignored files exist only in this worktree:
+  .local/seed.sql                       <span class="d">12 KB, edited 6 d ago</span>
+  docs/plans/onboarding-ledger.md       <span class="d">4 KB, edited 6 d ago</span>
+Copy them to the main checkout first with <span class="b">grove rm --rescue</span>, or delete anyway with <span class="b">--force</span>.</div>
+    </div>
+  </section>
+
+  <section class="shape" data-choice="cli+dash" onclick="toggleSelect(this)">
+    <h2>B. The same tool, plus a small local dashboard</h2>
+    <p><code style="font-family:JetBrains Mono,monospace;font-size:13px">grove ui</code> opens this on localhost and refreshes on every scan. The stack picture shows drift at a glance, which reads better on video than a table.</p>
+    <div class="dash">
+      <div class="dash-top"><strong>acme-shop</strong><span>9 worktrees, trunk main, scanned 4 s ago</span></div>
+      <div class="dash-body">
+        <div class="needs">
+          <h3>Needs you</h3>
+          <div class="alert"><b>feat/coupon-ui: history rewritten</b><span>14 commits became 1 at 23:19:42. The old commits are kept.</span><span style="margin-top:4px"><code>grove restore feat/coupon-ui</code></span></div>
+          <div class="alert"><b>chore/old-onboarding: not safe to remove</b><span>Merged, but 2 ignored files exist only here.</span><span style="margin-top:4px"><code>grove rm --rescue chore/old-onboarding</code></span></div>
+          <div class="alert amber"><b>feat/coupon-ui: parent moved</b><span>feat/checkout-coupons has 3 new commits. Restack before pushing.</span></div>
+          <div class="alert blue"><b>fix/cart-rounding: PR #212 blocked</b><span>CI passes. 1 review thread is still open.</span></div>
+        </div>
+        <div class="right">
+          <div class="lanes">
+            <h3>Branches against main</h3>
+            <svg viewBox="0 0 900 220" role="img" aria-label="Branches drawn as lanes off main, with how far each is behind">
+              <g font-family="JetBrains Mono" font-size="12" fill="#1E2A36">
+                <text x="20" y="34" fill="#5E6B7A">main</text>
+                <text x="20" y="84">fix/cart-rounding</text>
+                <text x="20" y="124">feat/checkout-coupons</text>
+                <text x="20" y="164">└ feat/coupon-ui</text>
+                <text x="20" y="204">spike/redis-cache</text>
+              </g>
+              <line x1="250" y1="30" x2="700" y2="30" stroke="#1E2A36" stroke-width="3"/>
+              <g fill="#1E2A36"><circle cx="280" cy="30" r="4.5"/><circle cx="330" cy="30" r="4.5"/><circle cx="380" cy="30" r="4.5"/><circle cx="430" cy="30" r="4.5"/><circle cx="480" cy="30" r="4.5"/><circle cx="530" cy="30" r="4.5"/><circle cx="580" cy="30" r="4.5"/><circle cx="630" cy="30" r="4.5"/><circle cx="680" cy="30" r="4.5"/></g>
+              <path d="M630 30 C 650 30, 650 80, 670 80 L 690 80" fill="none" stroke="#2E7D32" stroke-width="2.5"/>
+              <circle cx="690" cy="80" r="4.5" fill="#2E7D32"/>
+              <path d="M430 30 C 450 30, 450 120, 470 120 L 690 120" fill="none" stroke="#2E7D32" stroke-width="2.5"/>
+              <g fill="#2E7D32"><circle cx="500" cy="120" r="4.5"/><circle cx="560" cy="120" r="4.5"/><circle cx="620" cy="120" r="4.5"/><circle cx="690" cy="120" r="4.5"/></g>
+              <path d="M500 120 C 520 120, 520 160, 540 160 L 690 160" fill="none" stroke="#A86200" stroke-width="2.5" stroke-dasharray="6 4"/>
+              <circle cx="690" cy="160" r="4.5" fill="#A86200"/>
+              <path d="M250 30 C 265 30, 265 200, 280 200 L 690 200" fill="none" stroke="#C62828" stroke-width="2.5"/>
+              <circle cx="690" cy="200" r="4.5" fill="#C62828"/>
+              <g font-family="IBM Plex Sans" font-size="12.5">
+                <text x="708" y="84" fill="#5E6B7A">1 behind main</text>
+                <text x="708" y="124" fill="#5E6B7A">5 behind main</text>
+                <text x="708" y="164" fill="#A86200">parent +3, rewritten</text>
+                <text x="708" y="204" fill="#C62828">38 behind, idle 21 d</text>
+              </g>
+            </svg>
+          </div>
+          <div class="table">
+            <h3>All worktrees</h3>
+            <table>
+              <tr><th>Worktree</th><th>Changes</th><th>Origin</th><th>PR</th><th>Status</th></tr>
+              <tr><td class="mono">feat/coupon-ui</td><td>3 files</td><td>2 unpushed</td><td>#211, CI failed</td><td><span class="tag t-red">Rewritten</span></td></tr>
+              <tr><td class="mono">chore/old-onboarding</td><td>clean</td><td>merged</td><td>#198 merged</td><td><span class="tag t-red">Keep for now</span></td></tr>
+              <tr><td class="mono">feat/search-filters</td><td>12 files</td><td>no remote</td><td>none</td><td><span class="tag t-amber">Not pushed</span></td></tr>
+              <tr><td class="mono">fix/cart-rounding</td><td>clean</td><td>in sync</td><td>#212, 1 thread</td><td><span class="tag t-amber">Blocked</span></td></tr>
+              <tr><td class="mono">feat/checkout-coupons</td><td>clean</td><td>in sync</td><td>#210, CI ok</td><td><span class="tag t-green">Fine</span></td></tr>
+              <tr><td class="mono">spike/redis-cache</td><td>clean</td><td>no remote</td><td>none</td><td><span class="tag t-grey">Stale</span></td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

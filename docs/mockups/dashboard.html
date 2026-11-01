@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>grove</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;500;600;700;800&family=Atkinson+Hyperlegible+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F3F5F7; --surface: #FFFFFF; --ink: #16202A; --muted: #5B6876; --faint: #8F9BA8; --rule: #DDE3E9; --soft: #EEF2F5; --hover: #F6F8FA;
+    --red: #C2271F; --red-bg: #FCEDEC; --amber: #A85A00; --amber-bg: #FDF2E3; --blue: #2257C9; --blue-bg: #EAF0FC; --green: #23794A; --green-bg: #E7F3EC; --grey: #B7C1CB; --select: #E8EFFA;
+    --mono: "Atkinson Hyperlegible Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 "Atkinson Hyperlegible Next", system-ui, sans-serif; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .mono { font-family: var(--mono); }
+  .muted { color: var(--muted); }
+
+  .top { position: sticky; top: 0; z-index: 2; height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 24px; background: var(--surface); border-bottom: 1px solid var(--rule); }
+  .crumbs { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+  .wordmark { font-weight: 800; font-size: 19px; letter-spacing: -0.02em; margin-right: 8px; }
+  .crumbs button { border: none; background: none; padding: 4px 6px; border-radius: 6px; color: var(--muted); }
+  .crumbs button:hover { background: var(--soft); color: var(--ink); }
+  .crumbs .here { font-weight: 700; color: var(--ink); padding: 4px 6px; }
+  .crumbs .sep { color: var(--faint); }
+  .top .right { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 14px; }
+  .live { display: inline-flex; align-items: center; gap: 7px; }
+  .live::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .btn { border: 1px solid var(--rule); background: var(--surface); border-radius: 7px; padding: 6px 12px; font-size: 14px; white-space: nowrap; }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .btn.small { padding: 3px 9px; font-size: 13px; }
+  .btn[disabled] { color: var(--faint); cursor: not-allowed; background: var(--soft); }
+
+  .view { display: none; max-width: 1240px; margin: 0 auto; padding: 24px 24px 48px; }
+  .view.on { display: block; }
+  h1 { font-size: 26px; line-height: 1.15; margin: 0; letter-spacing: -0.01em; }
+  .head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; margin-bottom: 18px; }
+  .head p { margin: 4px 0 0; color: var(--muted); }
+
+  .chip { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 1px 9px; border-radius: 999px; white-space: nowrap; }
+  .c-red { background: var(--red-bg); color: var(--red); } .c-amber { background: var(--amber-bg); color: var(--amber); } .c-blue { background: var(--blue-bg); color: var(--blue); } .c-green { background: var(--green-bg); color: var(--green); } .c-grey { background: var(--soft); color: var(--muted); }
+
+  /* Projects */
+  .urgent { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 22px; }
+  .urg { text-align: left; background: var(--surface); border: 1px solid var(--rule); border-top: 3px solid var(--red); border-radius: 8px; padding: 10px 12px; }
+  .urg.amber { border-top-color: var(--amber); }
+  .urg:hover { background: var(--hover); }
+  .urg .proj { font-size: 12.5px; color: var(--muted); }
+  .urg b { display: block; margin: 2px 0; }
+  .urg span.w { font-size: 13.5px; color: var(--muted); }
+  .ledger { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  .prow { display: grid; grid-template-columns: 260px 1fr 150px 110px 110px; align-items: center; gap: 18px; width: 100%; text-align: left; border: none; background: none; padding: 16px 20px; border-top: 1px solid var(--rule); }
+  .prow:first-of-type { border-top: none; }
+  .prow:hover { background: var(--hover); }
+  .prow.headrow { padding-top: 10px; padding-bottom: 10px; font-size: 13px; color: var(--muted); cursor: default; background: var(--soft); }
+  .pname b { display: block; font-size: 17px; }
+  .pname span { font-size: 13.5px; color: var(--muted); }
+  .waffle { display: flex; flex-wrap: wrap; gap: 3px; max-width: 520px; }
+  .waffle i { width: 11px; height: 11px; border-radius: 2px; background: var(--grey); display: block; }
+  .waffle i.r { background: var(--red); } .waffle i.a { background: var(--amber); } .waffle i.b { background: var(--blue); } .waffle i.g { background: var(--green); }
+  .wcap { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-top: 12px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+  /* Features */
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .tabs { display: flex; gap: 4px; background: var(--soft); padding: 3px; border-radius: 8px; }
+  .tabs button { border: none; background: none; padding: 5px 12px; border-radius: 6px; font-size: 14px; color: var(--muted); }
+  .tabs button.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(22,32,42,.12); }
+  .search { border: 1px solid var(--rule); border-radius: 7px; padding: 6px 12px; width: 260px; font: inherit; font-size: 14px; background: var(--surface); }
+  .ftable { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+  .ftable th { text-align: left; font-size: 13px; color: var(--muted); font-weight: 500; padding: 10px 14px; background: var(--soft); }
+  .ftable td { padding: 12px 14px; border-top: 1px solid var(--rule); vertical-align: middle; }
+  .ftable tr.click { cursor: pointer; }
+  .ftable tr.click:hover td { background: var(--hover); }
+  .fname b { display: block; }
+  .fname span { font-size: 13px; color: var(--muted); font-family: var(--mono); }
+  .shape { display: inline-flex; flex-direction: column-reverse; gap: 2px; vertical-align: middle; margin-right: 8px; }
+  .shape i { display: block; width: 28px; height: 6px; border-radius: 2px; background: var(--green); }
+  .shape i.r { background: var(--red); } .shape i.a { background: var(--amber); } .shape i.b { background: var(--blue); } .shape i.x { background: transparent; border: 1.5px dashed var(--faint); height: 6px; } .shape i.n { background: var(--grey); }
+  .shape-label { font-size: 13.5px; color: var(--muted); }
+
+  /* Feature tree */
+  .split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+  .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+  .panel-h { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--rule); }
+  .panel-h h2 { font-size: 16px; margin: 0; }
+  .tree { list-style: none; margin: 0; padding: 14px 18px 18px; }
+  .tree ul { list-style: none; margin: 0; padding-left: 30px; }
+  .tree li { position: relative; }
+  .tree ul > li::before { content: ""; position: absolute; left: -18px; top: 0; bottom: 0; border-left: 2px solid var(--rule); }
+  .tree ul > li:last-child::before { bottom: auto; height: 30px; }
+  .tree ul > li::after { content: ""; position: absolute; left: -18px; top: 30px; width: 16px; border-top: 2px solid var(--rule); }
+  .tree li.drift::after { border-top-color: var(--amber); border-top-style: dashed; }
+  .node { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: center; padding: 10px 12px; margin: 6px 0; border: 1px solid var(--rule); border-left: 4px solid var(--green); border-radius: 8px; background: var(--surface); cursor: pointer; }
+  .node:hover { background: var(--hover); }
+  .node.sel { background: var(--select); border-color: #B9CBEA; border-left-color: var(--red); }
+  .node.red { border-left-color: var(--red); } .node.amber { border-left-color: var(--amber); } .node.blue { border-left-color: var(--blue); }
+  .node.trunk { border-left-color: var(--ink); background: var(--soft); cursor: default; }
+  .node .l1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .node .lv { font-size: 12.5px; color: var(--muted); }
+  .node .br { font-family: var(--mono); font-size: 14px; font-weight: 500; }
+  .node .meta { grid-column: 1 / 2; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); }
+  .node .acts { grid-row: 1 / 3; grid-column: 2; display: flex; gap: 6px; }
+  .edge-label { position: absolute; left: -17px; top: 12px; font-size: 11.5px; font-weight: 700; color: var(--amber); background: var(--surface); padding: 0 3px; }
+  .add { margin: 8px 0 0 0; }
+  .stackbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; border-top: 1px solid var(--rule); background: var(--soft); border-radius: 0 0 10px 10px; }
+  .stackbar p { margin: 0; font-size: 14px; }
+
+  .facts { display: grid; grid-template-columns: 130px 1fr; gap: 8px 14px; padding: 14px 18px; font-size: 14px; }
+  .facts dt { color: var(--muted); }
+  .facts dd { margin: 0; }
+  .ok { color: var(--green); font-weight: 600; } .bad { color: var(--red); font-weight: 600; } .warnc { color: var(--amber); font-weight: 600; }
+  .files { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .sect { border-top: 1px solid var(--rule); padding: 12px 18px; }
+  .sect h3 { font-size: 14px; margin: 0 0 8px; }
+  .journal { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 2px solid var(--rule); }
+  .journal li { position: relative; padding: 0 0 10px 12px; font-size: 13.5px; }
+  .journal li::before { content: ""; position: absolute; left: -21px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--faint); }
+  .journal li.bad::before { border-color: var(--red); background: var(--red); }
+  .journal li.pin::before { border-color: var(--blue); background: var(--blue); }
+  .journal .t { color: var(--muted); font-size: 12.5px; }
+  .journal code { font-family: var(--mono); font-size: 12.5px; }
+  .actgrid { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 18px 16px; border-top: 1px solid var(--rule); }
+  .why { font-size: 12.5px; color: var(--muted); width: 100%; margin-top: -2px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <nav class="crumbs" aria-label="Where you are">
+    <span class="wordmark">grove</span>
+    <span id="c0" class="here">Projects</span>
+    <span id="s1" class="sep" hidden>/</span>
+    <button id="c1" hidden onclick="go('features')">acme-shop</button>
+    <span id="s2" class="sep" hidden>/</span>
+    <span id="c2" class="here" hidden>checkout coupons</span>
+  </nav>
+  <div class="right">
+    <span class="live">Watching 4 projects, scanned 3 s ago</span>
+    <button class="btn">Scan now</button>
+  </div>
+</header>
+
+<!-- 1. Projects -->
+<section class="view on" id="projects">
+  <div class="head">
+    <div><h1>Your projects</h1><p>81 worktrees across 4 repos, using 17.7 GB.</p></div>
+    <button class="btn">Add a repo</button>
+  </div>
+
+  <div class="urgent">
+    <button class="urg" onclick="go('tree')"><span class="proj">acme-shop, checkout coupons</span><b>History rewritten on level 2</b><span class="w">14 commits became 1 at 23:19. Old commits are pinned.</span></button>
+    <button class="urg" onclick="go('features')"><span class="proj">acme-shop, chore/old-onboarding</span><b>Not safe to remove</b><span class="w">Merged, but 2 ignored files exist only here.</span></button>
+    <button class="urg amber"><span class="proj">eval-runs</span><b>41 worktrees idle over 14 days</b><span class="w">37 are safe to remove and would free 8.9 GB.</span></button>
+  </div>
+
+  <div class="ledger">
+    <div class="prow headrow"><span>Project</span><span>Worktrees, one square each</span><span>In flight</span><span>Disk</span><span>Last change</span></div>
+    <button class="prow" onclick="go('features')">
+      <span class="pname"><b>acme-shop</b><span>TypeScript monorepo, trunk main</span></span>
+      <span><span class="waffle"><i class="r"></i><i class="r"></i><i class="a"></i><i class="a"></i><i class="a"></i><i class="b"></i><i class="b"></i><i class="g"></i><i class="g"></i><i></i></span><span class="wcap">10 worktrees, 3 need you</span></span>
+      <span>3 stacks, 3 singles</span><span>4.2 GB</span><span>3 min ago</span>
+    </button>
+    <button class="prow">
+      <span class="pname"><b>eval-runs</b><span>Agent run sandboxes, trunk testing</span></span>
+      <span><span class="waffle"><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="a"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="wcap">64 worktrees, 41 idle over 14 days</span></span>
+      <span>1 feature</span><span>9.8 GB</span><span>2 h ago</span>
+    </button>
+    <button class="prow">
+      <span class="pname"><b>mobile-app</b><span>React Native, trunk develop</span></span>
+      <span><span class="waffle"><i class="a"></i><i class="g"></i><i class="g"></i></span><span class="wcap">3 worktrees, 1 is missing its .env</span></span>
+      <span>1 stack</span><span>3.1 GB</span><span>Yesterday</span>
+    </button>
+    <button class="prow">
+      <span class="pname"><b>billing-service</b><span>Go service, trunk main</span></span>
+      <span><span class="waffle"><i class="g"></i><i class="g"></i><i class="g"></i><i class="g"></i></span><span class="wcap">4 worktrees, all fine</span></span>
+      <span>2 singles</span><span>0.6 GB</span><span>1 h ago</span>
+    </button>
+  </div>
+  <div class="legend"><span><i style="background:var(--red)"></i>Could lose work</span><span><i style="background:var(--amber)"></i>Needs an action</span><span><i style="background:var(--blue)"></i>Waiting on review</span><span><i style="background:var(--green)"></i>Fine</span><span><i style="background:var(--grey)"></i>Idle</span></div>
+</section>
+
+<!-- 2. Features -->
+<section class="view" id="features">
+  <div class="head">
+    <div><h1>acme-shop</h1><p>6 features in flight on 10 worktrees. Trunk main at <span class="mono">4f2c1a9</span>.</p></div>
+    <button class="btn primary">New feature</button>
+  </div>
+  <div class="toolbar">
+    <div class="tabs" role="tablist"><button class="on">All 6</button><button>Needs you 3</button><button>Stacks 3</button><button>Single branches 3</button><button>Merged or idle 2</button></div>
+    <input class="search" placeholder="Find a feature or branch" aria-label="Find a feature or branch">
+  </div>
+  <table class="ftable">
+    <tr><th>Feature</th><th>Shape</th><th>Worst issue</th><th>PRs</th><th>Behind main</th><th>Last change</th></tr>
+    <tr class="click" onclick="go('tree')" tabindex="0">
+      <td class="fname"><b>checkout coupons</b><span>feat/coupons-*</span></td>
+      <td><span class="shape"><i></i><i class="r"></i><i class="g"></i><i class="a"></i></span><span class="shape-label">4 levels</span></td>
+      <td><span class="chip c-red">History rewritten</span></td>
+      <td>#210 #211 #214 #215</td><td>5</td><td>9 min ago</td>
+    </tr>
+    <tr class="click" tabindex="0">
+      <td class="fname"><b>search filters</b><span>feat/search-*</span></td>
+      <td><span class="shape"><i class="x"></i><i class="a"></i></span><span class="shape-label">2 levels, 1 merged</span></td>
+      <td><span class="chip c-amber">Re-base level 2 onto main</span></td>
+      <td>#205 merged, #207</td><td>2</td><td>2 h ago</td>
+    </tr>
+    <tr class="click" tabindex="0">
+      <td class="fname"><b>payments retry</b><span>feat/retry-*</span></td>
+      <td><span class="shape"><i class="b"></i><i class="b"></i></span><span class="shape-label">2 levels</span></td>
+      <td><span class="chip c-blue">Open thread blocks level 2</span></td>
+      <td>#216 #217</td><td>1</td><td>40 min ago</td>
+    </tr>
+    <tr class="click" tabindex="0">
+      <td class="fname"><b>old onboarding</b><span>chore/old-onboarding</span></td>
+      <td><span class="shape"><i class="r"></i></span><span class="shape-label">Single, merged</span></td>
+      <td><span class="chip c-red">Not safe to remove</span></td>
+      <td>#198 merged</td><td>none</td><td>6 days ago</td>
+    </tr>
+    <tr class="click" tabindex="0">
+      <td class="fname"><b>cart rounding</b><span>fix/cart-rounding</span></td>
+      <td><span class="shape"><i></i></span><span class="shape-label">Single</span></td>
+      <td><span class="chip c-green">Fine</span></td>
+      <td>#212</td><td>1</td><td>1 day ago</td>
+    </tr>
+    <tr class="click" tabindex="0">
+      <td class="fname"><b>redis cache spike</b><span>spike/redis-cache</span></td>
+      <td><span class="shape"><i class="n"></i></span><span class="shape-label">Single, no remote</span></td>
+      <td><span class="chip c-grey">Idle 21 days</span></td>
+      <td>none</td><td>38</td><td>21 days ago</td>
+    </tr>
+  </table>
+</section>
+
+<!-- 3. Feature tree -->
+<section class="view" id="tree">
+  <div class="head">
+    <div><h1>checkout coupons</h1><p>A stack of 4 branches in 4 worktrees, on main.</p></div>
+    <div style="display:flex;gap:8px"><button class="btn">Add a level</button><button class="btn primary">Fix this stack</button></div>
+  </div>
+  <div class="split">
+    <div class="panel">
+      <div class="panel-h"><h2>Stack</h2><span class="muted" style="font-size:13.5px">Click a branch to see its worktree</span></div>
+      <ul class="tree">
+        <li>
+          <div class="node trunk"><div class="l1"><span class="br">main</span><span class="lv">trunk at 4f2c1a9</span></div></div>
+          <ul>
+            <li>
+              <div class="node"><div class="l1"><span class="lv">Level 1</span><span class="br">feat/coupons-api</span></div><div class="meta"><span class="chip c-green">PR #210 approved</span><span>5 behind main</span><span>clean</span></div><div class="acts"><button class="btn small">Open</button><button class="btn small">Update from main</button></div></div>
+              <ul>
+                <li class="drift">
+                  <span class="edge-label">+3</span>
+                  <div class="node sel"><div class="l1"><span class="lv">Level 2</span><span class="br">feat/coupons-ui</span></div><div class="meta"><span class="chip c-red">History rewritten</span><span class="chip c-red">PR #211 CI failed</span><span>parent moved 3</span><span>3 changed files</span></div><div class="acts"><button class="btn small">Open</button><button class="btn small">Restore</button></div></div>
+                  <ul>
+                    <li>
+                      <div class="node amber"><div class="l1"><span class="lv">Level 3</span><span class="br">feat/coupons-emails</span></div><div class="meta"><span class="chip c-amber">Restack after level 2</span><span>PR #214 draft</span><span>2 uncommitted files</span></div><div class="acts"><button class="btn small">Open</button></div></div>
+                    </li>
+                  </ul>
+                </li>
+                <li>
+                  <div class="node"><div class="l1"><span class="lv">Level 2</span><span class="br">feat/coupons-admin</span></div><div class="meta"><span class="chip c-green">PR #215 CI ok</span><span>in sync with level 1</span></div><div class="acts"><button class="btn small">Open</button><button class="btn small">Push</button></div></div>
+                </li>
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <div class="stackbar"><p><b>3 steps to fix:</b> restore level 2, restack levels 2 and 3, push both as merge commits.</p><div style="display:flex;gap:8px"><button class="btn small">Copy commands</button><button class="btn small primary">Review plan</button></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-h"><h2 class="mono" style="font-size:15px">feat/coupons-ui</h2><span class="chip c-red">Could lose work</span></div>
+      <dl class="facts">
+        <dt>Worktree</dt><dd class="mono" style="font-size:13px">.worktrees/feat-coupons-ui</dd>
+        <dt>Changes</dt><dd>3 files <span class="files">CouponForm.tsx, coupon.schema.ts, coupons.test.ts</span></dd>
+        <dt>Not pushed</dt><dd class="warnc">2 commits</dd>
+        <dt>Parent</dt><dd>feat/coupons-api, which moved 3 commits</dd>
+        <dt>Env files</dt><dd><span class="ok">.env</span>, <span class="ok">apps/api/.env</span>, <span class="bad">apps/web/.env.local missing</span></dd>
+        <dt>Install</dt><dd><span class="ok">Up to date</span>, lockfile unchanged since install</dd>
+        <dt>Running</dt><dd>web dev server on :3001, Claude Code waiting for input for 12 min</dd>
+        <dt>Disk</dt><dd>1.1 GB</dd>
+      </dl>
+      <div class="sect">
+        <h3>History grove recorded</h3>
+        <ul class="journal">
+          <li><span class="t">Today 21:02</span><br>Tip <code>e71c09a</code>, 14 commits</li>
+          <li class="bad"><span class="t">Today 23:19:42</span><br><b style="color:var(--red)">Tip <code>3a9d771</code>, 1 commit. The old tip left its history.</b></li>
+          <li class="pin"><span class="t">Today 23:19:43</span><br>Pinned <code>e71c09a</code>, so its 14 commits stay reachable</li>
+        </ul>
+      </div>
+      <div class="actgrid">
+        <button class="btn small primary">Restore the 14 commits</button>
+        <button class="btn small">Copy env file from main</button>
+        <button class="btn small">Open in editor</button>
+        <button class="btn small">Open terminal</button>
+        <button class="btn small" disabled>Remove worktree</button>
+        <span class="why">Remove is off: 2 commits aren't pushed and the history was rewritten.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  function go(view) {
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('on', v.id === view));
+    const f = view === 'features', t = view === 'tree';
+    document.getElementById('c0').outerHTML = view === 'projects'
+      ? '<span id="c0" class="here">Projects</span>'
+      : '<button id="c0" onclick="go(\'projects\')">Projects</button>';
+    document.getElementById('s1').hidden = !(f || t);
+    const c1 = document.getElementById('c1');
+    c1.hidden = !(f || t);
+    c1.className = f ? 'here' : '';
+    document.getElementById('s2').hidden = !t;
+    document.getElementById('c2').hidden = !t;
+    window.scrollTo(0, 0);
+  }
+</script>
+</body>
+</html>
