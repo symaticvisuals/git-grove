@@ -1,13 +1,16 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { serveCommand } from "../../src/cli/commands/serve.js";
 import { run } from "../../src/cli/main.js";
 import { readServerFile } from "../../src/server/read-server-file.js";
+import { serverAlive } from "../../src/server/server-alive.js";
 import type { ServerInfo } from "../../src/server/server-info.types.js";
 import { startServer } from "../../src/server/start-server.js";
+import { writeServerFile } from "../../src/server/write-server-file.js";
 
 const savedHome = process.env["GIT_GROVE_HOME"];
 let home: string;
@@ -51,6 +54,45 @@ test("serveCommand --port 0 exits 75 after /api/shutdown", async () => {
   expect(cli.out.join("")).toContain(`http://127.0.0.1:${info.port}/`);
   expect(cli.out.join("")).not.toContain(token);
   expect(existsSync(join(home, "server.json"))).toBe(false);
+});
+
+async function closedPort(): Promise<number> {
+  const blocker = createServer();
+  await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+  const address = blocker.address();
+  await new Promise((resolve) => blocker.close(resolve));
+  if (address === null || typeof address === "string") throw new Error("no port");
+  return address.port;
+}
+
+async function waitForLiveServer(): Promise<ServerInfo> {
+  for (let tries = 0; tries < 200; tries++) {
+    const info = readServerFile(home);
+    if (info !== null && (await serverAlive(info))) return info;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("no server answered");
+}
+
+test("serve starts over a lock left by a live process that is not a server, and replaces the lock", async () => {
+  const lock = join(home, "server.lock");
+  await writeFile(lock, String(process.pid));
+  writeServerFile(home, { pid: process.pid, port: await closedPort(), version: "0.0.1" });
+  const before = (await stat(lock)).ino;
+  const cli = io();
+  const exited = run(["serve", "--port", "0"], cli.io);
+  const info = await waitForLiveServer();
+  expect((await stat(lock)).ino).not.toBe(before);
+  expect(await readFile(lock, "utf8")).toBe(String(process.pid));
+  const token = await readFile(join(home, "token"), "utf8");
+  const res = await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, {
+    method: "POST",
+    headers: { cookie: `grove_token=${token}`, "x-grove-token": token, "content-type": "application/json" },
+  });
+  expect(res.status).toBe(202);
+  expect(await exited).toBe(75);
+  expect(cli.out.join("")).not.toContain("already running");
+  expect(existsSync(lock)).toBe(false);
 });
 
 test("serve says where the running server is and exits 0", async () => {

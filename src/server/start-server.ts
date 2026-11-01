@@ -5,17 +5,14 @@ import { fileURLToPath } from "node:url";
 import { groveHome } from "../core/grove-home.js";
 import { openStore } from "../core/journal/open-store.js";
 import type { Store } from "../core/journal/store.types.js";
-import { LockHeldError } from "../core/runner/lock-held.error.js";
-import { acquirePidLock } from "../core/runner/pid-lock.js";
 import { registerApi } from "./api/register-api.js";
 import { readOrCreateToken } from "./auth/read-or-create-token.js";
 import { clearServerFile } from "./clear-server-file.js";
 import { handleRequest } from "./http/handle-request.js";
 import { listenOnFreePort } from "./http/listen-on-free-port.js";
 import { createRouter } from "./http/router.js";
-import { readServerFile } from "./read-server-file.js";
+import { lockServer } from "./lock-server.js";
 import type { ServerContext } from "./server-context.types.js";
-import { ServerRunningError } from "./server-running.error.js";
 import { writeServerFile } from "./write-server-file.js";
 
 export type StartServerOptions = {
@@ -31,15 +28,6 @@ export type RunningServer = { port: number; url: string; token: string; context:
 const DEFAULT_PORT = 47683;
 const CLOSE_GRACE_MS = 1000;
 
-async function lockServer(home: string): Promise<() => Promise<void>> {
-  try {
-    return await acquirePidLock(join(home, "server.lock"));
-  } catch (error) {
-    if (error instanceof LockHeldError) throw new ServerRunningError(readServerFile(home)?.port ?? null, error.pid);
-    throw error;
-  }
-}
-
 function stopListening(http: Server): Promise<void> {
   return new Promise((resolve) => {
     const grace = setTimeout(() => http.closeAllConnections(), CLOSE_GRACE_MS);
@@ -52,8 +40,8 @@ function stopListening(http: Server): Promise<void> {
 }
 
 /**
- * Starts the dashboard server on 127.0.0.1: takes `<home>/server.lock` (ServerRunningError while another server holds
- * it), listens on `port` (default 47683) or the next free one of 20, and records `{ pid, port, version }` in
+ * Starts the dashboard server on 127.0.0.1: takes `<home>/server.lock` (`lockServer`; ServerRunningError while another
+ * server holds it), listens on `port` (default 47683) or the next free one of 20, and records `{ pid, port, version }` in
  * `<home>/server.json`. `close` stops it, giving open connections a second, and removes server.json and the lock.
  */
 export async function startServer(options: StartServerOptions): Promise<RunningServer> {

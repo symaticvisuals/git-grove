@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import { PortsInUseError } from "../../src/server/http/ports-in-use.error.js";
 import { ServerRunningError } from "../../src/server/server-running.error.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
+import { writeServerFile } from "../../src/server/write-server-file.js";
 import { serverRequest } from "../support/server-request.js";
 import { type UiFixture, uiFixture } from "../support/ui-fixture.js";
 
@@ -62,6 +64,32 @@ async function occupyFreePort(): Promise<number> {
   return address.port;
 }
 
+async function closedPort(): Promise<number> {
+  const blocker = createServer();
+  await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
+  const address = blocker.address();
+  await new Promise((resolve) => blocker.close(resolve));
+  if (address === null || typeof address === "string") throw new Error("no port");
+  return address.port;
+}
+
+/** A stand-in that answers `/api/health` as process `pid`, as a grove server would, after running `onProbe`. */
+async function fakeHealth(pid: number, onProbe: () => void = () => undefined): Promise<number> {
+  const fake = createHttpServer((_req, res) => {
+    onProbe();
+    res.end(JSON.stringify({ ok: true, version: "0.0.1", pid }));
+  });
+  await new Promise<void>((resolve) => fake.listen(0, "127.0.0.1", resolve));
+  blockers.push(fake);
+  const address = fake.address();
+  if (address === null || typeof address === "string") throw new Error("no port");
+  return address.port;
+}
+
+function lockFile(): string {
+  return join(home, "server.lock");
+}
+
 function cookieOf(server: RunningServer): string {
   return `grove_token=${server.token}`;
 }
@@ -76,6 +104,11 @@ function post(server: RunningServer, path: string, headers: Record<string, strin
 
 function serverFile(): string {
   return join(home, "server.json");
+}
+
+function readServerFilePort(): unknown {
+  const parsed: unknown = JSON.parse(readFileSync(serverFile(), "utf8"));
+  return typeof parsed === "object" && parsed !== null && "port" in parsed ? parsed.port : null;
 }
 
 test("records pid, port and version in server.json and serves /api/health", async () => {
@@ -103,6 +136,48 @@ test("a second server with the same home refuses while the first runs", async ()
   await expect(second).rejects.toBeInstanceOf(ServerRunningError);
   await expect(second).rejects.toMatchObject({ port: first.port, pid: process.pid, url: first.url });
   expect(JSON.parse(await readFile(serverFile(), "utf8"))).toMatchObject({ port: first.port });
+});
+
+test("a lock held by a live process whose server.json port answers as another process is taken over", async () => {
+  await writeFile(lockFile(), String(process.pid));
+  writeServerFile(home, { pid: process.pid, port: await fakeHealth(process.pid + 1), version: "0.0.1" });
+  const before = (await stat(lockFile())).ino;
+  const server = await start();
+  expect((await stat(lockFile())).ino).not.toBe(before);
+  expect(JSON.parse(await readFile(serverFile(), "utf8"))).toEqual({ pid: process.pid, port: server.port, version: VERSION });
+});
+
+test("a lock held by a live process with no server.json is taken over once a starting server would have written it", async () => {
+  await writeFile(lockFile(), String(process.pid));
+  const before = (await stat(lockFile())).ino;
+  const startedAt = Date.now();
+  const server = await start();
+  expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1900);
+  expect((await stat(lockFile())).ino).not.toBe(before);
+  expect(readServerFilePort()).toBe(server.port);
+});
+
+test("a lock that changes hands while it is checked is put back, not taken over", async () => {
+  await writeFile(lockFile(), String(process.pid));
+  const handOver = (): void => writeFileSync(lockFile(), String(process.ppid));
+  writeServerFile(home, { pid: process.pid, port: await fakeHealth(process.pid + 1, handOver), version: "0.0.1" });
+  const second = start();
+  await expect(second).rejects.toBeInstanceOf(ServerRunningError);
+  await expect(second).rejects.toMatchObject({ pid: process.ppid });
+  expect(await readFile(lockFile(), "utf8")).toBe(String(process.ppid));
+  expect(await readdir(home)).not.toContainEqual(expect.stringMatching(/^server\.lock\./));
+});
+
+test("a server still starting is waited for, and then refused", async () => {
+  await writeFile(lockFile(), String(process.pid));
+  writeServerFile(home, { pid: process.pid + 1, port: await closedPort(), version: "0.0.0" });
+  const before = (await stat(lockFile())).ino;
+  const port = await fakeHealth(process.pid);
+  setTimeout(() => writeServerFile(home, { pid: process.pid, port, version: "0.0.1" }), 200);
+  const second = start();
+  await expect(second).rejects.toBeInstanceOf(ServerRunningError);
+  await expect(second).rejects.toMatchObject({ port, pid: process.pid });
+  expect((await stat(lockFile())).ino).toBe(before);
 });
 
 test("takes the next port when the asked one is busy", async () => {
