@@ -3,3 +3,4 @@ dist/
 *.tgz
 .superpowers/
 docs/figures/**/shots/
+.worktrees/
