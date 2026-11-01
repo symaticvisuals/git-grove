@@ -37,5 +37,8 @@ export function safeToRemove(facts: RemovalFacts): Verdict {
   if (facts.nestedWorktrees.length > 0) {
     reasons.push({ code: "nested-worktree", detail: `${plural(facts.nestedWorktrees.length, "worktree")} inside this folder`, paths: facts.nestedWorktrees });
   }
+  if (facts.unreadable.length > 0) {
+    reasons.push({ code: "unreadable", detail: `could not read ${facts.unreadable.join(", ")}`, paths: [] });
+  }
   return { ok: reasons.length === 0, reasons };
 }

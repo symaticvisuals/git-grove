@@ -18,7 +18,7 @@ export type WorktreeFacts = {
 export type BranchFacts = {
   name: string;
   tip: Sha;
-  upstream: { ref: string; ahead: number; behind: number } | null;
+  upstream: { ref: string; ahead: number; behind: number; gone: boolean } | null;
 };
 
 export type StackEdge = { branch: string; parent: string; forkPoint: Sha | null; feature: string | null };

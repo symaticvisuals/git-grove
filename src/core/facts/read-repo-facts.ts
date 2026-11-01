@@ -91,16 +91,17 @@ async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string
   };
 }
 
-function parseTrack(track: string): { ahead: number; behind: number } {
-  if (track === "gone") return { ahead: 0, behind: 0 };
+function parseTrack(track: string): { ahead: number; behind: number; gone: boolean } {
+  if (track === "gone") return { ahead: 0, behind: 0, gone: true };
   return {
+    gone: false,
     ahead: Number(/ahead (\d+)/.exec(track)?.[1] ?? 0),
     behind: Number(/behind (\d+)/.exec(track)?.[1] ?? 0),
   };
 }
 
 async function readBranches(cwd: string): Promise<BranchFacts[]> {
-  const format = "%(refname:short)%00%(objectname)%00%(upstream:short)%00%(upstream:track,nobracket)";
+  const format = "%(refname:lstrip=2)%00%(objectname)%00%(upstream:short)%00%(upstream:track,nobracket)";
   const { stdout } = await runGit(["for-each-ref", `--format=${format}`, "refs/heads"], { cwd });
   return stdout
     .split("\n")

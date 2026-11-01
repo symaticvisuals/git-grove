@@ -6,7 +6,8 @@ export type ReasonCode =
   | "stash"
   | "precious-ignored"
   | "too-many-ignored"
-  | "nested-worktree";
+  | "nested-worktree"
+  | "unreadable";
 
 export type Reason = { code: ReasonCode; detail: string; paths: string[] };
 
@@ -22,4 +23,5 @@ export type RemovalFacts = {
   preciousIgnored: string[];
   ignoredTruncated: boolean;
   nestedWorktrees: string[];
+  unreadable: string[];
 };

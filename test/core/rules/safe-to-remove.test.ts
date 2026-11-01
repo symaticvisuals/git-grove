@@ -1,4 +1,5 @@
-import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import { readEnvMissing } from "../../../src/core/facts/read-env-missing.js";
@@ -113,4 +114,80 @@ test("readEnvMissing reports ignored .env files absent from a worktree", async (
   await write(join(wt, ".env"), "KEY=1\n");
   const missing = await readEnvMissing(root, await readRepoFacts(root));
   expect(missing.get(wt)).toEqual(["apps/web/.env.local"]);
+});
+
+test("untracked files are found even when status.showUntrackedFiles is no", async () => {
+  const wt = await mergedWorktree("quiet");
+  await repo.git("config", "status.showUntrackedFiles", "no");
+  await write(join(wt, "notes.txt"), "mine\n");
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons).toEqual([expect.objectContaining({ code: "untracked", paths: ["notes.txt"] })]);
+});
+
+test("a failed read is unreadable, never zero", async () => {
+  const wt = await mergedWorktree("broken");
+  const facts = await readRepoFacts(root);
+  const elsewhere = await mkdtemp(join(tmpdir(), "grove-not-a-repo-"));
+  const moved = { ...facts, worktrees: facts.worktrees.map((w) => (w.path === wt ? { ...w, path: elsewhere } : w)) };
+  const verdict = safeToRemove(await readRemovalFacts(root, elsewhere, moved));
+  expect(verdict.ok).toBe(false);
+  expect(verdict.reasons.map((reason) => reason.code)).toContain("unreadable");
+});
+
+test("a branch whose upstream is gone still reports its local commits", async () => {
+  const remote = await mkdtemp(join(tmpdir(), "grove-remote-"));
+  await repo.git("init", "--bare", "-b", "main", remote);
+  await repo.git("remote", "add", "origin", remote);
+  await repo.git("push", "origin", "main");
+  const wt = await mergedWorktree("tracked");
+  await repo.git("-C", wt, "push", "-u", "origin", "tracked");
+  await write(join(wt, "t.txt"), "t\n");
+  await repo.git("-C", wt, "add", "t.txt");
+  await repo.git("-C", wt, "commit", "-m", "local only");
+  await repo.git("push", "origin", "--delete", "tracked");
+  await repo.git("fetch", "--prune");
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons.map((reason) => reason.code)).toEqual(["unpushed"]);
+});
+
+test("a tag named like the branch does not hide its commits", async () => {
+  await repo.git("tag", "feat");
+  const wt = join(root, ".worktrees", "feat");
+  await repo.git("worktree", "add", "-b", "feat", wt, "main");
+  await write(join(wt, "q.txt"), "q\n");
+  await repo.git("-C", wt, "add", "q.txt");
+  await repo.git("-C", wt, "commit", "-m", "on feat");
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons.map((reason) => reason.code)).toEqual(["unpushed"]);
+});
+
+test("a worktree whose folder was deleted still gets a verdict", async () => {
+  const wt = await mergedWorktree("vanished");
+  await rename(wt, `${wt}-gone`);
+  const verdict = await verdictFor(wt);
+  expect(verdict).toEqual({ ok: true, reasons: [] });
+});
+
+test("default folder names inside a precious folder do not hide its files", async () => {
+  const wt = await mergedWorktree("deep");
+  await write(join(wt, ".local", "build", "seed.sql"), "s\n");
+  await write(join(wt, ".local", "coverage", "notes.md"), "n\n");
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons).toEqual([
+    expect.objectContaining({ code: "precious-ignored", paths: expect.arrayContaining([".local/build/seed.sql", ".local/coverage/notes.md"]) }),
+  ]);
+});
+
+test("a symlinked .env is never precious", async () => {
+  const wt = await mergedWorktree("linked");
+  await symlink(join(root, ".env"), join(wt, ".env"));
+  expect(await verdictFor(wt)).toEqual({ ok: true, reasons: [] });
+});
+
+test("env discovery is not capped by unrelated ignored files", async () => {
+  await write(join(root, "apps", "web", ".env.local"), "A=1\n");
+  for (let i = 0; i < 30; i++) await write(join(root, "out", `f${i}.txt`), "x");
+  const wt = await mergedWorktree("capped");
+  const missing = await readEnvMissing(root, await readRepoFacts(root), 10);
+  expect(missing.get(wt)).toEqual(expect.arrayContaining(["apps/web/.env.local"]));
 });
