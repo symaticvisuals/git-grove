@@ -1,3 +1,4 @@
+import { branchWasCommittedTo } from "../../core/facts/branch-was-committed-to.js";
 import type { RepoFacts, Sha } from "../../core/facts/facts.types.js";
 import { readEnvMissing } from "../../core/facts/read-env-missing.js";
 import { readRemovalFacts } from "../../core/facts/read-removal-facts.js";
@@ -32,22 +33,29 @@ async function verdictFor(facts: RepoFacts, path: string): Promise<Verdict> {
   }
 }
 
+/** Verdicts for the linked worktrees whose branch has been committed to and has landed on the trunk. */
 async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
   const removals = new Map<string, Verdict>();
   for (const worktree of facts.worktrees) {
     const branch = facts.branches.find((candidate) => candidate.name === worktree.branch);
     if (worktree.isMain || branch === undefined || !(await landed(facts, branch.tip))) continue;
+    if (!(await branchWasCommittedTo(facts.root, branch.name))) continue;
     removals.set(worktree.path, await verdictFor(facts, worktree.path));
   }
   return removals;
 }
 
-/** Drops entries whose branch still exists with both its current tip and the tip it lost already in the trunk. */
+/**
+ * Keeps the entries whose lost tip has not landed on the trunk. A `deleted` entry, or one whose branch is gone,
+ * resolves once its lost tip lands; one whose branch still exists also needs the branch's current tip landed.
+ */
 async function stillUnresolved(facts: RepoFacts, entries: JournalEntry[]): Promise<JournalEntry[]> {
   const kept: JournalEntry[] = [];
   for (const entry of entries) {
     const branch = facts.branches.find((candidate) => candidate.name === entry.branch);
-    const resolved = branch !== undefined && (await landed(facts, branch.tip)) && (await landed(facts, entry.oldTip));
+    const resolved =
+      (await landed(facts, entry.oldTip)) &&
+      (entry.kind === "deleted" || branch === undefined || (await landed(facts, branch.tip)));
     if (!resolved) kept.push(entry);
   }
   return kept;

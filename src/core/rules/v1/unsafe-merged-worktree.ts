@@ -12,7 +12,7 @@ export const unsafeMergedWorktree: Rule = {
         subject: { kind: "worktree", id: path },
         title: "Merged, but not safe to remove",
         detail: verdict.reasons.map((r) => r.detail).join("; "),
-        action: `git grove rm --rescue ${path}`,
+        action: `git grove check remove ${path}`,
       });
     }
     return out;

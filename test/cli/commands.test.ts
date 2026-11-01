@@ -51,6 +51,18 @@ async function write(path: string, text: string): Promise<void> {
   await writeFile(path, text);
 }
 
+/** Adds a worktree on `name` with one commit of its own, fast-forwarded into main, and leaves main checked out. */
+async function landedWorktree(name: string): Promise<string> {
+  await repo.switch("main");
+  const path = join(repo.path, ".worktrees", name);
+  await repo.worktree(path, name);
+  await write(join(path, `${name}.txt`), `${name}\n`);
+  await repo.git("-C", path, "add", `${name}.txt`);
+  await repo.git("-C", path, "commit", "-m", `add ${name}`);
+  await repo.git("merge", "--ff-only", name);
+  return path;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -153,16 +165,56 @@ test("check remove refuses a merged worktree holding .local/seed.sql", async () 
   expect(json.code).toBe(3);
   const verdict: unknown = JSON.parse(json.out);
   expect(verdict).toMatchObject({ ok: false, reasons: [{ code: "precious-ignored", paths: [".local/seed.sql"] }] });
+});
 
-  expect(rulesOf((await statusJson()).findings)).toContain("unsafe-merged-worktree");
+test("status checks a landed worktree holding .local/seed.sql and suggests check remove", async () => {
+  const path = await landedWorktree("old");
+  await write(join(path, ".local", "seed.sql"), "insert;\n");
+
+  const unsafe = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "unsafe-merged-worktree");
+  expect(unsafe).toHaveLength(1);
+  expect(field(unsafe[0], "action")).toMatch(/^git grove check remove \/.+\/\.worktrees\/old$/);
+});
+
+test("status does not check a worktree whose branch has no commits of its own", async () => {
+  await repo.switch("main");
+  const path = join(repo.path, ".worktrees", "fresh");
+  await repo.worktree(path, "fresh");
+  await write(join(path, "draft.txt"), "wip\n");
+
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("unsafe-merged-worktree");
+  expect((await grove(["status"])).out).toMatch(/^fresh\s+1 change\s+no remote\s/m);
+});
+
+test("a branch deleted after its squash merge does not alert", async () => {
+  await grove(["status"]);
+  await repo.switch("main");
+  await repo.git("merge", "--squash", "feat");
+  await repo.git("commit", "-m", "land feat");
+  await repo.git("branch", "-D", "feat");
+
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("branch-deleted");
+  expect(doc.journal).toEqual([]);
+});
+
+test("a deleted branch with commits found nowhere else alerts", async () => {
+  await grove(["status"]);
+  await repo.switch("main");
+  await repo.git("branch", "-D", "feat");
+
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).toContain("branch-deleted");
+  expect(doc.journal).toHaveLength(1);
 });
 
 test("status lists a merged worktree's files only under its removal alert, with paths from the root", async () => {
   await repo.switch("main");
   await repo.commit(".gitignore", ".worktrees/\n.local/\n.env\n", "ignore env");
   await write(join(repo.path, ".env"), "KEY=1\n");
-  await repo.worktree(join(repo.path, ".worktrees", "old"), "old");
-  await write(join(repo.path, ".worktrees", "old", ".local", "seed.sql"), "insert;\n");
+  const path = await landedWorktree("old");
+  await write(join(path, ".local", "seed.sql"), "insert;\n");
 
   const { out } = await grove(["status"]);
   expect(out.match(/\.local\/seed\.sql/g)).toHaveLength(1);

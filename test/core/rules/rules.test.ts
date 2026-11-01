@@ -117,7 +117,7 @@ test("unsafe-merged-worktree fires for a removal verdict that is not ok", () => 
   expect(hit[0]).toMatchObject({
     severity: "loses-work",
     subject: { kind: "worktree", id: "/r/w" },
-    action: "git grove rm --rescue /r/w",
+    action: "git grove check remove /r/w",
   });
   expect(hit[0]?.detail).toContain("2 uncommitted files");
   expect(run("unsafe-merged-worktree", ctx({ removals: new Map([["/r/w", { ok: true, reasons: [] }]]) }))).toEqual([]);
