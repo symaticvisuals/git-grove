@@ -16,10 +16,11 @@
     "build": "tsc -p tsconfig.json",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/bin.js', 0o755)\"",
     "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.test.json",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {
-    "@types/node": "^26.6.6",
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"
   }
