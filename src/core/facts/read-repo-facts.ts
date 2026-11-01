@@ -53,7 +53,7 @@ function countChanges(porcelainV2: string): { staged: number; unstaged: number; 
 }
 
 async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string): Promise<WorktreeFacts> {
-  if (raw.prunable) {
+  if (raw.prunable || !existsSync(raw.path)) {
     return {
       path: raw.path,
       gitDir: join(commonDir, "worktrees", basename(raw.path)),
@@ -61,17 +61,18 @@ async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string
       branch: raw.branch,
       isMain,
       locked: raw.locked,
-      prunable: true,
+      prunable: raw.prunable,
       operation: null,
       changes: null,
       touchedAt: null,
     };
   }
   const [gitDirOut, statusOut] = await Promise.all([
-    runGit(["rev-parse", "--absolute-git-dir"], { cwd: raw.path }),
-    runGit(["status", "--porcelain=v2"], { cwd: raw.path }),
+    runGit(["rev-parse", "--absolute-git-dir"], { cwd: raw.path, allowFailure: true }).catch(() => null),
+    runGit(["status", "--porcelain=v2"], { cwd: raw.path, allowFailure: true }).catch(() => null),
   ]);
-  const gitDir = gitDirOut.stdout.trim();
+  const gitDir =
+    gitDirOut?.code === 0 ? gitDirOut.stdout.trim() : isMain ? commonDir : join(commonDir, "worktrees", basename(raw.path));
   const marker = OPERATION_MARKERS.find(([name]) => existsSync(join(gitDir, name)));
   const times = (await Promise.all([mtimeMs(join(gitDir, "index")), mtimeMs(join(gitDir, "HEAD"))])).filter(
     (time): time is number => time !== null,
@@ -85,7 +86,7 @@ async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string
     locked: raw.locked,
     prunable: false,
     operation: marker ? marker[1] : null,
-    changes: countChanges(statusOut.stdout),
+    changes: statusOut?.code === 0 ? countChanges(statusOut.stdout) : null,
     touchedAt: times.length > 0 ? Math.max(...times) : null,
   };
 }

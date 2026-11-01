@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -88,4 +88,59 @@ test("rejects a repository with no commits", async () => {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+async function bareRepoOn(branch: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "git-grove-trunk-"));
+  await runGit(["init", "-b", branch], { cwd: dir, write: true });
+  await inDir(dir, "commit", "--allow-empty", "-m", "first");
+  return dir;
+}
+
+test("trunk falls back to master when it is the only branch", async () => {
+  const dir = await bareRepoOn("master");
+  try {
+    const facts = await readRepoFacts(dir);
+    expect(facts.trunk).toMatchObject({ name: "master", ref: "refs/heads/master" });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("trunk falls back to the current branch of the main worktree", async () => {
+  const dir = await bareRepoOn("develop");
+  try {
+    const facts = await readRepoFacts(dir);
+    expect(facts.trunk.name).toBe("develop");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stack.trunk wins over other candidates", async () => {
+  await repo.git("config", "stack.trunk", "feat/a");
+  const facts = await readRepoFacts(repo.path);
+  expect(facts.trunk.name).toBe("feat/a");
+});
+
+test("a missing trunk raises NotARepoError", async () => {
+  const dir = await bareRepoOn("develop");
+  try {
+    await inDir(dir, "config", "stack.trunk", "nope");
+    await inDir(dir, "checkout", "-q", "--detach");
+    await inDir(dir, "branch", "-m", "develop", "other");
+    await expect(readRepoFacts(dir)).rejects.toBeInstanceOf(NotARepoError);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a locked worktree whose folder is gone degrades instead of failing the read", async () => {
+  const gone = join(repo.path, ".worktrees", "gone");
+  await repo.worktree(gone, "feat/gone");
+  await repo.git("worktree", "lock", gone);
+  await rename(gone, `${gone}-moved`);
+  const facts = await readRepoFacts(repo.path);
+  const entry = facts.worktrees.find((w) => w.branch === "feat/gone");
+  expect(entry).toMatchObject({ changes: null, operation: null, touchedAt: null, locked: true });
 });
