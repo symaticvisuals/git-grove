@@ -42,3 +42,19 @@ test("a second withRepoLock rejects while the first runs, and the lock is remove
   });
   expect(await withRepoLock(commonDir, async () => 2)).toBe(2);
 });
+
+test("listPins orders by time then numeric suffix across branches", async () => {
+  const t1 = new Date(Date.UTC(2026, 10, 1, 1, 0, 0));
+  const t2 = new Date(Date.UTC(2026, 10, 1, 2, 0, 0));
+  for (let i = 0; i < 10; i++) await pin(repo.path, "a", sha, t2);
+  await pin(repo.path, "z", sha, t1);
+  await pin(repo.path, "z", sha, t2);
+  const refs = (await listPins(repo.path)).map((entry) => entry.ref);
+  expect(refs.slice(0, 3)).toEqual([
+    "refs/grove/pins/a/20261101T020000Z-10",
+    "refs/grove/pins/a/20261101T020000Z-9",
+    "refs/grove/pins/a/20261101T020000Z-8",
+  ]);
+  expect(refs.indexOf("refs/grove/pins/z/20261101T020000Z")).toBeLessThan(refs.indexOf("refs/grove/pins/z/20261101T010000Z"));
+  expect(refs.at(-1)).toBe("refs/grove/pins/z/20261101T010000Z");
+});

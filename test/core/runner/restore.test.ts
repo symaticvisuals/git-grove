@@ -52,3 +52,18 @@ test("restore refuses when the worktree has an uncommitted file", async () => {
 test("restore refuses when the branch has no pin", async () => {
   await expect(restore(repo.path, "main")).rejects.toBeInstanceOf(RefusedError);
 });
+
+test("restore refuses on an untracked file and creates no pin", async () => {
+  await writeFile(join(repo.path, "stray.txt"), "x\n");
+  await expect(restore(repo.path, "feat/x")).rejects.toBeInstanceOf(RefusedError);
+  expect((await listPins(repo.path, "feat/x")).length).toBe(1);
+});
+
+test("restore refuses without resetting when the tip moves before the move", async () => {
+  await expect(
+    restore(repo.path, "feat/x", undefined, async () => {
+      await repo.commit("late.txt", "late\n", "late");
+    }),
+  ).rejects.toThrow("moved while restoring");
+  expect((await repo.git("rev-parse", "feat/x~1")).trim()).toBe(squashed);
+});

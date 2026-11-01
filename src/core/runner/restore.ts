@@ -13,15 +13,18 @@ async function revParse(cwd: string, rev: string): Promise<Sha | null> {
 
 /**
  * Moves `branch` back to a pin (default: its newest), after pinning its current tip.
+ * Takes the repo lock first and refuses if the branch tip changes before the move (`beforeMove` is a test seam).
  * Refuses when the worktree holding the branch has uncommitted changes or an operation in progress.
  */
 export async function restore(
   cwd: string,
   branch: string,
   pinRef?: string,
+  beforeMove?: () => Promise<void>,
 ): Promise<{ from: Sha; to: Sha; pinnedCurrent: string }> {
-  const facts = await readRepoFacts(cwd);
-  return withRepoLock(facts.commonDir, async () => {
+  const probe = await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd });
+  return withRepoLock(probe.stdout.trim(), async () => {
+    const facts = await readRepoFacts(cwd);
     const target = pinRef ?? (await listPins(facts.root, branch))[0]?.ref;
     if (target === undefined) throw new RefusedError(`git-grove: no pin found for ${branch}`);
     const to = await revParse(facts.root, target);
@@ -37,6 +40,10 @@ export async function restore(
     }
 
     const pinnedCurrent = await pin(facts.root, branch, from, new Date());
+    await beforeMove?.();
+    if ((await revParse(facts.root, `refs/heads/${branch}`)) !== from) {
+      throw new RefusedError(`git-grove: ${branch} moved while restoring; run again`);
+    }
     if (holder) await runGit(["reset", "--keep", to], { cwd: holder.path, write: true });
     else await runGit(["update-ref", `refs/heads/${branch}`, to, from], { cwd: facts.root, write: true });
     return { from, to, pinnedCurrent };

@@ -5,20 +5,24 @@ import { PINS_PREFIX } from "./pin.js";
 export type PinEntry = { ref: string; sha: Sha; branch: string; at: string };
 
 /**
- * Lists grove pins, newest first, optionally only those of `branch`.
+ * Lists grove pins, newest first by timestamp then numeric suffix, optionally only those of `branch`.
  */
 export async function listPins(cwd: string, branch?: string): Promise<PinEntry[]> {
   const { stdout } = await runGit(
     ["for-each-ref", "--sort=-refname", "--format=%(refname)%00%(objectname)", PINS_PREFIX],
     { cwd },
   );
-  const pins: PinEntry[] = [];
+  const pins: { entry: PinEntry; serial: number }[] = [];
   for (const line of stdout.split("\n")) {
     const [ref = "", sha = ""] = line.split("\0");
-    const match = /^(.+)\/(\d{8}T\d{6}Z)(?:-\d+)?$/.exec(ref.slice(PINS_PREFIX.length));
+    const match = /^(.+)\/(\d{8}T\d{6}Z)(?:-(\d+))?$/.exec(ref.slice(PINS_PREFIX.length));
     if (!match || sha === "") continue;
-    const [, pinned = "", at = ""] = match;
-    if (branch === undefined || pinned === branch) pins.push({ ref, sha, branch: pinned, at });
+    const [, pinned = "", at = "", suffix] = match;
+    if (branch === undefined || pinned === branch) {
+      pins.push({ entry: { ref, sha, branch: pinned, at }, serial: Number(suffix ?? 1) });
+    }
   }
-  return pins;
+  return pins
+    .sort((a, b) => (a.entry.at === b.entry.at ? b.serial - a.serial : a.entry.at < b.entry.at ? 1 : -1))
+    .map(({ entry }) => entry);
 }
