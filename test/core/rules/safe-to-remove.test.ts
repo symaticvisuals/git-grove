@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -190,4 +190,29 @@ test("env discovery is not capped by unrelated ignored files", async () => {
   const wt = await mergedWorktree("capped");
   const missing = await readEnvMissing(root, await readRepoFacts(root), 10);
   expect(missing.get(wt)).toEqual(expect.arrayContaining(["apps/web/.env.local"]));
+});
+
+test("untracked content inside a submodule is seen", async () => {
+  const lib = await mkdtemp(join(tmpdir(), "grove-lib-"));
+  await repo.git("init", "-b", "main", lib);
+  await write(join(lib, "a.txt"), "a\n");
+  await repo.git("-C", lib, "add", "a.txt");
+  await repo.git("-C", lib, "commit", "-m", "lib");
+  await repo.git("-c", "protocol.file.allow=always", "submodule", "add", lib, "lib");
+  await repo.git("commit", "-m", "add submodule");
+  const wt = join(root, ".worktrees", "subbed");
+  await repo.git("worktree", "add", "-b", "subbed", wt);
+  await repo.git("-C", wt, "-c", "protocol.file.allow=always", "submodule", "update", "--init");
+  await write(join(wt, "lib", "scratch.txt"), "mine\n");
+  const verdict = await verdictFor(wt);
+  expect(verdict.ok).toBe(false);
+});
+
+test("a prunable worktree whose folder still exists is not safe", async () => {
+  const wt = await mergedWorktree("orphan");
+  await write(join(wt, "notes.txt"), "mine\n");
+  await rm(join(wt, ".git"));
+  const verdict = await verdictFor(wt);
+  expect(verdict.ok).toBe(false);
+  expect(verdict.reasons.map((reason) => reason.code)).toContain("unreadable");
 });

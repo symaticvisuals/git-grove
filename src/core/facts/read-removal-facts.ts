@@ -25,7 +25,7 @@ async function readUnpushed(cwd: string, worktree: WorktreeFacts, facts: RepoFac
 }
 
 async function readUncommitted(worktree: WorktreeFacts): Promise<Read<number>> {
-  const result = await runGit(["status", "--porcelain=v2", "--untracked-files=no"], {
+  const result = await runGit(["status", "--porcelain=v2", "--untracked-files=no", "--ignore-submodules=none"], {
     cwd: worktree.path,
     allowFailure: true,
   }).catch(() => null);
@@ -76,7 +76,8 @@ async function folderExists(path: string): Promise<boolean> {
  * commits that are neither pushed nor merged, commits only a detached HEAD holds, stashes for its branch,
  * ignored files that exist nowhere else, and worktrees nested inside it.
  * A read that fails is reported in `unreadable` and never counted as empty.
- * A prunable worktree or a missing folder skips the on-disk checks and keeps the repository-level ones.
+ * A prunable worktree whose folder is gone skips the on-disk checks and keeps the repository-level ones;
+ * one whose folder still exists is reported as unreadable.
  * Throws MainWorktreeError for the main worktree.
  */
 export async function readRemovalFacts(cwd: string, worktreePath: string, facts: RepoFacts): Promise<RemovalFacts> {
@@ -87,7 +88,9 @@ export async function readRemovalFacts(cwd: string, worktreePath: string, facts:
 
   const others = facts.worktrees.filter((candidate) => candidate !== worktree).map((candidate) => candidate.path);
   const nestedWorktrees = others.filter((other) => other.startsWith(worktree.path + sep));
-  const onDisk = !worktree.prunable && (await folderExists(worktree.path));
+  const exists = await folderExists(worktree.path);
+  const onDisk = !worktree.prunable && exists;
+  const orphaned = worktree.prunable && exists ? ["folder (it exists but git no longer tracks it as a worktree)"] : [];
 
   const [uncommitted, untracked, precious, unpushed, detachedCommits] = await Promise.all([
     onDisk ? readUncommitted(worktree) : { value: 0, failed: null },
@@ -107,6 +110,6 @@ export async function readRemovalFacts(cwd: string, worktreePath: string, facts:
     preciousIgnored: precious.value.files,
     ignoredTruncated: precious.value.truncated,
     nestedWorktrees,
-    unreadable: [uncommitted.failed, untracked.failed, precious.failed].filter((item) => item !== null),
+    unreadable: [...orphaned, uncommitted.failed, untracked.failed, precious.failed].filter((item) => item !== null),
   };
 }
