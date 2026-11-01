@@ -207,7 +207,7 @@ test("static files return 200 without the token header", async () => {
 
 test("API calls without the token header are 401, and with it they pass the gate", async () => {
   const server = await start();
-  for (const path of ["api/projects", "events"]) {
+  for (const path of ["api/unrouted", "events"]) {
     expect((await fetch(`${server.url}${path}`)).status, path).toBe(401);
     expect((await fetch(`${server.url}${path}`, { headers: { "x-grove-token": "f".repeat(64) } })).status, path).toBe(401);
     expect((await fetch(`${server.url}${path}`, { headers: tokenOf(server) })).status, path).toBe(404);

@@ -1,8 +1,10 @@
+import type { Snapshots } from "./live/snapshots.js";
 import type { Store } from "../core/journal/store.types.js";
 
-/** What every route handler gets: the open store, the server's token, port, version and home, and a way to stop it. */
+/** What every route handler gets: the open store, its snapshots, the server's token, port, version and home, and a way to stop it. */
 export type ServerContext = {
   store: Store;
+  snapshots: Snapshots;
   token: string;
   port: number;
   version: string;

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { groveHome } from "../core/grove-home.js";
 import { openStore } from "../core/journal/open-store.js";
 import type { Store } from "../core/journal/store.types.js";
+import { createSnapshots } from "./live/snapshots.js";
 import { registerApi } from "./api/register-api.js";
 import { readOrCreateToken } from "./auth/read-or-create-token.js";
 import { clearServerFile } from "./clear-server-file.js";
@@ -75,6 +76,7 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     };
     const context: ServerContext = {
       store: opened,
+      snapshots: createSnapshots(opened),
       token,
       port: 0,
       version: options.version,

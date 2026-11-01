@@ -1,0 +1,50 @@
+import { relative } from "node:path";
+import { worst } from "../../core/rules/needs-you.js";
+import type { Snapshot } from "../../core/snapshot/read-snapshot.js";
+import { healthOf } from "./health-of.js";
+import { toWireFeature } from "./to-wire-feature.js";
+import type { WireProject, WireRepoView, WireSandbox } from "./wire.types.js";
+
+function sandboxes(snapshot: Snapshot): WireSandbox[] {
+  const { facts, findings } = snapshot;
+  return facts.worktrees
+    .filter((worktree) => worktree.branch === null && !worktree.prunable)
+    .map((worktree) => {
+      const own = findings.filter(({ subject }) => subject.kind === "worktree" && subject.id === worktree.path);
+      const [top] = own;
+      return {
+        path: worktree.path,
+        rel: relative(facts.root, worktree.path) || ".",
+        head: worktree.head,
+        touchedAt: worktree.touchedAt,
+        health: healthOf(worst(own)),
+        state: top?.title ?? "Nothing to keep",
+      };
+    });
+}
+
+function cleanupCountOf(snapshot: Snapshot, detached: number): number {
+  let merged = 0;
+  for (const verdict of snapshot.removals.values()) {
+    const rescuable = verdict.reasons.length > 0 && verdict.reasons.every((reason) => reason.code === "precious-ignored");
+    if (verdict.ok || rescuable) merged += 1;
+  }
+  return merged + detached;
+}
+
+/**
+ * The dashboard's view of one repository: its features (stacks and singles) with their levels, the detached
+ * sandboxes, every finding, and how many worktrees clean up would offer. `project` and `pins` pass through unchanged.
+ */
+export function toRepoView(project: WireProject, snapshot: Snapshot, pins: number): WireRepoView {
+  const detached = sandboxes(snapshot);
+  return {
+    project: { ...project, pins },
+    trunk: snapshot.facts.trunk.name,
+    lastFetchAt: snapshot.facts.lastFetchAt,
+    features: snapshot.features.filter((feature) => feature.kind !== "detached").map((feature) => toWireFeature(snapshot, feature)),
+    detached,
+    findings: snapshot.findings,
+    cleanupCount: cleanupCountOf(snapshot, detached.length),
+  };
+}
