@@ -265,10 +265,10 @@ test("a set-aside change that conflicts once put back is named by its sha, with 
 
   expect(receipt).toMatchObject({ ok: false, title: "Stopped at level 02: your change did not apply cleanly" });
   expect(receipt.lines).toContain(
-    `Your change is kept in the stash as ${stash.slice(0, 7)} ("grove restack checkout"). It did not apply cleanly; ` +
-      ".worktrees/checkout/02-feat-ui now has it partly applied, with conflicts in shared.txt. " +
-      `Fix those files, then run git stash apply ${stash}.`,
+    "Your change is partly back in .worktrees/checkout/02-feat-ui: resolve the conflicts in shared.txt, and the rest is " +
+      `already in place. The whole change is also kept in the stash as ${stash.slice(0, 7)}, if you need it: git stash apply ${stash}.`,
   );
+  expect(receipt.lines.join("\n")).not.toContain("stash drop");
   expect((await repo.git("stash", "list", "--format=%H")).trim()).toBe(stash);
 });
 

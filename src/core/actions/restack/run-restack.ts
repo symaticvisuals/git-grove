@@ -34,10 +34,14 @@ function putBackLines(putBack: PutBack, folder: string, message: string): string
   if (putBack.why === "rebase-in-progress") {
     return [`Your change was not put back, because a rebase is still in progress in ${folder}; it is in the stash as ${named}`];
   }
-  const kept = `Your change is kept in the stash as ${named}. It did not apply cleanly;`;
-  if (touched.length === 0) return [`${kept} ${folder} is unchanged. Apply it by hand with git stash apply ${stash}.`];
-  const where = conflicted.length > 0 ? `with conflicts in ${listPaths(conflicted)}` : `in ${listPaths(touched)}`;
-  return [`${kept} ${folder} now has it partly applied, ${where}. Fix those files, then run git stash apply ${stash}.`];
+  const apply = `git stash apply ${stash}`;
+  if (touched.length === 0) {
+    return [`Your change is kept in the stash as ${named}. It did not apply cleanly; ${folder} is unchanged. Apply it by hand with ${apply}.`];
+  }
+  const also = `The whole change is also kept in the stash as ${stash.slice(0, 7)}, if you need it: ${apply}.`;
+  if (conflicted.length === 0) return [`Your change is partly back in ${folder}, in ${listPaths(touched)}. ${also}`];
+  const resolve = `resolve the conflicts in ${listPaths(conflicted)}, and the rest is already in place`;
+  return [`Your change is partly back in ${folder}: ${resolve}. ${also}`];
 }
 
 function undoOf(done: Done[], pins: Map<string, string>): RestoreTarget[] | null {
