@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -38,14 +39,16 @@ test("rescueTarget keeps the path when main has nothing there, else adds .from-<
 });
 
 test("rescueFiles copies into main at the same path, creating folders", async () => {
-  expect(await rescueFiles(main, worktree, [".local/seed.sql"])).toEqual([{ from: ".local/seed.sql", to: ".local/seed.sql" }]);
+  expect(await rescueFiles(main, worktree, [".local/seed.sql"])).toEqual([
+    { from: ".local/seed.sql", to: ".local/seed.sql", digest: expect.stringMatching(/^[0-9a-f]{64}$/) },
+  ]);
   expect(await readFile(join(main, ".local", "seed.sql"), "utf8")).toBe("seed\n");
 });
 
 test("rescueFiles never overwrites: an existing file, or a dangling link, sends the copy elsewhere", async () => {
   await write(join(main, ".local", "seed.sql"), "main\n");
   await symlink(join(main, "nowhere"), join(main, ".local", "seed.sql.from-old"));
-  expect(await rescueFiles(main, worktree, [".local/seed.sql"])).toEqual([
+  expect(await rescueFiles(main, worktree, [".local/seed.sql"])).toMatchObject([
     { from: ".local/seed.sql", to: ".local/seed.sql.from-old-2" },
   ]);
   expect(await readFile(join(main, ".local", "seed.sql"), "utf8")).toBe("main\n");
@@ -57,7 +60,7 @@ test("two files of one batch never land on the same path", async () => {
   await write(join(worktree, "a"), "a\n");
   await write(join(worktree, "a.from-old"), "b\n");
   const pairs = await rescueFiles(main, worktree, ["a", "a.from-old"]);
-  expect(pairs).toEqual([
+  expect(pairs).toMatchObject([
     { from: "a", to: "a.from-old" },
     { from: "a.from-old", to: "a.from-old.from-old" },
   ]);
@@ -69,6 +72,16 @@ test("a target folder in main that resolves into a worktree is refused before an
     reason: "the target folder in main points into a worktree",
   });
   expect(await readFile(join(worktree, ".local", "seed.sql"), "utf8")).toBe("seed\n");
+});
+
+test("a refused rescue makes no folder inside the worktree", async () => {
+  await mkdir(join(worktree, "node_modules", "cache"), { recursive: true });
+  await symlink(join(worktree, "node_modules", "cache"), join(main, ".local"));
+  await write(join(worktree, ".local", "deep", "notes.md"), "mine\n");
+  await expect(rescueFiles(main, worktree, [".local/deep/notes.md"])).rejects.toMatchObject({
+    reason: "the target folder in main points into a worktree",
+  });
+  expect(existsSync(join(worktree, "node_modules", "cache", "deep"))).toBe(false);
 });
 
 test("a copy whose bytes differ throws RescueFailedError naming the file", async () => {

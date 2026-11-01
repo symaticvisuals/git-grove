@@ -9,9 +9,9 @@ import type { Removal } from "./read-removal.js";
 import { removalReasons } from "./removal-reasons.js";
 import { removeWorktreeSafely } from "./remove-worktree-safely.js";
 import { rescueFiles } from "./rescue-files.js";
-import type { RescuedFile } from "./verify-copies.js";
+import type { CopiedFile } from "./verify-copies.js";
 
-type Outcome = { removal: Removal; copied: RescuedFile[]; state: "removed" | "skipped" | "kept"; why: string };
+type Outcome = { removal: Removal; copied: CopiedFile[]; state: "removed" | "skipped" | "kept"; why: string };
 
 async function recheck(root: string, removal: Removal): Promise<string[]> {
   try {
@@ -31,7 +31,7 @@ function outcomeLine({ removal, state, why }: Outcome): string {
 
 async function cleanOne(root: string, removal: Removal, first: number, run: RunContext): Promise<Outcome> {
   const { worktree, copies } = removal;
-  const copied: RescuedFile[] = [];
+  const copied: CopiedFile[] = [];
   const last = first + copies.length;
   const skipFrom = (index: number, why: string): void => {
     for (let at = index; at <= last; at++) run.skip(at, why);

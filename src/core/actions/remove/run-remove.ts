@@ -7,7 +7,7 @@ import { removalReasons } from "./removal-reasons.js";
 import type { RemoveRead } from "./remove-plan.js";
 import { removeWorktreeSafely } from "./remove-worktree-safely.js";
 import { rescueFiles } from "./rescue-files.js";
-import { verifyCopies, type RescuedFile } from "./verify-copies.js";
+import { verifyCopies, type CopiedFile } from "./verify-copies.js";
 
 /**
  * Runs a remove plan from `run.firstStep`: copies each precious file to main, checks every copy byte for byte,
@@ -20,7 +20,7 @@ export async function runRemove(read: RemoveRead, run: RunContext): Promise<Exec
   const { root } = run.facts;
   const { worktree, shown } = read.removal;
   const copies = read.rescue ? read.removal.copies : [];
-  const copied: RescuedFile[] = [];
+  const copied: CopiedFile[] = [];
   const kept = worktree.branch === null ? [] : [`The branch ${worktree.branch} is kept`];
   const held: { reasons: string[] } = { reasons: [] };
   const stopped = (error: unknown): ExecuteResult => ({

@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -233,6 +233,18 @@ test("E2: a rescued file edited after its copy was checked stops the removal, an
   expect(await worktreeList()).toContain(old);
   expect(await readFile(join(old, ".local", "seed.sql"), "utf8")).toBe("edited after the copy\n");
   expect(await readFile(join(root, ".local", "seed.sql"), "utf8")).toBe(SEED);
+});
+
+test("main's copy deleted after it was checked stops the removal, and says the copy changed", async () => {
+  const prepared = await prepareAction("remove", ctx, { worktree: old, rescue: true });
+  const checked = prepared.plan.steps.findIndex((step) => step.title === "Check the copy matches");
+  const receipt = await runPrepared(ctx, prepared, (event) => {
+    if (event.index === checked && event.state === "done") rmSync(join(root, ".local", "seed.sql"));
+  });
+  expect(receipt.ok).toBe(false);
+  expect(receipt.title).toBe("Stopped before removing .worktrees/old");
+  expect(receipt.lines).toContain("the copy of .local/seed.sql in main changed after it was made");
+  expect(await readFile(join(old, ".local", "seed.sql"), "utf8")).toBe(SEED);
 });
 
 test("a copy that does not match stops before removing", async () => {

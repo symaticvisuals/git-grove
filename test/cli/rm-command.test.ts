@@ -32,7 +32,7 @@ async function write(path: string, text: string): Promise<void> {
 beforeEach(async () => {
   repo = await makeRepo();
   root = await realpath(repo.path);
-  await repo.commit(".gitignore", ".worktrees/\n.local/\n", "ignore");
+  await repo.commit(".gitignore", ".worktrees/\n.local/\nnode_modules/\n", "ignore");
   await repo.commit("base.txt", "base\n", "base");
   old = join(root, ".worktrees", "old");
   await repo.worktree(old, "old");
@@ -97,7 +97,8 @@ test("E1: a folder in main that is a symlink into the worktree never makes its f
 });
 
 test("E6: a rescue whose target folder in main points into the worktree stops and removes nothing", async () => {
-  await symlink(join(old, ".local"), join(root, ".local"));
+  await mkdir(join(old, "node_modules", "cache"), { recursive: true });
+  await symlink(join(old, "node_modules", "cache"), join(root, ".local"));
   expect((await grove(["check", "remove", ".worktrees/old"])).code).toBe(3);
   expect((await grove(["rm", ".worktrees/old"])).code).toBe(3);
 
@@ -105,6 +106,25 @@ test("E6: a rescue whose target folder in main points into the worktree stops an
   expect(result.code).toBe(1);
   expect(result.out).toContain("Stopped before removing .worktrees/old");
   expect(result.out).toContain("the target folder in main points into a worktree");
+  expect(existsSync(old)).toBe(true);
+  expect(await readFile(join(old, ".local", "seed.sql"), "utf8")).toBe("insert;\n");
+  expect(existsSync(join(old, "node_modules", "cache", "seed.sql"))).toBe(false);
+});
+
+const FIRMLINK = "/System/Volumes/Data";
+
+test.skipIf(!existsSync(FIRMLINK))("a symlink in main through a macOS firmlink to the worktree is caught by folder identity", async () => {
+  await symlink(`${FIRMLINK}${old}/.local`, join(root, ".local"));
+  expect(await realpath(join(root, ".local"))).toBe(`${FIRMLINK}${old}/.local`);
+
+  const check = await grove(["check", "remove", ".worktrees/old"]);
+  expect(check.code).toBe(3);
+  expect(check.out).toContain(".local/seed.sql");
+  expect((await grove(["rm", ".worktrees/old"])).code).toBe(3);
+
+  const rescue = await grove(["rm", ".worktrees/old", "--rescue"]);
+  expect(rescue.code).toBe(1);
+  expect(rescue.out).toContain("the target folder in main points into a worktree");
   expect(existsSync(old)).toBe(true);
   expect(await readFile(join(old, ".local", "seed.sql"), "utf8")).toBe("insert;\n");
 });
