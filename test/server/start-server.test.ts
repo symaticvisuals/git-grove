@@ -135,6 +135,15 @@ test.skipIf(!ipv6)("listens on [::1] at the same port as 127.0.0.1", async () =>
   await expect(serverRequest(server.port, { address: "::1", path: "/api/health" })).rejects.toThrow();
 });
 
+test.skipIf(!ipv6)("answers a Host of [::1] at its own port, and refuses [::1] at any other", async () => {
+  const server = await start();
+  const own = await serverRequest(server.port, { address: "::1", path: "/api/health", headers: { host: `[::1]:${server.port}` } });
+  expect(own.status).toBe(200);
+  expect(JSON.parse(own.body)).toEqual({ ok: true, version: VERSION, pid: process.pid });
+  const other = await serverRequest(server.port, { address: "::1", path: "/api/health", headers: { host: `[::1]:${server.port + 1}` } });
+  expect(other.status).toBe(421);
+});
+
 test.skipIf(!ipv6)("takes the next port when [::1] at the asked one is busy", async () => {
   const busy = await occupyFreePort("::1");
   const server = await start({ port: busy });

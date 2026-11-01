@@ -37,6 +37,9 @@ describe("Host", () => {
   test.each([
     ["127.0.0.1", "ok", HOST],
     ["localhost", "ok", `localhost:${PORT}`],
+    ["the IPv6 loopback", "ok", `[::1]:${PORT}`],
+    ["the IPv6 loopback on another port", 421, "[::1]:1"],
+    ["the IPv6 loopback with no port", 421, "[::1]"],
     ["a foreign name on our port", 421, `evil.test:${PORT}`],
     ["our address on another port", 421, "127.0.0.1:1"],
     ["localhost on another port", 421, "localhost:3000"],
@@ -81,6 +84,11 @@ describe("the token header", () => {
 describe("POST", () => {
   test("a correct POST is ok", () => {
     expect(checkRequest(facts("/api/shutdown", SAME_ORIGIN_POST), SERVER)).toEqual({ kind: "ok" });
+  });
+
+  test("a correct POST through the IPv6 loopback is ok", () => {
+    const host = `[::1]:${PORT}`;
+    expect(checkRequest(facts("/api/shutdown", { ...SAME_ORIGIN_POST, host, origin: `http://${host}` }), SERVER)).toEqual({ kind: "ok" });
   });
 
   test("a correct POST through localhost is ok", () => {

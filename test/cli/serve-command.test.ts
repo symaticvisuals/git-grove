@@ -124,7 +124,10 @@ test("serve B leaves the lock alone while server A is stopped, and exits non-zer
     process.kill(info.pid, "SIGSTOP");
     const cli = io();
     expect(await run(["serve", "--port", "0"], cli.io)).toBe(1);
-    expect(cli.err.join("")).toContain(`process ${info.pid} holds the server lock, but its server on port ${info.port} does not answer`);
+    expect(cli.err.join("")).toBe(
+      `git-grove: process ${info.pid} holds the server lock, but its server on port ${info.port} does not answer; ` +
+        `if no git grove server is running, delete ${join(home, "server.lock")} and start again\n`,
+    );
     expect(await readFile(join(home, "server.lock"), "utf8")).toBe(String(info.pid));
     expect(readServerFile(home)).toEqual(info);
   } finally {

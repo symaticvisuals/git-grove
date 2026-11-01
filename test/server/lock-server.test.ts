@@ -107,7 +107,9 @@ test("a holder whose server does not answer within 1 s keeps its lock, and the c
   await writeFile(lockFile(), String(process.pid));
   writeServerFile(home, { pid: process.pid, port: await silentPort(), version: "0.0.1" });
   const before = await inode();
-  await expect(lockServer(home)).rejects.toBeInstanceOf(ServerUnresponsiveError);
+  const refused = lockServer(home);
+  await expect(refused).rejects.toBeInstanceOf(ServerUnresponsiveError);
+  await expect(refused).rejects.toThrow(`if no git grove server is running, delete ${lockFile()} and start again`);
   expect(await inode()).toBe(before);
 });
 
@@ -115,7 +117,10 @@ test("a fresh lock held by a live process that writes no server.json is not take
   await writeFile(lockFile(), String(process.pid));
   const before = await inode();
   const startedAt = Date.now();
-  await expect(lockServer(home)).rejects.toBeInstanceOf(ServerUnresponsiveError);
+  await expect(lockServer(home)).rejects.toThrow(
+    `git-grove: process ${process.pid} holds the server lock, but it has written no server.json; ` +
+      `if no git grove server is running, delete ${lockFile()} and start again`,
+  );
   expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1900);
   expect(await inode()).toBe(before);
 });

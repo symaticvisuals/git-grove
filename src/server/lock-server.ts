@@ -72,9 +72,9 @@ export async function lockServer(home: string): Promise<Release> {
     const read = readServerFile(home);
     return read?.pid === holder ? read : null;
   });
-  if (info === null) throw new ServerUnresponsiveError(holder, "it has written no server.json");
+  if (info === null) throw new ServerUnresponsiveError(holder, path, "it has written no server.json");
   const probe = await probeHealth(info.port);
   if (probe.kind === "answered" && probe.pid === holder) throw new ServerRunningError(info.port, holder);
-  if (probe.kind === "silent") throw new ServerUnresponsiveError(holder, `its server on port ${info.port} does not answer`);
+  if (probe.kind === "silent") throw new ServerUnresponsiveError(holder, path, `its server on port ${info.port} does not answer`);
   return granted(await takeOverServerLock(path, holder), home, path);
 }
