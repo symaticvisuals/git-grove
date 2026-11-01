@@ -1,0 +1,357 @@
+REPO, trunk main, 6 worktrees, scanned in N s
+
+Needs you
+ ▲ feat/coupons-ui  Parent moved
+                    feat/coupons-model has 2 commits not in feat/coupons-ui
+                    restack feat/coupons-ui onto feat/coupons-model
+
+Worktree                       Changes  Origin     Behind main  Touched
+main                           clean    no remote  -            now
+feat/coupons-model             clean    no remote  0            now
+  └ feat/coupons-ui            clean    no remote  parent +2    now
+    └ feat/coupons-email       clean    no remote  0            now
+fix/invoice-rounding           clean    no remote  0            now
+.worktrees/sandbox (detached)  clean    -          -            now
+{
+  "repo": {
+    "root": "REPO",
+    "commonDir": "REPO/.git"
+  },
+  "trunk": {
+    "name": "main",
+    "ref": "refs/heads/main",
+    "sha": "SHA"
+  },
+  "features": [
+    {
+      "name": "checkout coupons",
+      "kind": "stack",
+      "levels": [
+        {
+          "branch": "feat/coupons-model",
+          "parent": "main",
+          "depth": 1,
+          "worktree": {
+            "path": "REPO/.worktrees/checkout coupons/01-feat-coupons-model",
+            "gitDir": "REPO/.git/worktrees/01-feat-coupons-model",
+            "head": "SHA",
+            "branch": "feat/coupons-model",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 0,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        },
+        {
+          "branch": "feat/coupons-ui",
+          "parent": "feat/coupons-model",
+          "depth": 2,
+          "worktree": {
+            "path": "REPO/.worktrees/checkout coupons/02-feat-coupons-ui",
+            "gitDir": "REPO/.git/worktrees/02-feat-coupons-ui",
+            "head": "SHA",
+            "branch": "feat/coupons-ui",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 2,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        },
+        {
+          "branch": "feat/coupons-email",
+          "parent": "feat/coupons-ui",
+          "depth": 3,
+          "worktree": {
+            "path": "REPO/.worktrees/checkout coupons/03-feat-coupons-email",
+            "gitDir": "REPO/.git/worktrees/03-feat-coupons-email",
+            "head": "SHA",
+            "branch": "feat/coupons-email",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 0,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        }
+      ]
+    },
+    {
+      "name": "fix/invoice-rounding",
+      "kind": "single",
+      "levels": [
+        {
+          "branch": "fix/invoice-rounding",
+          "parent": "main",
+          "depth": 1,
+          "worktree": {
+            "path": "REPO/.worktrees/single",
+            "gitDir": "REPO/.git/worktrees/single",
+            "head": "SHA",
+            "branch": "fix/invoice-rounding",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 0,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        }
+      ]
+    },
+    {
+      "name": "detached",
+      "kind": "detached",
+      "levels": []
+    }
+  ],
+  "findings": [
+    {
+      "rule": "parent-moved",
+      "severity": "needs-action",
+      "subject": {
+        "kind": "level",
+        "id": "checkout coupons/feat/coupons-ui"
+      },
+      "title": "Parent moved",
+      "detail": "feat/coupons-model has 2 commits not in feat/coupons-ui",
+      "action": "restack feat/coupons-ui onto feat/coupons-model"
+    }
+  ],
+  "journal": []
+}
+REPO, trunk main, 6 worktrees, scanned in N s
+
+Needs you
+ ✖ feat/coupons-model  History rewritten
+                       3 commits no longer on feat/coupons-model, kept at refs/grove/pins/feat/coupons-model/STAMP (if that was intended: git grove ack feat/coupons-model)
+                       git grove restore feat/coupons-model refs/grove/pins/feat/coupons-model/STAMP
+ ▲ feat/coupons-ui     Parent moved
+                       feat/coupons-model has 1 commit not in feat/coupons-ui
+                       restack feat/coupons-ui onto feat/coupons-model
+
+Worktree                       Changes  Origin     Behind main  Touched
+main                           clean    no remote  -            now
+feat/coupons-model             clean    no remote  0            now
+  └ feat/coupons-ui            clean    no remote  parent +1    now
+    └ feat/coupons-email       clean    no remote  0            now
+fix/invoice-rounding           clean    no remote  0            now
+.worktrees/sandbox (detached)  clean    -          -            now
+{
+  "repo": {
+    "root": "REPO",
+    "commonDir": "REPO/.git"
+  },
+  "trunk": {
+    "name": "main",
+    "ref": "refs/heads/main",
+    "sha": "SHA"
+  },
+  "features": [
+    {
+      "name": "checkout coupons",
+      "kind": "stack",
+      "levels": [
+        {
+          "branch": "feat/coupons-model",
+          "parent": "main",
+          "depth": 1,
+          "worktree": {
+            "path": "REPO/.worktrees/checkout coupons/01-feat-coupons-model",
+            "gitDir": "REPO/.git/worktrees/01-feat-coupons-model",
+            "head": "SHA",
+            "branch": "feat/coupons-model",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 0,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        },
+        {
+          "branch": "feat/coupons-ui",
+          "parent": "feat/coupons-model",
+          "depth": 2,
+          "worktree": {
+            "path": "REPO/.worktrees/checkout coupons/02-feat-coupons-ui",
+            "gitDir": "REPO/.git/worktrees/02-feat-coupons-ui",
+            "head": "SHA",
+            "branch": "feat/coupons-ui",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 1,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        },
+        {
+          "branch": "feat/coupons-email",
+          "parent": "feat/coupons-ui",
+          "depth": 3,
+          "worktree": {
+            "path": "REPO/.worktrees/checkout coupons/03-feat-coupons-email",
+            "gitDir": "REPO/.git/worktrees/03-feat-coupons-email",
+            "head": "SHA",
+            "branch": "feat/coupons-email",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 0,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        }
+      ]
+    },
+    {
+      "name": "fix/invoice-rounding",
+      "kind": "single",
+      "levels": [
+        {
+          "branch": "fix/invoice-rounding",
+          "parent": "main",
+          "depth": 1,
+          "worktree": {
+            "path": "REPO/.worktrees/single",
+            "gitDir": "REPO/.git/worktrees/single",
+            "head": "SHA",
+            "branch": "fix/invoice-rounding",
+            "isMain": false,
+            "locked": false,
+            "prunable": false,
+            "operation": null,
+            "operationBranch": null,
+            "changes": {
+              "staged": 0,
+              "unstaged": 0,
+              "untracked": 0
+            },
+            "touchedAt": T
+          },
+          "parentCommitsSinceFork": 0,
+          "behindTrunk": 0,
+          "parentMerged": false,
+          "parentMissing": false
+        }
+      ]
+    },
+    {
+      "name": "detached",
+      "kind": "detached",
+      "levels": []
+    }
+  ],
+  "findings": [
+    {
+      "rule": "history-rewritten",
+      "severity": "loses-work",
+      "subject": {
+        "kind": "branch",
+        "id": "feat/coupons-model"
+      },
+      "title": "History rewritten",
+      "detail": "3 commits no longer on feat/coupons-model, kept at refs/grove/pins/feat/coupons-model/STAMP (if that was intended: git grove ack feat/coupons-model)",
+      "action": "git grove restore feat/coupons-model refs/grove/pins/feat/coupons-model/STAMP"
+    },
+    {
+      "rule": "parent-moved",
+      "severity": "needs-action",
+      "subject": {
+        "kind": "level",
+        "id": "checkout coupons/feat/coupons-ui"
+      },
+      "title": "Parent moved",
+      "detail": "feat/coupons-model has 1 commit not in feat/coupons-ui",
+      "action": "restack feat/coupons-ui onto feat/coupons-model"
+    }
+  ],
+  "journal": [
+    {
+      "id": 1,
+      "branch": "feat/coupons-model",
+      "oldTip": "SHA",
+      "newTip": "SHA",
+      "kind": "rewritten",
+      "lost": [
+        "SHA",
+        "SHA",
+        "SHA"
+      ],
+      "matchedByPatch": 0,
+      "matchedByMeta": 0,
+      "pinRef": "refs/grove/pins/feat/coupons-model/STAMP",
+      "at": T,
+      "foundLater": false,
+      "acked": false
+    }
+  ]
+}

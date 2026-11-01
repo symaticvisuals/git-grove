@@ -9,7 +9,7 @@ import { pinsCommand } from "./commands/pins.js";
 import { restoreCommand } from "./commands/restore.js";
 import { serveCommand } from "./commands/serve.js";
 import { statusCommand } from "./commands/status.js";
-import { describeError } from "./describe-error.js";
+import { describeError } from "../core/describe-error.js";
 import { packageVersion } from "./package-version.js";
 import { runActionCommand } from "./run-action.js";
 

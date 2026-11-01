@@ -14,12 +14,14 @@ let ui: UiFixture;
 let server: RunningServer;
 let fixture: SquashedFixture;
 let repoId: number;
+let clock: number;
 
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "git-grove-read-api-"));
   ui = await uiFixture();
   fixture = await squashedFixture();
-  server = await startServer({ port: 0, home, uiDir: ui.dir, version: "9.9.9" });
+  clock = Date.now();
+  server = await startServer({ port: 0, home, uiDir: ui.dir, version: "9.9.9", now: () => clock });
   repoId = (await readSnapshot(fixture.repo.path, server.context.store, Date.now())).repoId;
   await fixture.squash();
 });
@@ -140,14 +142,44 @@ test("an unknown repo or feature is 404 JSON", async () => {
 test("a repo whose folder was deleted is listed with an error, not a 500", async () => {
   await get("/api/projects");
   await fixture.repo.cleanup();
-  await new Promise((resolve) => setTimeout(resolve, 2100));
+  clock += 3000;
+  await server.context.snapshots.refresh(repoId).catch(() => undefined);
   const { status, body } = await get("/api/projects");
   expect(status).toBe(200);
   const [project] = list(body);
   expect(project).toMatchObject({ id: repoId });
   expect(project?.["error"]).toEqual(expect.any(String));
   expect(project?.["error"]).not.toMatch(/git not found/);
-  expect((await get(`/api/repos/${repoId}/features`)).status).toBe(503);
+  expect((await get(`/api/repos/${repoId}/features`)).status).toBe(200);
+});
+
+test("a repo that never scanned is 503 on its view", async () => {
+  await fixture.repo.cleanup();
+  clock += 3000;
+  const { status, body } = await get(`/api/repos/${repoId}/features`);
+  expect(status).toBe(503);
+  expect(record(body)["error"]).toEqual(expect.any(String));
+});
+
+test("a deleted branch shows as an orphan and links from needs-you", async () => {
+  const { repo } = fixture;
+  await repo.branch("gone");
+  await repo.switch("gone");
+  await repo.commit("gone.txt", "gone\n", "only on gone");
+  await repo.switch("main");
+  await readSnapshot(repo.path, server.context.store, Date.now());
+  await repo.git("branch", "-D", "gone");
+  const view = record((await get(`/api/repos/${repoId}/features`)).body);
+  const [orphan] = list(view["orphans"]);
+  expect(orphan).toMatchObject({ branch: "gone", pinRef: expect.any(String) });
+  expect(record(orphan)["lost"]).toHaveLength(1);
+  const item = list((await get("/api/needs-you")).body).find((candidate) => candidate["orphan"] === "gone");
+  expect(item).toMatchObject({ featureId: null, orphan: "gone" });
+});
+
+test("feature and repo together are 400", async () => {
+  const reply = await get(`/api/activity?repo=${repoId}&feature=${featureId(repoId, COUPONS)}`);
+  expect(reply.status).toBe(400);
 });
 
 test("the read routes need the token", async () => {

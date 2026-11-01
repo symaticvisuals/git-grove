@@ -22,6 +22,8 @@ export type StartServerOptions = {
   uiDir?: string;
   version: string;
   onShutdown?: (code: number) => void;
+  /** The clock the snapshots use; `Date.now` by default. */
+  now?: () => number;
 };
 
 export type RunningServer = { port: number; url: string; token: string; context: ServerContext; close(): Promise<void> };
@@ -76,7 +78,7 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     };
     const context: ServerContext = {
       store: opened,
-      snapshots: createSnapshots(opened),
+      snapshots: createSnapshots(opened, options.now),
       token,
       port: 0,
       version: options.version,

@@ -20,12 +20,16 @@ function owner(snapshot: Snapshot, finding: Finding): string | null {
   return null;
 }
 
-/** The findings of `repo` that need the user, worst first, each with the feature it belongs to. */
+/** The findings of `repo` that need the user, worst first, each with the feature it belongs to, or the deleted branch it is about. */
 export function toNeedsYouItems(repo: StoredRepo, snapshot: Snapshot): NeedsYouItem[] {
-  return needsYou(snapshot.findings).map((finding) => ({
-    repoId: repo.id,
-    repoName: basename(repo.root),
-    featureId: owner(snapshot, finding),
-    finding,
-  }));
+  return needsYou(snapshot.findings).map((finding) => {
+    const featureId = owner(snapshot, finding);
+    return {
+      repoId: repo.id,
+      repoName: basename(repo.root),
+      featureId,
+      orphan: featureId === null && finding.rule === "branch-deleted" ? finding.subject.id : null,
+      finding,
+    };
+  });
 }

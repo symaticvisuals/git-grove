@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
-import { describeError } from "../../../src/cli/describe-error.js";
+import { describeError } from "../../../src/core/describe-error.js";
 import { GitError } from "../../../src/core/git/git.error.js";
 import { runGit } from "../../../src/core/git/run-git.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";

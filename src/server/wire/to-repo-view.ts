@@ -3,7 +3,7 @@ import { worst } from "../../core/rules/needs-you.js";
 import type { Snapshot } from "../../core/snapshot/read-snapshot.js";
 import { healthOf } from "./health-of.js";
 import { toWireFeature } from "./to-wire-feature.js";
-import type { WireProject, WireRepoView, WireSandbox } from "./wire.types.js";
+import type { WireOrphan, WireProject, WireRepoView, WireSandbox } from "./wire.types.js";
 
 function sandboxes(snapshot: Snapshot): WireSandbox[] {
   const { facts, findings } = snapshot;
@@ -23,6 +23,19 @@ function sandboxes(snapshot: Snapshot): WireSandbox[] {
     });
 }
 
+function orphansOf(snapshot: Snapshot): WireOrphan[] {
+  const present = new Set(snapshot.facts.branches.map((branch) => branch.name));
+  const newest = new Map<string, WireOrphan>();
+  for (const entry of snapshot.journal) {
+    if (entry.kind !== "deleted" || present.has(entry.branch)) continue;
+    const held = newest.get(entry.branch);
+    if (held === undefined || held.at <= entry.at) {
+      newest.set(entry.branch, { branch: entry.branch, lost: entry.lost, pinRef: entry.pinRef, lastTip: entry.oldTip, at: entry.at });
+    }
+  }
+  return [...newest.values()];
+}
+
 function cleanupCountOf(snapshot: Snapshot, detached: number): number {
   let merged = 0;
   for (const verdict of snapshot.removals.values()) {
@@ -34,7 +47,7 @@ function cleanupCountOf(snapshot: Snapshot, detached: number): number {
 
 /**
  * The dashboard's view of one repository: its features (stacks and singles) with their levels, the detached
- * sandboxes, every finding, and how many worktrees clean up would offer. `project` and `pins` pass through unchanged.
+ * sandboxes, the deleted branches still unresolved, every finding, and how many worktrees clean up would offer. `project` and `pins` pass through unchanged.
  */
 export function toRepoView(project: WireProject, snapshot: Snapshot, pins: number): WireRepoView {
   const detached = sandboxes(snapshot);
@@ -44,6 +57,7 @@ export function toRepoView(project: WireProject, snapshot: Snapshot, pins: numbe
     lastFetchAt: snapshot.facts.lastFetchAt,
     features: snapshot.features.filter((feature) => feature.kind !== "detached").map((feature) => toWireFeature(snapshot, feature)),
     detached,
+    orphans: orphansOf(snapshot),
     findings: snapshot.findings,
     cleanupCount: cleanupCountOf(snapshot, detached.length),
   };

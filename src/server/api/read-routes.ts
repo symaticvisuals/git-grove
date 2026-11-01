@@ -54,6 +54,7 @@ export function registerReadRoutes(router: Router): void {
     const limit = limitOf(req.query.get("limit"));
     const featureParam = req.query.get("feature");
     const repoParam = req.query.get("repo");
+    if (featureParam !== null && repoParam !== null) throw new InvalidInputError("give either feature or repo, not both");
     if (featureParam !== null) {
       const id = parseFeatureId(featureParam);
       if (id === null) throw new HttpError(404, "unknown feature");

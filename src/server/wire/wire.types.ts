@@ -39,12 +39,16 @@ export type WireFeature = { id: string; repoId: number; name: string; kind: Feat
 
 export type WireSandbox = { path: string; rel: string; head: string | null; touchedAt: number | null; health: Health; state: string };
 
+/** A deleted branch whose unique commits are still unresolved; they are kept at `pinRef`. */
+export type WireOrphan = { branch: string; lost: string[]; pinRef: string | null; lastTip: string; at: number };
+
 export type WireRepoView = {
   project: WireProject;
   trunk: string;
   lastFetchAt: number | null;
   features: WireFeature[];
   detached: WireSandbox[];
+  orphans: WireOrphan[];
   findings: Finding[];
   cleanupCount: number;
 };
@@ -70,9 +74,13 @@ export type ActivityItem = {
   branch: string | null;
   title: string;
   detail: string;
-  severity: Severity | "info" | null;
+  severity: Severity | "info";
 };
 
 export type WireFeatureDetail = { feature: WireFeature; rewrites: WireRewrite[]; activity: ActivityItem[] };
 
-export type NeedsYouItem = { repoId: number; repoName: string; featureId: string | null; finding: Finding };
+export type NeedsYouItem = { repoId: number; repoName: string; featureId: string | null;
+  /** The deleted branch the finding is about, which has no feature. */
+  orphan: string | null;
+  finding: Finding;
+};

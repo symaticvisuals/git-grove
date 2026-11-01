@@ -43,12 +43,18 @@ export type Store = {
   swapTip(repoId: number, swap: TipSwap): { swapped: boolean; entryId: number | null };
   /** Returns the entry's id. A change the journal already holds (same branch, old and new tip) takes `entry`'s values. */
   record(repoId: number, entry: JournalEntry): number;
-  /** `unresolved` keeps `rewritten` and `deleted` entries that are not acked. */
-  entries(repoId: number, options?: { unresolved?: boolean }): JournalEntry[];
+  /**
+   * Oldest first. `unresolved` keeps `rewritten` and `deleted` entries that are not acked; `afterId` keeps entries with a
+   * greater id; `branches` keeps those of the named branches; `limit` keeps the newest that many.
+   */
+  entries(
+    repoId: number,
+    options?: { unresolved?: boolean; afterId?: number; branches?: readonly string[]; limit?: number },
+  ): JournalEntry[];
   ack(repoId: number, entryId: number, at: number): void;
   /** Returns the item's id. */
   addActivity(repoId: number, item: ActivityItem): number;
-  /** Newest first; `repoId` null reads every repository's. */
-  activity(repoId: number | null, limit: number): StoredActivity[];
+  /** Newest first; `repoId` null reads every repository's; `branches` keeps items on those branches. */
+  activity(repoId: number | null, limit: number, branches?: readonly string[]): StoredActivity[];
   close(): void;
 };

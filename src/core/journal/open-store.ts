@@ -289,7 +289,25 @@ export function openStore(path: string = defaultPath()): Store {
     },
     record: insertEntry,
     entries(repoId, options = {}) {
-      return (options.unresolved ? statements.unresolved : statements.entries).all(repoId).map(readEntry);
+      const { afterId, branches, limit } = options;
+      if (afterId === undefined && branches === undefined && limit === undefined) {
+        return (options.unresolved ? statements.unresolved : statements.entries).all(repoId).map(readEntry);
+      }
+      const where = ["repo_id = ?"];
+      const params: (number | string)[] = [repoId];
+      if (options.unresolved) where.push("kind IN ('rewritten', 'deleted') AND acked_at IS NULL");
+      if (afterId !== undefined) {
+        where.push("id > ?");
+        params.push(afterId);
+      }
+      if (branches !== undefined) {
+        where.push(`ref IN (${branches.map(() => "?").join(", ")})`);
+        params.push(...branches);
+      }
+      const page = limit === undefined ? "" : " ORDER BY at DESC, id DESC LIMIT ?";
+      if (limit !== undefined) params.push(limit);
+      const rows = db.prepare(`SELECT ${ENTRY_COLUMNS} FROM journal WHERE ${where.join(" AND ")}${page || " ORDER BY at, id"}`).all(...params).map(readEntry);
+      return limit === undefined ? rows : rows.reverse();
     },
     ack(repoId, entryId, at) {
       statements.ack.run(at, repoId, entryId);
@@ -299,7 +317,12 @@ export function openStore(path: string = defaultPath()): Store {
       if (row === undefined) throw new StoreCorruptError("activity.id");
       return integer(row, "id");
     },
-    activity(repoId, limit) {
+    activity(repoId, limit, branches) {
+      if (branches !== undefined) {
+        const where = [...(repoId === null ? [] : ["repo_id = ?"]), `branch IN (${branches.map(() => "?").join(", ")})`];
+        const sql = `SELECT id, repo_id, kind, branch, title, detail, at FROM activity WHERE ${where.join(" AND ")} ORDER BY at DESC, id DESC LIMIT ?`;
+        return db.prepare(sql).all(...(repoId === null ? [] : [repoId]), ...branches, limit).map(readActivity);
+      }
       const rows = repoId === null ? statements.allActivity.all(limit) : statements.activity.all(repoId, limit);
       return rows.map(readActivity);
     },
