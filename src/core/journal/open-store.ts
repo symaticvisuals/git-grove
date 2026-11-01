@@ -1,8 +1,8 @@
 import { mkdirSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLOutputValue, type StatementResultingChanges } from "node:sqlite";
 import type { Sha } from "../facts/facts.types.js";
+import { groveHome } from "../grove-home.js";
 import type { ChangeKind } from "./classify-tip-change.js";
 import { StoreCorruptError } from "./store-corrupt.error.js";
 import { StoreUnavailableError } from "./store-unavailable.error.js";
@@ -154,7 +154,7 @@ function inTransaction<T>(db: DatabaseSync, work: () => T): T {
 }
 
 function defaultPath(): string {
-  return join(process.env["GIT_GROVE_HOME"] ?? join(homedir(), ".git-grove"), "grove.db");
+  return join(groveHome(), "grove.db");
 }
 
 function reasonOf(error: unknown): string {

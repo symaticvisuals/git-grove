@@ -11,11 +11,33 @@ import { describeError } from "./describe-error.js";
 import { runActionCommand } from "./run-action.js";
 
 type Parsed = {
-  values: { version?: boolean; help?: boolean; json?: boolean; stash?: boolean; "dry-run"?: boolean };
+  values: {
+    version?: boolean;
+    help?: boolean;
+    json?: boolean;
+    stash?: boolean;
+    "dry-run"?: boolean;
+    branch?: string;
+    from?: string;
+    on?: string;
+    "skip-env"?: boolean;
+    install?: boolean;
+    open?: boolean;
+  };
   positionals: string[];
 };
 
-type Flags = { json: boolean; stash: boolean; dryRun: boolean };
+type Flags = {
+  json: boolean;
+  stash: boolean;
+  dryRun: boolean;
+  branch: string | undefined;
+  from: string | undefined;
+  on: string | undefined;
+  skipEnv: boolean;
+  install: boolean;
+  open: boolean;
+};
 
 type Command = (io: CliIo) => Promise<number>;
 
@@ -29,9 +51,15 @@ const USAGE = `Usage: git grove <command> [options]
   restack <feature> [--stash]       move each level of a stack onto its parent;
           [--dry-run] [--json]        --stash sets uncommitted changes aside
   stack plan <feature> [--json]     show what restack would do, changing nothing
+  new <feature> [--branch <b>]      start a feature: level 01 on the trunk, in
+          [--from <trunk>]            .worktrees/<feature>/01-<branch>
+          [--skip-env] [--install] [--open] [--dry-run] [--json]
+  add-level <feature> <branch>      add the next level, on the deepest one
+          [--on <parent-branch>]      or on --on's branch; same options as new
+          [--skip-env] [--install] [--open] [--dry-run] [--json]
 `;
 
-const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack"]);
+const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level"]);
 
 function hasVersion(value: unknown): value is { version: string } {
   return typeof value === "object" && value !== null && "version" in value && typeof value.version === "string";
@@ -57,12 +85,33 @@ function parse(argv: string[]): Parsed {
       json: { type: "boolean" },
       stash: { type: "boolean" },
       "dry-run": { type: "boolean" },
+      branch: { type: "string" },
+      from: { type: "string" },
+      on: { type: "string" },
+      "skip-env": { type: "boolean" },
+      install: { type: "boolean" },
+      open: { type: "boolean" },
     },
   });
 }
 
-function route(positionals: string[], { json, stash, dryRun }: Flags): Command | null {
+function route(positionals: string[], flags: Flags): Command | null {
+  const { json, stash, dryRun } = flags;
   const [name, first, second, extra] = positionals;
+  const creating = flags.branch !== undefined || flags.from !== undefined || flags.on !== undefined || flags.skipEnv || flags.install || flags.open;
+  const options = { dryRun, json };
+  const level = { env: !flags.skipEnv, install: flags.install, open: flags.open };
+  if (name === "new") {
+    return first !== undefined && second === undefined && !stash && flags.on === undefined
+      ? (io) => runActionCommand(io, "new", { feature: first, branch: flags.branch, from: flags.from, ...level }, options)
+      : null;
+  }
+  if (name === "add-level") {
+    return first !== undefined && second !== undefined && extra === undefined && !stash && flags.branch === undefined && flags.from === undefined
+      ? (io) => runActionCommand(io, "add-level", { feature: first, branch: second, on: flags.on, ...level }, options)
+      : null;
+  }
+  if (creating) return null;
   if (name === "restack") {
     return first !== undefined && second === undefined
       ? (io) => runActionCommand(io, "restack", { feature: first, stash }, { dryRun, json })
@@ -111,8 +160,18 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
     return 0;
   }
 
-  const { json, stash, "dry-run": dryRun } = args.values;
-  const command = route(args.positionals, { json: json === true, stash: stash === true, dryRun: dryRun === true });
+  const { values } = args;
+  const command = route(args.positionals, {
+    json: values.json === true,
+    stash: values.stash === true,
+    dryRun: values["dry-run"] === true,
+    branch: values.branch,
+    from: values.from,
+    on: values.on,
+    skipEnv: values["skip-env"] === true,
+    install: values.install === true,
+    open: values.open === true,
+  });
   if (command === null) {
     const [name] = args.positionals;
     io.err(name !== undefined && !COMMANDS.has(name) ? `Unknown command: ${name}\n${USAGE}` : USAGE);

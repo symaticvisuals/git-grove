@@ -1,13 +1,7 @@
 import { access } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import type { RepoFacts } from "./facts.types.js";
-import { listIgnoredFiles } from "./list-ignored-files.js";
-
-const ENV_SCAN_LIMIT = 100_000;
-
-function isEnvFile(relative: string): boolean {
-  return basename(relative).startsWith(".env");
-}
+import { listMainEnvFiles } from "./list-main-env-files.js";
 
 function exists(path: string): Promise<boolean> {
   return access(path).then(
@@ -23,17 +17,10 @@ function exists(path: string): Promise<boolean> {
 export async function readEnvMissing(
   _cwd: string,
   facts: RepoFacts,
-  scanLimit: number = ENV_SCAN_LIMIT,
+  scanLimit?: number,
 ): Promise<Map<string, string[]>> {
   const result = new Map<string, string[]>();
-  const main = facts.worktrees.find((worktree) => worktree.isMain);
-  if (!main) return result;
-  const listing = await listIgnoredFiles(
-    main.path,
-    facts.worktrees.filter((worktree) => !worktree.isMain).map((worktree) => worktree.path),
-    { limit: scanLimit, accept: isEnvFile },
-  );
-  const envFiles = listing.files;
+  const envFiles = await listMainEnvFiles(facts, scanLimit);
   for (const worktree of facts.worktrees) {
     if (worktree.isMain || worktree.prunable || worktree.branch === null) continue;
     const missing: string[] = [];

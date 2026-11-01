@@ -1,5 +1,8 @@
 import type { ActionContext, ActionDef, Prepared } from "./action.types.js";
 import { ackAction } from "./ack-action.js";
+import { addLevelAction } from "./create/add-level-action.js";
+import { copyEnvAction } from "./create/copy-env-action.js";
+import { newFeatureAction } from "./create/new-feature-action.js";
 import { InvalidInputError } from "./invalid-input.error.js";
 import type { ActionName } from "./plan.types.js";
 import { restackAction } from "./restack/restack-action.js";
@@ -10,6 +13,9 @@ export const ACTIONS: Partial<Record<ActionName, ActionDef>> = {
   restore: restoreAction,
   ack: ackAction,
   restack: restackAction,
+  new: newFeatureAction,
+  "add-level": addLevelAction,
+  "copy-env": copyEnvAction,
 };
 
 /** Prepares the named action from `raw`. Throws InvalidInputError for an action that is not registered. */
