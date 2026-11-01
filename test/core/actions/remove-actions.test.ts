@@ -235,7 +235,21 @@ test("a precious file inside a git repository nested in the worktree is never re
   await write(join(old, ".local", "clone", "notes.md"), "mine\n");
   await repo.git("init", "-q", join(old, ".local", "clone"));
   const plan = await prepare("remove", { worktree: old, rescue: true });
-  expect(plan.blockers.join("\n")).toContain(".local/clone");
+  expect(plan.blockers).toContain("a git repository of its own inside this folder: .local/clone");
+  expect(plan.checks).toContainEqual(expect.objectContaining({ ok: false, text: "A git repository of its own inside this folder" }));
+});
+
+test("a plain rm of a worktree whose nested repository's files all match main is blocked", async () => {
+  await rm(join(old, ".local", "seed.sql"));
+  const clone = join(old, ".local", "clone");
+  await repo.git("init", "-q", clone);
+  await commitIn(clone, "a.txt", "same\n");
+  await write(join(root, ".local", "clone", "a.txt"), "same\n");
+  const plan = await prepare("remove", { worktree: old });
+  expect(plan.blockers).toEqual(["a git repository of its own inside this folder: .local/clone"]);
+  const receipt = await runPrepared(ctx, await prepareAction("remove", ctx, { worktree: old }), () => undefined);
+  expect(receipt.refused).toBe(true);
+  expect(existsSync(join(clone, ".git"))).toBe(true);
 });
 
 test("rm of a clean detached sandbox removes it", async () => {
@@ -295,7 +309,7 @@ test("cleanup skips one that gained a precious file after the plan and removes t
   expect(events.find((event) => event.index === index)?.state).toBe("skipped");
   expect(receipt.ok).toBe(false);
   expect(receipt.title).toBe("Cleaned up 1 of 2 worktrees");
-  expect(receipt.lines.join("\n")).toContain(".worktrees/agent-1 was not removed");
+  expect(receipt.lines.join("\n")).toContain("Skipped .worktrees/agent-1: ");
   expect(receipt.lines.join("\n")).toContain(".local/scratch.md");
   expect(existsSync(box)).toBe(true);
   expect(existsSync(old)).toBe(false);
@@ -317,13 +331,27 @@ test("cleanup keeps a worktree whose copy does not match, says what it copied, a
   expect(existsSync(box)).toBe(false);
 });
 
-test("cleanup refuses, changing nothing, when a picked worktree was edited after the plan", async () => {
+test("cleanup skips only the picked worktree that was edited after the plan, and removes the rest", async () => {
   const box = await sandbox("agent-1");
-  const { receipt } = await run("cleanup", {}, () => write(join(box, "base.txt"), "edited\n"));
-  expect(receipt.refused).toBe(true);
-  expect(receipt.lines).toContain("base.txt changed in .worktrees/agent-1");
+  const { plan, receipt, events } = await run("cleanup", {}, () => write(join(box, "base.txt"), "edited\n"));
+  expect(plan.expects).toEqual([]);
+  const index = plan.steps.findIndex((step) => step.title === ".worktrees/agent-1: remove folder");
+  expect(events.find((event) => event.index === index)).toMatchObject({ state: "skipped", detail: "base.txt changed in .worktrees/agent-1" });
+  expect(receipt.refused).toBe(false);
+  expect(receipt.ok).toBe(false);
+  expect(receipt.lines).toContain("Skipped .worktrees/agent-1: base.txt changed in .worktrees/agent-1");
+  expect(await readFile(join(box, "base.txt"), "utf8")).toBe("edited\n");
+  expect(existsSync(old)).toBe(false);
+  expect(await readFile(join(root, ".local", "seed.sql"), "utf8")).toBe(SEED);
+});
+
+test("cleanup skips a merged worktree whose branch moved after the plan", async () => {
+  const box = await sandbox("agent-1");
+  const { receipt } = await run("cleanup", {}, () => commitIn(old, "late.txt", "late\n"));
+  expect(receipt.lines.join("\n")).toMatch(/^Skipped \.worktrees\/old: old moved: was [0-9a-f]{7}, now [0-9a-f]{7}$/m);
   expect(existsSync(old)).toBe(true);
   expect(existsSync(join(root, ".local", "seed.sql"))).toBe(false);
+  expect(existsSync(box)).toBe(false);
 });
 
 test("cleanup with nothing picked is blocked with \"Pick at least one worktree.\"", async () => {

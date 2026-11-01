@@ -1,5 +1,7 @@
+import { readRepoFacts } from "../../facts/read-repo-facts.js";
 import { plural } from "../../rules/plural.js";
 import type { ExecuteResult, RunContext } from "../action.types.js";
+import { checkExpectations } from "../check-expectations.js";
 import { errorLine } from "../error-line.js";
 import { copiedLine } from "./copied-line.js";
 import type { Removal } from "./read-removal.js";
@@ -8,7 +10,23 @@ import { removeWorktreeSafely } from "./remove-worktree-safely.js";
 import { rescueFiles } from "./rescue-files.js";
 import { verifyCopies, type RescuedFile } from "./verify-copies.js";
 
-type Outcome = { removal: Removal; copied: RescuedFile[]; why: string | null };
+type Outcome = { removal: Removal; copied: RescuedFile[]; state: "removed" | "skipped" | "kept"; why: string };
+
+async function recheck(root: string, removal: Removal): Promise<string[]> {
+  try {
+    const fresh = await readRepoFacts(root);
+    const changed = await checkExpectations(fresh, removal.expects);
+    if (changed.length > 0) return changed;
+    return await removalReasons(fresh, removal.worktree.path, new Set(removal.copies.map((copy) => copy.from)));
+  } catch (error) {
+    return [errorLine(error)];
+  }
+}
+
+function outcomeLine({ removal, state, why }: Outcome): string {
+  if (state === "removed") return `Removed ${removal.shown}`;
+  return state === "skipped" ? `Skipped ${removal.shown}: ${why}` : `${removal.shown} was not removed: ${why}`;
+}
 
 async function cleanOne(root: string, removal: Removal, first: number, run: RunContext): Promise<Outcome> {
   const { worktree, copies } = removal;
@@ -18,12 +36,11 @@ async function cleanOne(root: string, removal: Removal, first: number, run: RunC
     for (let at = index; at <= last; at++) run.skip(at, why);
   };
 
-  const planned = new Set(copies.map((copy) => copy.from));
-  const reasons = await removalReasons(root, worktree.path, planned).catch((error: unknown) => [errorLine(error)]);
+  const reasons = await recheck(root, removal);
   if (reasons.length > 0) {
     const why = reasons.join("; ");
     skipFrom(first, why);
-    return { removal, copied, why };
+    return { removal, copied, state: "skipped", why };
   }
   for (const [offset, { from }] of copies.entries()) {
     try {
@@ -34,7 +51,7 @@ async function cleanOne(root: string, removal: Removal, first: number, run: RunC
       });
     } catch (error) {
       skipFrom(first + offset + 1, "A copy failed, so the folder stays");
-      return { removal, copied, why: errorLine(error) };
+      return { removal, copied, state: "kept", why: errorLine(error) };
     }
   }
   try {
@@ -45,14 +62,15 @@ async function cleanOne(root: string, removal: Removal, first: number, run: RunC
       return worktree.branch === null ? "removed" : "branch kept";
     });
   } catch (error) {
-    return { removal, copied, why: errorLine(error) };
+    return { removal, copied, state: "kept", why: errorLine(error) };
   }
-  return { removal, copied, why: null };
+  return { removal, copied, state: "removed", why: "" };
 }
 
 /**
- * Runs a clean up plan from `run.firstStep`, one picked worktree after another. Before a worktree's first step its
- * full verdict is re-read: any reason beyond the precious files the plan copies skips all of its steps. Its files are
+ * Runs a clean up plan from `run.firstStep`, one picked worktree after another. Before a worktree's first step it is
+ * checked against what the plan read (its head, tip, uncommitted paths and operation) and its full verdict is re-read:
+ * any change, or any reason beyond the precious files the plan copies, skips all of its steps. Its files are
  * then copied to main and checked, and the folder is removed only if the verdict, read once more, is still clear.
  * A worktree that is skipped or fails stays, and the run carries on with the next; the receipt names each one.
  */
@@ -63,11 +81,8 @@ export async function runCleanup(picked: Removal[], run: RunContext): Promise<Ex
     outcomes.push(await cleanOne(run.facts.root, removal, first, run));
     first += removal.copies.length + 1;
   }
-  const removed = outcomes.filter((outcome) => outcome.why === null).length;
-  const lines = outcomes.flatMap(({ removal, copied, why }) => [
-    ...copied.map(copiedLine),
-    why === null ? `Removed ${removal.shown}` : `${removal.shown} was not removed: ${why}`,
-  ]);
+  const removed = outcomes.filter((outcome) => outcome.state === "removed").length;
+  const lines = outcomes.flatMap((outcome) => [...outcome.copied.map(copiedLine), outcomeLine(outcome)]);
   const ok = removed === outcomes.length;
   return {
     ok,

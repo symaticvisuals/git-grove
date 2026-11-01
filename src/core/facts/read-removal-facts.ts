@@ -39,30 +39,37 @@ async function readUncommitted(worktree: WorktreeFacts): Promise<Read<number>> {
   return { value: result.stdout.split("\n").filter((line) => /^[12u] /.test(line)).length, failed: null };
 }
 
-async function readUntracked(worktree: WorktreeFacts, nested: string[]): Promise<Read<string[]>> {
+async function readUntracked(worktree: WorktreeFacts, nested: string[]): Promise<Read<{ files: string[]; repos: string[] }>> {
   const result = await runGit(["ls-files", "--others", "--exclude-standard", "-z"], {
     cwd: worktree.path,
     allowFailure: true,
   }).catch(() => null);
-  if (!result || result.code !== 0) return { value: [], failed: "untracked files" };
+  if (!result || result.code !== 0) return { value: { files: [], repos: [] }, failed: "untracked files" };
   const entries = result.stdout
     .split("\0")
     .filter((entry) => entry !== "" && !nested.includes(join(worktree.path, entry.replace(/\/$/, ""))));
-  return { value: entries, failed: null };
+  const files = entries.filter((entry) => !entry.endsWith("/"));
+  const repos = entries.filter((entry) => entry.endsWith("/")).map((entry) => entry.slice(0, -1));
+  return { value: { files, repos }, failed: null };
 }
 
-async function readPrecious(worktree: WorktreeFacts, main: WorktreeFacts, others: string[]): Promise<Read<{ files: string[]; truncated: boolean }>> {
+type Precious = { files: string[]; truncated: boolean; repos: string[] };
+
+const NO_PRECIOUS: Precious = { files: [], truncated: false, repos: [] };
+
+async function readPrecious(worktree: WorktreeFacts, main: WorktreeFacts, others: string[]): Promise<Read<Precious>> {
   try {
     const listing = await listIgnoredFiles(worktree.path, others);
     const failed = listing.unreadable.length > 0 ? `ignored files in ${listing.unreadable.join(", ")}` : null;
-    if (listing.truncated) return { value: { files: [], truncated: true }, failed };
+    const repos = listing.nestedRepos;
+    if (listing.truncated) return { value: { files: [], truncated: true, repos }, failed };
     const kept: string[] = [];
     for (const file of listing.files) {
       if (!(await sameFileInBoth(worktree.path, main.path, file))) kept.push(file);
     }
-    return { value: { files: kept, truncated: false }, failed };
+    return { value: { files: kept, truncated: false, repos }, failed };
   } catch {
-    return { value: { files: [], truncated: false }, failed: "ignored files" };
+    return { value: NO_PRECIOUS, failed: "ignored files" };
   }
 }
 
@@ -84,7 +91,7 @@ async function folderExists(path: string): Promise<boolean> {
 /**
  * Gathers everything that deleting a worktree could lose: uncommitted and untracked work,
  * commits that are neither pushed nor merged, commits only a detached HEAD holds, stashes for its branch,
- * ignored files that exist nowhere else, and worktrees nested inside it.
+ * ignored files that exist nowhere else, and worktrees and git repositories of their own nested inside it.
  * A read that fails is reported in `unreadable` and never counted as empty; the other reads still count.
  * A prunable worktree whose folder is gone skips the on-disk checks and keeps the repository-level ones;
  * one whose folder still exists is reported as unreadable.
@@ -104,8 +111,8 @@ export async function readRemovalFacts(cwd: string, worktreePath: string, facts:
 
   const [uncommitted, untracked, precious, unpushed, detachedCommits] = await Promise.all([
     onDisk ? readUncommitted(worktree) : { value: 0, failed: null },
-    onDisk ? readUntracked(worktree, nestedWorktrees) : { value: [], failed: null },
-    onDisk ? readPrecious(worktree, main, others) : { value: { files: [], truncated: false }, failed: null },
+    onDisk ? readUntracked(worktree, nestedWorktrees) : { value: { files: [], repos: [] }, failed: null },
+    onDisk ? readPrecious(worktree, main, others) : { value: NO_PRECIOUS, failed: null },
     readUnpushed(cwd, worktree, facts),
     readDetached(cwd, worktree),
   ]);
@@ -113,13 +120,14 @@ export async function readRemovalFacts(cwd: string, worktreePath: string, facts:
   return {
     path: worktree.path,
     uncommitted: uncommitted.value,
-    untracked: untracked.value,
+    untracked: untracked.value.files,
     unpushed: unpushed.value,
     detachedCommits: detachedCommits.value,
     stashes: worktree.branch === null ? 0 : facts.stashes.filter((stash) => stash.branch === worktree.branch).length,
     preciousIgnored: precious.value.files,
     ignoredTruncated: precious.value.truncated,
     nestedWorktrees,
+    nestedRepos: [...new Set([...untracked.value.repos, ...precious.value.repos])].sort(),
     unreadable: [...orphaned, uncommitted.failed, untracked.failed, precious.failed, unpushed.failed, detachedCommits.failed].filter(
       (item) => item !== null,
     ),

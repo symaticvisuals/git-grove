@@ -21,8 +21,11 @@ const REGENERABLE_FOLDERS = new Set([
 const JUNK_FOLDERS = new Set(["__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"]);
 const JUNK_FILES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
 
-/** `unreadable` holds the worktree-relative folders (ending in `/`) and files the walk could not inspect. */
-export type IgnoredListing = { files: string[]; truncated: boolean; unreadable: string[] };
+/**
+ * `unreadable` holds the worktree-relative folders (ending in `/`) and files the walk could not inspect;
+ * `nestedRepos` the worktree-relative folders, inside ignored ones, that hold a `.git` of their own.
+ */
+export type IgnoredListing = { files: string[]; truncated: boolean; unreadable: string[]; nestedRepos: string[] };
 
 export type IgnoredListingOptions = {
   limit?: number;
@@ -66,19 +69,23 @@ async function* walk(
   root: string,
   relative: string,
   skipFolders: readonly string[],
-  unreadable: string[],
+  found: Pick<IgnoredListing, "unreadable" | "nestedRepos">,
 ): AsyncGenerator<string> {
   const entries = await readEntries(join(root, relative));
   if (entries === null) {
-    unreadable.push(relative);
+    found.unreadable.push(relative);
     return;
   }
   for (const entry of entries) {
     const child = `${relative}${entry.name}`;
-    if (entry.name === ".git" || entry.isSymbolicLink()) continue;
+    if (entry.name === ".git") {
+      found.nestedRepos.push(relative.replace(/\/$/, ""));
+      continue;
+    }
+    if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
       if (JUNK_FOLDERS.has(entry.name) || isInside(join(root, child), skipFolders)) continue;
-      yield* walk(root, `${child}/`, skipFolders, unreadable);
+      yield* walk(root, `${child}/`, skipFolders, found);
     } else if (!JUNK_FILES.has(entry.name)) {
       yield child;
     }
@@ -100,6 +107,8 @@ async function fileKind(path: string): Promise<"symlink" | "file" | "unreadable"
  * is dropped everywhere. Symlinks and folders that are other worktrees are skipped.
  * Directory entries git reports alongside their contents are collapsed to one entry per file.
  * Folders that cannot be opened and files that cannot be inspected are listed in `unreadable`.
+ * A walked folder holding a `.git` folder or file is a git repository of its own and is listed in `nestedRepos`; its
+ * files are still examined. Regenerable and junk folders are not walked, so repositories inside them are not found.
  * Stops and reports `truncated` once more than `limit` accepted files have been examined.
  */
 export async function listIgnoredFiles(
@@ -125,7 +134,7 @@ export async function listIgnoredFiles(
   };
   const nested = otherWorktrees.filter((other) => other.startsWith(worktreePath + sep));
   const files = new Set<string>();
-  const unreadable: string[] = [];
+  const found: Pick<IgnoredListing, "unreadable" | "nestedRepos"> = { unreadable: [], nestedRepos: [] };
   const add = (file: string): boolean => {
     if (accept(file)) files.add(file);
     return files.size > limit;
@@ -134,13 +143,13 @@ export async function listIgnoredFiles(
     if (entry === "" || isJunk(entry) || (await inIgnoredRegenerable(entry, isIgnoredFolder))) continue;
     if (!entry.endsWith("/")) {
       const kind = await fileKind(join(worktreePath, entry));
-      if (kind === "unreadable") unreadable.push(entry);
-      else if (kind === "file" && add(entry)) return { files: [], truncated: true, unreadable };
+      if (kind === "unreadable") found.unreadable.push(entry);
+      else if (kind === "file" && add(entry)) return { files: [], truncated: true, ...found };
     } else if (!isInside(join(worktreePath, entry), nested)) {
-      for await (const file of walk(worktreePath, entry, nested, unreadable)) {
-        if (add(file)) return { files: [], truncated: true, unreadable };
+      for await (const file of walk(worktreePath, entry, nested, found)) {
+        if (add(file)) return { files: [], truncated: true, ...found };
       }
     }
   }
-  return { files: [...files], truncated: false, unreadable };
+  return { files: [...files], truncated: false, ...found };
 }

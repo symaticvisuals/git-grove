@@ -308,3 +308,33 @@ test("detached sandboxes are not checked for env files, while a branch worktree 
   expect([...missing.keys()]).toEqual([branch]);
   expect(missing.get(branch)).toEqual([".env"]);
 });
+
+test("an ignored git repository inside the worktree is nested-repo, even when its files match main's", async () => {
+  const wt = await mergedWorktree("cloned");
+  const clone = join(wt, ".local", "clone");
+  await write(join(clone, "a.txt"), "same\n");
+  await repo.git("init", "-q", clone);
+  await repo.git("-C", clone, "add", "a.txt");
+  await repo.git("-C", clone, "commit", "-m", "only here");
+  await write(join(root, ".local", "clone", "a.txt"), "same\n");
+  const verdict = await verdictFor(wt);
+  expect(verdict.ok).toBe(false);
+  expect(verdict.reasons).toEqual([
+    { code: "nested-repo", detail: "a git repository of its own inside this folder", paths: [".local/clone"] },
+  ]);
+});
+
+test("an untracked git repository inside the worktree is nested-repo, not an untracked file", async () => {
+  const wt = await mergedWorktree("vendored");
+  await write(join(wt, "vendor", "lib", "b.txt"), "b\n");
+  await repo.git("init", "-q", join(wt, "vendor", "lib"));
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons).toEqual([expect.objectContaining({ code: "nested-repo", paths: ["vendor/lib"] })]);
+});
+
+test("a registered worktree nested inside is nested-worktree, never nested-repo", async () => {
+  const outer = await mergedWorktree("host");
+  await repo.git("worktree", "add", "-b", "guest", join(outer, ".local", "guest"));
+  const verdict = await verdictFor(outer);
+  expect(verdict.reasons.map((reason) => reason.code)).toEqual(["nested-worktree"]);
+});

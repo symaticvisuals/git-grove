@@ -68,6 +68,20 @@ test("rm on precious files exits 3 and names --rescue", async () => {
   expect(existsSync(old)).toBe(true);
 });
 
+test("rm of a worktree holding a nested git repository exits 3, with or without --rescue", async () => {
+  await rm(join(old, ".local", "seed.sql"));
+  const clone = join(old, ".local", "clone");
+  await write(join(clone, "a.txt"), "same\n");
+  await repo.git("init", "-q", clone);
+  await write(join(root, ".local", "clone", "a.txt"), "same\n");
+  for (const argv of [["rm", ".worktrees/old"], ["rm", ".worktrees/old", "--rescue"]]) {
+    const result = await grove(argv);
+    expect(result.code).toBe(3);
+    expect(result.out).toContain("a git repository of its own inside this folder: .local/clone");
+  }
+  expect(existsSync(join(clone, ".git"))).toBe(true);
+});
+
 test("rm of the main worktree exits 3", async () => {
   const result = await grove(["rm", "."]);
   expect(result.code).toBe(3);

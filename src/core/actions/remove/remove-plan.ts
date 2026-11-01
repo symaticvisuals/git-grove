@@ -12,7 +12,6 @@ import { describeReason } from "./describe-reason.js";
 import { formatSize } from "./format-size.js";
 import type { Removal } from "./read-removal.js";
 import { removalCommands } from "./removal-commands.js";
-import { removalExpects } from "./removal-expects.js";
 
 /** A remove plan's reading: the worktree, whether to rescue its precious files, and whether its branch has landed. */
 export type RemoveRead = { removal: Removal; rescue: boolean; landed: boolean };
@@ -44,11 +43,10 @@ function ignoredCheck(read: RemoveRead, reason: (code: ReasonCode) => Reason | u
   if (copies.length === 0) return { ok: true, text: "No ignored files exist only here", why: null };
   const listed = copies.map((copy) => (copy.size === null ? copy.from : `${copy.from}, ${formatSize(copy.size)}`));
   const shown = copies.length > 3 ? [...listed.slice(0, 3), `and ${copies.length - 3} more`] : listed;
-  const rescued = read.rescue && read.removal.nestedRepo === null;
   return {
-    ok: rescued,
+    ok: read.rescue,
     text: `${plural(copies.length, "ignored file")} ${copies.length === 1 ? "exists" : "exist"} only here`,
-    why: `${shown.join("; ")}, ${rescued ? "copied to main first" : "not in the main checkout"}`,
+    why: `${shown.join("; ")}, ${read.rescue ? "copied to main first" : "not in the main checkout"}`,
   };
 }
 
@@ -58,6 +56,7 @@ function checksOf(facts: RepoFacts, read: RemoveRead): Check[] {
   const reason = (code: ReasonCode): Reason | undefined => verdict.reasons.find((candidate) => candidate.code === code);
   const work = WORK.flatMap((code) => verdict.reasons.filter((candidate) => candidate.code === code));
   const nested = reason("nested-worktree");
+  const repos = reason("nested-repo");
   const unreadable = reason("unreadable");
   return [
     mergeCheck(facts, read, reason),
@@ -67,6 +66,7 @@ function checksOf(facts: RepoFacts, read: RemoveRead): Check[] {
     nested
       ? { ok: false, text: sentence(nested.detail), why: listPaths(nested.paths.map((path) => displayPath(facts.root, path))) }
       : { ok: true, text: "No worktree inside this folder", why: null },
+    ...(repos ? [{ ok: false, text: sentence(repos.detail), why: `${listPaths(repos.paths)}; its history would go with the folder` }] : []),
     ignoredCheck(read, reason),
     ...(unreadable ? [{ ok: false, text: sentence(unreadable.detail), why: null }] : []),
   ];
@@ -132,7 +132,7 @@ export function removePlan(facts: RepoFacts, read: RemoveRead): Plan {
         : "If anything new turns up in the folder, grove stops before removing it.",
     undoable: false,
     moves: [],
-    expects: removalExpects(facts, removal),
+    expects: removal.expects,
     readAt: facts.readAt,
   };
 }

@@ -34,6 +34,11 @@ export function safeToRemove(facts: RemovalFacts): Verdict {
   if (facts.nestedWorktrees.length > 0) {
     reasons.push({ code: "nested-worktree", detail: `${plural(facts.nestedWorktrees.length, "worktree")} inside this folder`, paths: facts.nestedWorktrees });
   }
+  if (facts.nestedRepos.length > 0) {
+    const count = facts.nestedRepos.length;
+    const repos = count === 1 ? "a git repository" : `${count} git repositories`;
+    reasons.push({ code: "nested-repo", detail: `${repos} of its own inside this folder`, paths: facts.nestedRepos });
+  }
   if (facts.unreadable.length > 0) {
     reasons.push({ code: "unreadable", detail: `could not read ${facts.unreadable.join(", ")}`, paths: [] });
   }

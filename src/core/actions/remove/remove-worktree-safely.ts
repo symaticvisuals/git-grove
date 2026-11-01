@@ -1,3 +1,4 @@
+import { readRepoFacts } from "../../facts/read-repo-facts.js";
 import { runGit } from "../../git/run-git.js";
 import { removalReasons } from "./removal-reasons.js";
 
@@ -12,7 +13,7 @@ export async function removeWorktreeSafely(
   path: string,
   rescued: ReadonlySet<string>,
 ): Promise<{ removed: true } | { removed: false; reasons: string[] }> {
-  const reasons = await removalReasons(root, path, rescued);
+  const reasons = await removalReasons(await readRepoFacts(root), path, rescued);
   if (reasons.length > 0) return { removed: false, reasons };
   await runGit(["worktree", "remove", path], { cwd: root, write: true });
   return { removed: true };

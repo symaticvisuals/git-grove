@@ -4,9 +4,9 @@ import { basename, join } from "node:path";
 import type { RepoFacts, WorktreeFacts } from "../../facts/facts.types.js";
 import type { Verdict } from "../../rules/verdict.types.js";
 import { displayPath } from "../display-path.js";
+import type { Expectation } from "../plan.types.js";
 import { readDirtyPaths } from "../read-dirty-paths.js";
 import { describeReason } from "./describe-reason.js";
-import { nestedRepoOf } from "./nested-repo-of.js";
 import { planRescueTargets } from "./plan-rescue-targets.js";
 import { removalBlocker } from "./removal-blocker.js";
 import type { RescuedFile } from "./verify-copies.js";
@@ -17,7 +17,8 @@ export type PlannedCopy = RescuedFile & { size: number | null };
 /**
  * One worktree as a removal plan reads it. `label` is its branch, or its folder when detached. `blockers` keep it
  * whatever is rescued; `precious` is the precious-files reason as one line, null when there are none; `copies` are
- * those files with their planned targets in main; `nestedRepo` is a git repository holding one of them, if any.
+ * those files with their planned targets in main; `expects` is the worktree as read, uncommitted paths included, and
+ * its branch's tip.
  */
 export type Removal = {
   worktree: WorktreeFacts;
@@ -27,9 +28,18 @@ export type Removal = {
   blockers: string[];
   precious: string | null;
   copies: PlannedCopy[];
-  nestedRepo: string | null;
-  dirty: string[];
+  expects: Expectation[];
 };
+
+async function expectsOf(facts: RepoFacts, worktree: WorktreeFacts): Promise<Expectation[]> {
+  const { path, head, operation, branch } = worktree;
+  const onDisk = !worktree.prunable && existsSync(path);
+  const dirty = onDisk ? await readDirtyPaths(path).catch(() => []) : [];
+  const expects: Expectation[] = [{ kind: "worktree", path, head, dirty, operation }];
+  const tip = facts.branches.find((candidate) => candidate.name === branch)?.tip;
+  if (branch !== null && tip !== undefined) expects.push({ kind: "tip", branch, sha: tip });
+  return expects;
+}
 
 async function sizeOf(path: string): Promise<number | null> {
   return lstat(path).then(
@@ -40,9 +50,7 @@ async function sizeOf(path: string): Promise<number | null> {
 
 /**
  * Reads what removing `worktree` would involve from its `verdict`, which is null for the main worktree: the reasons
- * that keep it, the precious files a rescue copies and where, and its uncommitted paths for the plan's expectations.
- * A rescue of files inside a git repository nested in the worktree is a blocker, since that repository's history
- * would go with the folder.
+ * that keep it, the precious files a rescue copies and where, and what it relies on for the plan's expectations.
  */
 export async function readRemoval(facts: RepoFacts, worktree: WorktreeFacts, verdict: Verdict | null): Promise<Removal> {
   const shown = displayPath(facts.root, worktree.path);
@@ -53,9 +61,7 @@ export async function readRemoval(facts: RepoFacts, worktree: WorktreeFacts, ver
   for (const copy of planRescueTargets(facts.root, basename(worktree.path), files)) {
     copies.push({ ...copy, size: await sizeOf(join(worktree.path, copy.from)) });
   }
-  const nested = nestedRepoOf(worktree.path, files);
   const blocker = removalBlocker(worktree);
-  const onDisk = !worktree.prunable && existsSync(worktree.path);
   return {
     worktree,
     shown,
@@ -64,11 +70,9 @@ export async function readRemoval(facts: RepoFacts, worktree: WorktreeFacts, ver
     blockers: [
       ...(blocker === null ? [] : [blocker]),
       ...reasons.filter((reason) => reason !== precious).map((reason) => describeReason(facts.root, reason)),
-      ...(nested === null ? [] : [`${nested} is a git repository of its own; its history would be lost, so move it out by hand`]),
     ],
     precious: precious === undefined ? null : describeReason(facts.root, precious),
     copies,
-    nestedRepo: nested,
-    dirty: onDisk ? await readDirtyPaths(worktree.path).catch(() => []) : [],
+    expects: await expectsOf(facts, worktree),
   };
 }

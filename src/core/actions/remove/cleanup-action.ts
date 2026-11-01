@@ -9,7 +9,6 @@ import { copyDetail } from "./copy-detail.js";
 import { readCleanupCandidates } from "./read-cleanup-candidates.js";
 import type { Removal } from "./read-removal.js";
 import { removalCommands } from "./removal-commands.js";
-import { removalExpects } from "./removal-expects.js";
 import { runCleanup } from "./run-cleanup.js";
 
 const SHAPE = "cleanup takes { paths?: [worktree path] }";
@@ -73,7 +72,7 @@ function planOf(facts: RepoFacts, candidates: Removal[], picked: Removal[]): Pla
     ],
     commands: picked.flatMap((candidate) => removalCommands(candidate, true)),
     steps: [
-      { title: "Check nothing moved since you looked", detail: "Each folder as you saw it" },
+      { title: "Check nothing moved since you looked", detail: "Each folder is checked again right before it goes" },
       ...picked.flatMap((candidate) => [
         ...candidate.copies.map((copy) => ({ title: `${candidate.label}: copy ${copy.from} to main`, detail: copyDetail(copy) })),
         { title: `${candidate.label}: remove folder`, detail: candidate.worktree.branch === null ? "nothing to keep" : "branch kept" },
@@ -83,7 +82,7 @@ function planOf(facts: RepoFacts, candidates: Removal[], picked: Removal[]): Pla
     note: "Each folder is re-checked right before it goes. Branches are kept.",
     undoable: false,
     moves: [],
-    expects: picked.flatMap((candidate) => removalExpects(facts, candidate)),
+    expects: [],
     readAt: facts.readAt,
   };
 }
@@ -103,7 +102,8 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
 /**
  * Removes merged worktrees and detached sandboxes in one go: `{ paths? }`, worktree paths from the plan's choices,
  * by default every one that can be picked. A picked worktree's precious ignored files are copied into main first, never
- * overwriting. Each worktree's full verdict is re-read right before it goes; one that changed is skipped and the rest
- * still go. Every branch is kept. A path that is not a choice is invalid input.
+ * overwriting. The plan expects nothing as a whole: each worktree is checked against what the plan read, and its full
+ * verdict re-read, right before it goes; one that changed is skipped and the rest still go. Every branch is kept. A
+ * path that is not a choice is invalid input.
  */
 export const cleanupAction: ActionDef = { name: "cleanup", prepare };

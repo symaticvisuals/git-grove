@@ -38,6 +38,6 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
  * worktree or absolute. Blocked whenever its safe-to-remove verdict gives a reason, and for the main, a locked or a
  * prunable worktree or one mid-operation. With `rescue`, precious ignored files do not block: each is copied into main
  * (never overwriting) and checked byte for byte first. The verdict is re-read right before the folder goes; the
- * branch is always kept.
+ * branch is always kept. An ignored file written between that last re-check and the removal is not protected.
  */
 export const removeAction: ActionDef = { name: "remove", prepare };

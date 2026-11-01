@@ -171,6 +171,26 @@ test("check remove refuses a merged worktree holding .local/seed.sql", async () 
   expect(verdict).toMatchObject({ ok: false, reasons: [{ code: "precious-ignored", paths: [".local/seed.sql"] }] });
 });
 
+test("check remove refuses a worktree holding an ignored git repository whose files all match main", async () => {
+  await repo.switch("main");
+  const clone = join(repo.path, ".worktrees", "old", ".local", "clone");
+  await repo.worktree(join(repo.path, ".worktrees", "old"), "old");
+  await write(join(clone, "a.txt"), "same\n");
+  await repo.git("init", "-q", clone);
+  await repo.git("-C", clone, "add", "a.txt");
+  await repo.git("-C", clone, "commit", "-m", "only here");
+  await write(join(repo.path, ".local", "clone", "a.txt"), "same\n");
+
+  const result = await grove(["check", "remove", ".worktrees/old"]);
+  expect(result).toMatchObject({ code: 3, err: "" });
+  expect(result.out).toBe("a git repository of its own inside this folder: .local/clone\n");
+
+  const json = await grove(["check", "remove", ".worktrees/old", "--json"]);
+  expect(json.code).toBe(3);
+  const verdict: unknown = JSON.parse(json.out);
+  expect(verdict).toMatchObject({ ok: false, reasons: [{ code: "nested-repo", paths: [".local/clone"] }] });
+});
+
 test("status checks a landed worktree holding .local/seed.sql and suggests check remove", async () => {
   const path = await landedWorktree("old");
   await write(join(path, ".local", "seed.sql"), "insert;\n");

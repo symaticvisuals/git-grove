@@ -7,6 +7,7 @@ export type ReasonCode =
   | "precious-ignored"
   | "too-many-ignored"
   | "nested-worktree"
+  | "nested-repo"
   | "unreadable"
   | "main-worktree";
 
@@ -24,5 +25,7 @@ export type RemovalFacts = {
   preciousIgnored: string[];
   ignoredTruncated: boolean;
   nestedWorktrees: string[];
+  /** Worktree-relative folders holding a git repository of their own that is not a registered worktree. */
+  nestedRepos: string[];
   unreadable: string[];
 };

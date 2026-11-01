@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { readRepoFacts } from "../../facts/read-repo-facts.js";
 import type { ExecuteResult, RunContext } from "../action.types.js";
 import { errorLine } from "../error-line.js";
 import { copiedLine } from "./copied-line.js";
@@ -51,7 +52,7 @@ export async function runRemove(read: RemoveRead, run: RunContext): Promise<Exec
       });
     }
     await run.step(index++, async () => {
-      held.reasons = await removalReasons(root, worktree.path, rescued());
+      held.reasons = await removalReasons(await readRepoFacts(root), worktree.path, rescued());
       if (held.reasons.length > 0) throw new Error(held.reasons.join("; "));
       return "nothing else only here";
     });

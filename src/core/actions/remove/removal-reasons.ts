@@ -1,6 +1,5 @@
 import type { RepoFacts } from "../../facts/facts.types.js";
 import { readRemovalFacts } from "../../facts/read-removal-facts.js";
-import { readRepoFacts } from "../../facts/read-repo-facts.js";
 import { GitError } from "../../git/git.error.js";
 import { safeToRemove } from "../../rules/safe-to-remove.js";
 import type { RemovalFacts } from "../../rules/verdict.types.js";
@@ -18,13 +17,12 @@ async function removalFacts(root: string, path: string, facts: RepoFacts): Promi
 }
 
 /**
- * Re-reads the repository and the full safe-to-remove verdict of the worktree at `path`, now, and resolves to every
- * reason it must not be removed, one line each; empty when it is safe. The precious ignored files named in `present`
+ * Reads the full safe-to-remove verdict of the worktree at `path` against `facts`, which the caller has just read, and
+ * resolves to every reason it must not be removed, one line each; empty when it is safe. The precious ignored files named in `present`
  * (worktree-relative) count as kept in main; any other precious file, and every other reason, is reported. A worktree
  * that is gone, main, locked, untracked by git or mid-operation is never safe, nor is one git fails to read.
  */
-export async function removalReasons(root: string, path: string, present: ReadonlySet<string>): Promise<string[]> {
-  const facts = await readRepoFacts(root);
+export async function removalReasons(facts: RepoFacts, path: string, present: ReadonlySet<string>): Promise<string[]> {
   const worktree = facts.worktrees.find((candidate) => candidate.path === path);
   if (worktree === undefined) return [`${displayPath(facts.root, path)} is no longer a worktree`];
   const blocker = removalBlocker(worktree);
