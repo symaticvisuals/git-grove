@@ -1,7 +1,9 @@
 import type { BranchFacts, RepoFacts, Sha } from "../facts/facts.types.js";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
 import { GitError } from "../git/git.error.js";
+import { isAncestor } from "../git/is-ancestor.js";
 import { runGit, type RunGitResult } from "../git/run-git.js";
+import { unlessGitFails } from "../git/unless-git-fails.js";
 import { pin } from "../runner/pin.js";
 import { classifyTipChange, type TipChange } from "./classify-tip-change.js";
 import type { JournalEntry, LastTip, Store, TipSwap } from "./store.types.js";
@@ -31,13 +33,6 @@ async function throwUnlessGone(cwd: string, args: string[], result: RunGitResult
   throw new GitError(args, result.code, result.stderr);
 }
 
-async function isAncestor(cwd: string, ancestor: Sha, descendant: Sha): Promise<boolean> {
-  const args = ["merge-base", "--is-ancestor", ancestor, descendant];
-  const result = await runGit(args, { cwd, allowFailure: true });
-  if (result.code > 1) throw new GitError(args, result.code, result.stderr);
-  return result.code === 0;
-}
-
 /** Resolves to the merge base, to `parentTip` when the two share no history, or null when either is not a commit. */
 async function mergeBase(cwd: string, tip: Sha, parentTip: Sha): Promise<Sha | null> {
   const args = ["merge-base", tip, parentTip];
@@ -46,15 +41,6 @@ async function mergeBase(cwd: string, tip: Sha, parentTip: Sha): Promise<Sha | n
   if (result.code === 1) return parentTip;
   await throwUnlessGone(cwd, args, result, [tip, parentTip]);
   return null;
-}
-
-async function unlessGitFails(work: Promise<TipSwap>): Promise<TipSwap | null> {
-  try {
-    return await work;
-  } catch (error) {
-    if (error instanceof GitError) return null;
-    throw error;
-  }
 }
 
 async function savedTips(cwd: string, store: Store): Promise<Map<string, LastTip>> {
@@ -169,7 +155,7 @@ export async function observe(cwd: string, store: Store, now: number = Date.now(
 
   // Vanished branches go first, so pins taken for moved branches in this call never hide their commits.
   for (const [branch, last] of lastTips) {
-    if (!present.has(branch)) commit(await unlessGitFails(journalDeletion(root, branch, last.sha, now)));
+    if (!present.has(branch)) commit(await unlessGitFails(journalDeletion(root, branch, last.sha, now), null));
   }
 
   for (const branch of facts.branches) {
@@ -181,7 +167,7 @@ export async function observe(cwd: string, store: Store, now: number = Date.now(
     } else {
       const isTrunk = facts.trunk.ref === `refs/heads/${branch.name}`;
       const undoes = (oldTip: Sha, newTip: Sha): number[] => undoesRewrite(branch.name, oldTip, newTip);
-      commit(await unlessGitFails(journalMove({ root, branch, last, parentTip, isTrunk, now, undoesRewrite: undoes })));
+      commit(await unlessGitFails(journalMove({ root, branch, last, parentTip, isTrunk, now, undoesRewrite: undoes }), null));
     }
   }
 

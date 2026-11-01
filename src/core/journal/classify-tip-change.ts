@@ -1,6 +1,5 @@
 import type { Sha } from "../facts/facts.types.js";
-import { GitError } from "../git/git.error.js";
-import { runGit } from "../git/run-git.js";
+import { isAncestor } from "../git/is-ancestor.js";
 import { ownCommits, type OwnCommit } from "./own-commits.js";
 
 export type ChangeKind = "advanced" | "rebased" | "amended" | "rewritten" | "deleted";
@@ -18,14 +17,6 @@ export type TipChange = {
 export type TipChangeInput = { cwd: string; branch: string; oldTip: Sha; newTip: Sha; oldBase: Sha; newBase: Sha };
 
 type MatchedCommit = { commit: OwnCommit; by: "patch" | "meta" | null };
-
-async function isAncestor(cwd: string, ancestor: Sha, descendant: Sha): Promise<boolean> {
-  const args = ["merge-base", "--is-ancestor", ancestor, descendant];
-  const result = await runGit(args, { cwd, allowFailure: true });
-  if (result.code === 0) return true;
-  if (result.code === 1) return false;
-  throw new GitError(args, result.code, result.stderr);
-}
 
 function matchOwnCommits(
   oldOwn: readonly OwnCommit[],

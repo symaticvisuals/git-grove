@@ -123,3 +123,20 @@ test("a git failure on one level leaves parentMerged false instead of rejecting"
   const ui = features.flatMap((f) => f.levels).find((l) => l.branch === "feat/ui");
   expect(ui?.parentMerged).toBe(false);
 });
+
+test("a squash-merged branch stays merged after the trunk edits the same lines", async () => {
+  await repo.branch("coupons");
+  await commitOn("coupons", "base.txt", "coupons edit");
+  await repo.git("merge", "--squash", "coupons");
+  await repo.git("commit", "-m", "coupons (#2)");
+  await repo.commit("base.txt", "trunk edits it again\n", "follow-up");
+  const tip = (await repo.git("rev-parse", "coupons")).trim();
+  expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(true);
+});
+
+test("a branch with no history in common with the trunk is not merged", async () => {
+  await repo.git("switch", "--orphan", "pages");
+  const tip = await repo.commit("index.html", "docs\n", "publish docs");
+  await repo.git("switch", "main");
+  expect(await isMerged(repo.path, tip, "refs/heads/main")).toBe(false);
+});

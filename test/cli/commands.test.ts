@@ -628,3 +628,57 @@ test("restore of a branch whose worktree folder is gone moves the branch", async
   expect(result).toMatchObject({ code: 0, err: "" });
   expect((await repo.git("rev-parse", "side")).trim()).toBe(original);
 });
+
+/** Commits `coupons` off main, editing base.txt's only line and adding extra.txt, and leaves main checked out. */
+async function couponsBranch(): Promise<void> {
+  await repo.switch("main");
+  await repo.branch("coupons");
+  await repo.switch("coupons");
+  await repo.commit("base.txt", "base, coupons\n", "coupons one");
+  await repo.commit("extra.txt", "extra\n", "coupons two");
+  await repo.switch("main");
+}
+
+async function squashMergeCoupons(): Promise<void> {
+  await repo.git("merge", "--squash", "coupons");
+  await repo.git("commit", "-m", "coupons (#2)");
+}
+
+test("a branch squash-merged and deleted stays resolved after the trunk edits the same line", async () => {
+  await couponsBranch();
+  await grove(["status"]);
+  await squashMergeCoupons();
+  await repo.git("branch", "-D", "coupons");
+  expect(rulesOf((await statusJson()).findings)).not.toContain("branch-deleted");
+  expect((await journalEntries()).find((entry) => entry.branch === "coupons")).toMatchObject({ kind: "deleted", acked: true });
+
+  await repo.commit("base.txt", "base, coupons v2\n", "coupons follow-up");
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("branch-deleted");
+  expect(doc.journal).toEqual([]);
+});
+
+test("a deletion first seen after the trunk moved on past its squash merge resolves", async () => {
+  await couponsBranch();
+  await grove(["status"]);
+  await squashMergeCoupons();
+  await repo.commit("base.txt", "base, coupons v2\n", "coupons follow-up");
+  await repo.git("branch", "-D", "coupons");
+
+  const doc = await statusJson();
+  expect(rulesOf(doc.findings)).not.toContain("branch-deleted");
+  expect(doc.journal).toEqual([]);
+});
+
+test("a parent merged with a merge commit gives the child a Parent merged finding", async () => {
+  await repo.switch("main");
+  await repo.git("config", "branch.feat.stackparent", "main");
+  await repo.branch("feat-ui", "feat");
+  await repo.git("config", "branch.feat-ui.stackparent", "feat");
+  await repo.commit("other.txt", "other\n", "unrelated trunk work");
+  await repo.git("merge", "--no-ff", "-m", "Merge feat (#1)", "feat");
+
+  const merged = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "parent-merged");
+  expect(merged).toHaveLength(1);
+  expect(merged[0]).toMatchObject({ title: "Parent merged", subject: { kind: "level", id: "feat/feat-ui" } });
+});

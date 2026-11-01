@@ -1,6 +1,7 @@
 import type { RepoFacts, Sha } from "../../core/facts/facts.types.js";
 import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
-import { runGit } from "../../core/git/run-git.js";
+import { isAncestor } from "../../core/git/is-ancestor.js";
+import { unlessGitFails } from "../../core/git/unless-git-fails.js";
 import { openStore } from "../../core/journal/open-store.js";
 import type { Store } from "../../core/journal/store.types.js";
 import { restore, type RestoreResult } from "../../core/runner/restore.js";
@@ -9,10 +10,6 @@ import type { CliIo } from "../cli-io.types.js";
 function parentTipOf(facts: RepoFacts, branch: string): Sha {
   const parent = facts.edges.find((edge) => edge.branch === branch)?.parent;
   return facts.branches.find((candidate) => candidate.name === parent)?.tip ?? facts.trunk.sha;
-}
-
-async function isAncestor(cwd: string, ancestor: Sha, descendant: Sha): Promise<boolean> {
-  return (await runGit(["merge-base", "--is-ancestor", ancestor, descendant], { cwd, allowFailure: true })).code === 0;
 }
 
 /** The pin of the branch's newest unresolved rewrite or deletion, which is the alert status shows last. */
@@ -32,11 +29,13 @@ async function settleJournal(store: Store, facts: RepoFacts, branch: string, tip
   const repoId = store.repoId(facts.commonDir, facts.root);
   const parentTip = parentTipOf(facts, branch);
   const kept = store.lastTips(repoId).get(branch)?.parentSha ?? parentTip;
-  const parentSha = (await isAncestor(facts.root, parentTip, tip)) ? parentTip : kept;
+  const parentSha = (await unlessGitFails(isAncestor(facts.root, parentTip, tip), false)) ? parentTip : kept;
   store.saveTip(repoId, branch, tip, parentSha, now);
   for (const entry of store.entries(repoId, { unresolved: true })) {
     if (entry.branch !== branch || entry.id === undefined) continue;
-    if (entry.oldTip === tip || (await isAncestor(facts.root, entry.oldTip, tip))) store.ack(repoId, entry.id, now);
+    if (entry.oldTip === tip || (await unlessGitFails(isAncestor(facts.root, entry.oldTip, tip), false))) {
+      store.ack(repoId, entry.id, now);
+    }
   }
 }
 

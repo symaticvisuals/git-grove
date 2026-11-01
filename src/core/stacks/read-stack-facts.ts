@@ -1,8 +1,9 @@
 import type { BranchFacts, RepoFacts, StackEdge } from "../facts/facts.types.js";
-import { GitError } from "../git/git.error.js";
+import { isAncestor } from "../git/is-ancestor.js";
 import { runGit } from "../git/run-git.js";
+import { unlessGitFails } from "../git/unless-git-fails.js";
+import { branchLanded } from "./branch-landed.js";
 import { groupFeatures } from "./group-features.js";
-import { isMerged } from "./is-merged.js";
 import type { Feature, Level } from "./stacks.types.js";
 
 const CONCURRENCY = 8;
@@ -11,23 +12,9 @@ async function count(cwd: string, range: string): Promise<number> {
   return Number((await runGit(["rev-list", "--count", range], { cwd })).stdout.trim());
 }
 
-async function isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
-  return (await runGit(["merge-base", "--is-ancestor", ancestor, descendant], { cwd, allowFailure: true })).code === 0;
-}
-
 async function forkOf(cwd: string, edge: StackEdge | undefined, branch: BranchFacts, parent: BranchFacts): Promise<string> {
-  if (edge?.forkPoint && (await isAncestor(cwd, edge.forkPoint, branch.tip))) return edge.forkPoint;
+  if (edge?.forkPoint && (await unlessGitFails(isAncestor(cwd, edge.forkPoint, branch.tip), false))) return edge.forkPoint;
   return (await runGit(["merge-base", branch.tip, parent.tip], { cwd })).stdout.trim();
-}
-
-async function parentLanded(cwd: string, parentTip: string, trunkRef: string): Promise<boolean> {
-  try {
-    if ((await count(cwd, `${trunkRef}..${parentTip}`)) === 0) return false;
-    return await isMerged(cwd, parentTip, trunkRef);
-  } catch (error) {
-    if (error instanceof GitError) return false;
-    throw error;
-  }
 }
 
 async function mapLimited<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -66,7 +53,7 @@ export async function readStackFacts(cwd: string, facts: RepoFacts): Promise<Fea
     if (parentBranch) {
       const fork = await forkOf(cwd, edge, branch, parentBranch);
       parentCommitsSinceFork = await count(cwd, `${fork}..${parentBranch.tip}`);
-      parentMerged = await parentLanded(cwd, parentBranch.tip, facts.trunk.ref);
+      parentMerged = await branchLanded(cwd, parentBranch, facts.trunk.ref);
     }
     const parentMissing = parentName !== trunkName && parentBranch === undefined;
     return {

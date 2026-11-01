@@ -1,35 +1,21 @@
 import { realpath } from "node:fs/promises";
-import { branchWasCommittedTo } from "../../core/facts/branch-was-committed-to.js";
-import type { RepoFacts, Sha } from "../../core/facts/facts.types.js";
+import type { RepoFacts } from "../../core/facts/facts.types.js";
 import { readEnvMissing } from "../../core/facts/read-env-missing.js";
 import { readRemovalFacts } from "../../core/facts/read-removal-facts.js";
 import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
 import { GitError } from "../../core/git/git.error.js";
-import { runGit } from "../../core/git/run-git.js";
+import { isAncestor } from "../../core/git/is-ancestor.js";
+import { unlessGitFails } from "../../core/git/unless-git-fails.js";
 import { observe } from "../../core/journal/observe.js";
 import { openStore } from "../../core/journal/open-store.js";
-import type { JournalEntry } from "../../core/journal/store.types.js";
+import type { JournalEntry, Store } from "../../core/journal/store.types.js";
 import { evaluate } from "../../core/rules/evaluate.js";
 import { safeToRemove } from "../../core/rules/safe-to-remove.js";
 import type { Verdict } from "../../core/rules/verdict.types.js";
-import { isMerged } from "../../core/stacks/is-merged.js";
+import { branchLanded } from "../../core/stacks/branch-landed.js";
 import { readStackFacts } from "../../core/stacks/read-stack-facts.js";
 import type { CliIo } from "../cli-io.types.js";
 import { renderStatus } from "../render-status.js";
-
-async function landed(facts: RepoFacts, sha: Sha): Promise<boolean> {
-  try {
-    return await isMerged(facts.root, sha, facts.trunk.ref);
-  } catch (error) {
-    if (error instanceof GitError) return false;
-    throw error;
-  }
-}
-
-async function isAncestor(facts: RepoFacts, ancestor: Sha, descendant: Sha): Promise<boolean> {
-  const args = ["merge-base", "--is-ancestor", ancestor, descendant];
-  return (await runGit(args, { cwd: facts.root, allowFailure: true })).code === 0;
-}
 
 async function verdictFor(facts: RepoFacts, path: string): Promise<Verdict> {
   try {
@@ -40,14 +26,13 @@ async function verdictFor(facts: RepoFacts, path: string): Promise<Verdict> {
   }
 }
 
-/** Verdicts for the linked worktrees, off the trunk, whose branch has been committed to and has landed on it. */
+/** Verdicts for the linked worktrees, off the trunk, whose branch has landed on it. */
 async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
   const removals = new Map<string, Verdict>();
   for (const worktree of facts.worktrees) {
     const branch = facts.branches.find((candidate) => candidate.name === worktree.branch);
     if (worktree.isMain || branch === undefined || branch.name === facts.trunk.name) continue;
-    if (!(await landed(facts, branch.tip))) continue;
-    if (!(await branchWasCommittedTo(facts.root, branch.name))) continue;
+    if (!(await branchLanded(facts.root, branch, facts.trunk.ref))) continue;
     removals.set(worktree.path, await verdictFor(facts, worktree.path));
   }
   return removals;
@@ -57,16 +42,19 @@ async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
  * Keeps the entries whose lost commits are neither back on their branch nor landed on the trunk.
  * A `deleted` entry, or one whose branch is gone, resolves once its lost tip lands;
  * one whose branch still exists also needs the branch's current tip landed.
+ * An entry resolved by landing is acked in `store`, so it stays resolved however the trunk moves on.
  */
-async function stillUnresolved(facts: RepoFacts, entries: JournalEntry[]): Promise<JournalEntry[]> {
+async function stillUnresolved(store: Store, repoId: number, facts: RepoFacts, now: number): Promise<JournalEntry[]> {
   const kept: JournalEntry[] = [];
-  for (const entry of entries) {
+  const trunkRef = facts.trunk.ref;
+  for (const entry of store.entries(repoId, { unresolved: true })) {
     const branch = facts.branches.find((candidate) => candidate.name === entry.branch);
-    if (branch !== undefined && (await isAncestor(facts, entry.oldTip, branch.tip))) continue;
+    if (branch !== undefined && (await unlessGitFails(isAncestor(facts.root, entry.oldTip, branch.tip), false))) continue;
     const resolved =
-      (await landed(facts, entry.oldTip)) &&
-      (entry.kind === "deleted" || branch === undefined || (await landed(facts, branch.tip)));
+      (await branchLanded(facts.root, { name: entry.branch, tip: entry.oldTip }, trunkRef)) &&
+      (entry.kind === "deleted" || branch === undefined || (await branchLanded(facts.root, branch, trunkRef)));
     if (!resolved) kept.push(entry);
+    else if (entry.id !== undefined) store.ack(repoId, entry.id, now);
   }
   return kept;
 }
@@ -86,7 +74,7 @@ export async function statusCommand(io: CliIo, options: { json: boolean }): Prom
     const removals = await mergedRemovals(facts);
     const envMissing = await readEnvMissing(facts.root, facts).catch(() => new Map<string, string[]>());
     const repoId = store.repoId(facts.commonDir, facts.root);
-    const journal = await stillUnresolved(facts, store.entries(repoId, { unresolved: true }));
+    const journal = await stillUnresolved(store, repoId, facts, now);
     const findings = evaluate({ facts, features, unresolved: journal, removals, envMissing, now });
     if (options.json) {
       const doc = { repo: { root: facts.root, commonDir: facts.commonDir }, trunk: facts.trunk, features, findings, journal };
