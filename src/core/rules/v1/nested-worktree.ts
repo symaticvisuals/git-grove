@@ -5,7 +5,7 @@ export const nestedWorktree: Rule = {
   id: "nested-worktree",
   evaluate: (ctx) => {
     const paths = ctx.facts.worktrees.map((w) => w.path);
-    return paths.flatMap((outer) => {
+    return ctx.facts.worktrees.filter((w) => !w.isMain).map((w) => w.path).flatMap((outer) => {
       const inner = paths.filter((p) => p !== outer && p.startsWith(outer.endsWith(sep) ? outer : outer + sep));
       if (inner.length === 0) return [];
       return [

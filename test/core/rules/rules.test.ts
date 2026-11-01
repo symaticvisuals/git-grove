@@ -134,6 +134,19 @@ test("nested-worktree fires on the outer worktree, not on siblings with a shared
   expect(run("nested-worktree", ctx({ worktrees: [wt("/r/a"), wt("/r/ab")] }))).toEqual([]);
 });
 
+test("nested-worktree ignores the main worktree as outer but fires for linked inside linked", () => {
+  expect(
+    run("nested-worktree", ctx({ worktrees: [wt("/r", { isMain: true }), wt("/r/.worktrees/x")] })),
+  ).toEqual([]);
+  const hit = run("nested-worktree", ctx({ worktrees: [wt("/r", { isMain: true }), wt("/r/a"), wt("/r/a/.worktrees/b")] }));
+  expect(hit.map((f) => f.subject.id)).toEqual(["/r/a"]);
+});
+
+test("a prunable worktree untouched for 20 days yields prunable only", () => {
+  const out = evaluate(ctx({ worktrees: [wt("/r/a", { prunable: true, touchedAt: NOW - 20 * DAY })] }));
+  expect(out.map((f) => f.rule)).toEqual(["prunable"]);
+});
+
 test("operation-in-progress fires when an operation is underway", () => {
   const hit = run("operation-in-progress", ctx({ worktrees: [wt("/r/a", { operation: "rebase" })] }));
   expect(hit).toHaveLength(1);

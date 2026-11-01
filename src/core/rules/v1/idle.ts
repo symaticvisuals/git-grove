@@ -7,7 +7,7 @@ export const idle: Rule = {
   evaluate: (ctx) => {
     const out: Finding[] = [];
     for (const w of ctx.facts.worktrees) {
-      if (w.isMain || w.touchedAt === null || ctx.now - w.touchedAt <= IDLE_MS) continue;
+      if (w.isMain || w.prunable || w.touchedAt === null || ctx.now - w.touchedAt <= IDLE_MS) continue;
       const days = Math.floor((ctx.now - w.touchedAt) / 86_400_000);
       out.push({
         rule: "idle",
