@@ -16,7 +16,8 @@ function argvOf(parsed: object, key: string): string[] | null {
 }
 
 /**
- * Reads `config.json` in grove's folder. `editor` and `terminal` may each be a command string or an argv array.
+ * Reads `config.json` in grove's folder. `editor` and `terminal` may each be a string, which is one program and is
+ * never split (its path may contain spaces), or an array of the program followed by its arguments.
  * A missing, unreadable or malformed file, and any key of the wrong shape, give null for it.
  */
 export async function readConfig(): Promise<GroveConfig> {

@@ -217,3 +217,62 @@ test("copy-env copies apps/web/.env.local into a worktree that lacks it and neve
 test("copy-env refuses the main checkout", async () => {
   await expect(prepare("copy-env", { worktree: repo.path })).rejects.toThrow(InvalidInputError);
 });
+
+test("a record step that fails reports what exists and how to remove it", async () => {
+  const prepared = await prepareAction("new", ctx, GIFT);
+  const commonDir = (await repo.git("rev-parse", "--path-format=absolute", "--git-common-dir")).trim();
+  await writeFile(join(commonDir, "config.lock"), "");
+  const receipt = await runPrepared(ctx, prepared, () => undefined);
+  await rm(join(commonDir, "config.lock"));
+  expect(receipt.ok).toBe(false);
+  expect(receipt.refused).toBe(false);
+  expect(receipt.title).toBe("Stopped: Record it as level 01 of gift cards");
+  const text = receipt.lines.join("\n");
+  expect(text).toContain("folder .worktrees/gift-cards/01-feat-gift-cards-model, a worktree on feat/gift-cards-model");
+  expect(text).toContain("branch feat/gift-cards-model");
+  expect(text).toContain("git worktree remove --force .worktrees/gift-cards/01-feat-gift-cards-model");
+  expect(text).toContain("git branch -D feat/gift-cards-model");
+});
+
+test("a create step that fails says what it left", async () => {
+  const prepared = await prepareAction("new", ctx, GIFT);
+  const commonDir = (await repo.git("rev-parse", "--path-format=absolute", "--git-common-dir")).trim();
+  await writeFile(join(commonDir, "worktrees"), "not a folder");
+  const receipt = await runPrepared(ctx, prepared, () => undefined);
+  await rm(join(commonDir, "worktrees"));
+  expect(receipt.ok).toBe(false);
+  expect(receipt.title).toBe("Stopped: Create branch feat/gift-cards-model and its folder");
+  expect(receipt.lines).toContain("Left behind by this run:");
+});
+
+test("a failing env copy is a line, not a failure", async () => {
+  await chmod(join(repo.path, ".env"), 0o000);
+  try {
+    const { receipt } = await run("new", GIFT);
+    expect(receipt.ok).toBe(true);
+    expect(receipt.lines.some((line) => line.startsWith("Couldn't copy the env files:") && line.endsWith("Copy them yourself."))).toBe(true);
+  } finally {
+    await chmod(join(repo.path, ".env"), 0o644);
+  }
+});
+
+test("a feature name with no letter or digit is invalid", async () => {
+  const message = "Give the feature a name with at least one letter or digit";
+  await expect(prepare("new", { feature: "日本" })).rejects.toThrow(message);
+  await expect(prepare("new", { feature: "!!!" })).rejects.toThrow(InvalidInputError);
+  await expect(prepare("add-level", { feature: "!!!", branch: "feat/x" })).rejects.toThrow(message);
+});
+
+test("open launches the configured editor", async () => {
+  await writeFile(join(home, "config.json"), JSON.stringify({ editor: "true" }));
+  try {
+    const events: string[] = [];
+    const prepared = await prepareAction("new", ctx, { ...GIFT, open: true });
+    const receipt = await runPrepared(ctx, prepared, (event) => events.push(`${event.state}:${event.detail}`));
+    expect(receipt.ok).toBe(true);
+    expect(receipt.lines.join(" ")).not.toContain("could not open");
+    expect(events).toContain("done:Opened");
+  } finally {
+    await rm(join(home, "config.json"), { force: true });
+  }
+});

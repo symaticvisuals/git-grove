@@ -14,6 +14,7 @@ const SHAPE = "new takes { feature, branch?, from?, env?, install?, open? }";
 async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const input = parseLevelInput(raw, SHAPE);
   if (input.on !== undefined) throw new InvalidInputError(SHAPE);
+  if (slugOf(input.feature) === "") throw new InvalidInputError("Give the feature a name with at least one letter or digit");
   const facts = await readRepoFacts(ctx.root);
   const { trunk } = facts;
   if (input.from !== undefined && input.from !== trunk.name && input.from !== trunk.ref) {

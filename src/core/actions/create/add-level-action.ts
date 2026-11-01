@@ -10,6 +10,7 @@ import { createLevelPlan } from "./create-level-plan.js";
 import { parseLevelInput } from "./parse-level-input.js";
 import { readNewLevel } from "./read-new-level.js";
 import { runCreateLevel } from "./run-create-level.js";
+import { slugOf } from "./slug-of.js";
 
 const SHAPE = "add-level takes { feature, branch, on?, env?, install?, open? }";
 
@@ -27,6 +28,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const input = parseLevelInput(raw, SHAPE);
   const { branch } = input;
   if (branch === undefined || input.from !== undefined) throw new InvalidInputError(SHAPE);
+  if (slugOf(input.feature) === "") throw new InvalidInputError("Give the feature a name with at least one letter or digit");
   const facts = await readRepoFacts(ctx.root);
   const feature = findFeature(await readStackFacts(facts.root, facts), input.feature);
   if (feature === null || feature.kind !== "stack") throw new InvalidInputError(`no stack named ${input.feature}`);

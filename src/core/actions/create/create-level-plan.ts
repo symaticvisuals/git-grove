@@ -1,6 +1,7 @@
 import type { RepoFacts } from "../../facts/facts.types.js";
 import { listPaths } from "../list-paths.js";
 import { displayPath } from "../display-path.js";
+import { shellWord } from "../shell-word.js";
 import type { Expectation, FolderLine, Plan } from "../plan.types.js";
 import { levelSteps } from "./level-steps.js";
 import type { NewLevel } from "./new-level.types.js";
@@ -8,15 +9,15 @@ import type { NewLevel } from "./new-level.types.js";
 function commandsOf(facts: RepoFacts, level: NewLevel): string[] {
   const { branch } = level;
   const keys = [
-    `git config branch.${branch}.stackparent ${level.parent}`,
+    `git config branch.${branch}.stackparent ${shellWord(level.parent)}`,
     `git config branch.${branch}.stackforkpoint ${level.forkPoint}`,
-    ...(level.recordFeature ? [`git config branch.${branch}.grovefeature '${level.feature}'`] : []),
+    ...(level.recordFeature ? [`git config branch.${branch}.grovefeature ${shellWord(level.feature)}`] : []),
   ];
   return [
-    `git worktree add -b ${branch} ${displayPath(facts.root, level.folder)} ${level.forkPoint.slice(0, 7)}`,
+    `git worktree add -b ${shellWord(branch)} ${shellWord(displayPath(facts.root, level.folder))} ${level.forkPoint.slice(0, 7)}`,
     ...keys,
     ...(level.ignoreWorktrees ? ["echo '.worktrees/' >> .git/info/exclude"] : []),
-    ...(level.install === null ? [] : [`cd ${displayPath(facts.root, level.folder)} && ${level.install.label}`]),
+    ...(level.install === null ? [] : [`cd ${shellWord(displayPath(facts.root, level.folder))} && ${level.install.label}`]),
   ];
 }
 

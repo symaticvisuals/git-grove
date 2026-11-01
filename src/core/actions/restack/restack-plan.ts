@@ -3,15 +3,12 @@ import type { RepoFacts } from "../../facts/facts.types.js";
 import { plural } from "../../rules/plural.js";
 import { displayPath } from "../display-path.js";
 import { listPaths } from "../list-paths.js";
+import { shellWord } from "../shell-word.js";
 import type { Check, Expectation, Plan } from "../plan.types.js";
 import type { RestackLevel, RestackRead } from "./restack.types.js";
 
 function shortRef(ref: string): string {
   return ref.replace(/^refs\/(?:heads|remotes)\//, "");
-}
-
-function shellWord(word: string): string {
-  return /^[\w./@:+-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
 }
 
 function settingAside(read: RestackRead, level: RestackLevel): boolean {
