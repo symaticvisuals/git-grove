@@ -58,13 +58,13 @@ async function leftBehind(root: string, level: NewLevel, written: string[], titl
     lines.push(`  a half-made folder ${shown}, not a worktree`);
     remove.push(`delete the folder ${shown} yourself`);
   }
+  for (const key of written) {
+    lines.push(`  config branch.${level.branch}.${key}`);
+    remove.push(`git config --unset ${shellWord(`branch.${level.branch}.${key}`)}`);
+  }
   if (hasBranch) {
     lines.push(`  branch ${level.branch}`);
     remove.push(`git branch -D ${shellWord(level.branch)}`);
-  }
-  for (const key of written) {
-    lines.push(`  config branch.${level.branch}.${key}`);
-    remove.push(`git config --unset branch.${shellWord(level.branch)}.${key}`);
   }
   if (remove.length === 0) lines.push("  nothing; the repository is as it was");
   else lines.push("To undo it, run:", ...remove.map((command) => `  ${command}`));

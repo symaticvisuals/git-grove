@@ -9,9 +9,9 @@ import type { NewLevel } from "./new-level.types.js";
 function commandsOf(facts: RepoFacts, level: NewLevel): string[] {
   const { branch } = level;
   const keys = [
-    `git config branch.${branch}.stackparent ${shellWord(level.parent)}`,
-    `git config branch.${branch}.stackforkpoint ${level.forkPoint}`,
-    ...(level.recordFeature ? [`git config branch.${branch}.grovefeature ${shellWord(level.feature)}`] : []),
+    `git config ${shellWord(`branch.${branch}.stackparent`)} ${shellWord(level.parent)}`,
+    `git config ${shellWord(`branch.${branch}.stackforkpoint`)} ${level.forkPoint}`,
+    ...(level.recordFeature ? [`git config ${shellWord(`branch.${branch}.grovefeature`)} ${shellWord(level.feature)}`] : []),
   ];
   return [
     `git worktree add -b ${shellWord(branch)} ${shellWord(displayPath(facts.root, level.folder))} ${level.forkPoint.slice(0, 7)}`,
