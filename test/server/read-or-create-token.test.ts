@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -28,4 +28,11 @@ test("callers racing on a missing token all get the one that was written", async
 test("a token file that holds something else is refused", async () => {
   await writeFile(join(home, "token"), "not a token\n", { mode: 0o600 });
   await expect(readOrCreateToken(home)).rejects.toThrow("does not hold a grove token");
+});
+
+test("an existing token open to others is narrowed to 0600", async () => {
+  const token = await readOrCreateToken(home);
+  await chmod(join(home, "token"), 0o644);
+  expect(await readOrCreateToken(home)).toBe(token);
+  expect((await stat(join(home, "token"))).mode & 0o777).toBe(0o600);
 });

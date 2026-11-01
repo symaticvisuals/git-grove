@@ -3,20 +3,6 @@ import type { ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
 import { send } from "./send.js";
 
-const CONTENT_SECURITY_POLICY = [
-  "default-src 'self'",
-  "script-src 'self'",
-  "style-src 'self'",
-  "img-src 'self' data:",
-  "font-src 'self'",
-  "connect-src 'self'",
-  "manifest-src 'self'",
-  "worker-src 'self'",
-  "frame-ancestors 'none'",
-  "base-uri 'none'",
-  "form-action 'none'",
-].join("; ");
-
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -64,29 +50,20 @@ async function fileInside(root: string, segments: string[]): Promise<string | nu
 
 /**
  * Serves a file from `uiDir` for a GET or HEAD of `path` (still percent-encoded), or 404. A path that would leave
- * `uiDir`, by its segments or through a symlink, is 404. `/` and `/index.html` serve `index.html` with
- * `%GROVE_TOKEN%` and `%GROVE_VERSION%` replaced, HTML-escaped, and the content security policy.
+ * `uiDir`, by its segments or through a symlink, is 404. The file whose realpath is `uiDir/index.html`'s, however
+ * it was asked for, is served with `%GROVE_VERSION%` replaced, HTML-escaped.
  */
-export async function serveStatic(
-  res: ServerResponse,
-  options: { uiDir: string; path: string; page: { token: string; version: string } },
-): Promise<void> {
+export async function serveStatic(res: ServerResponse, options: { uiDir: string; path: string; version: string }): Promise<void> {
   const segments = segmentsOf(options.path);
   const root = await realpath(options.uiDir).catch(() => null);
   const file = segments === null || root === null ? null : await fileInside(root, segments);
-  if (segments === null || file === null) {
+  if (root === null || segments === null || file === null) {
     send(res, 404, { error: "not found" });
     return;
   }
-  if (segments.length === 1 && segments[0] === "index.html") {
-    const html = (await readFile(file, "utf8"))
-      .replaceAll("%GROVE_TOKEN%", escapeHtml(options.page.token))
-      .replaceAll("%GROVE_VERSION%", escapeHtml(options.page.version));
-    res.writeHead(200, {
-      "content-type": CONTENT_TYPES[".html"],
-      "content-length": Buffer.byteLength(html),
-      "content-security-policy": CONTENT_SECURITY_POLICY,
-    });
+  if (file === (await realpath(join(root, "index.html")).catch(() => null))) {
+    const html = (await readFile(file, "utf8")).replaceAll("%GROVE_VERSION%", escapeHtml(options.version));
+    res.writeHead(200, { "content-type": CONTENT_TYPES[".html"], "content-length": Buffer.byteLength(html) });
     res.end(html);
     return;
   }

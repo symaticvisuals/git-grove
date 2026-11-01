@@ -39,11 +39,13 @@ test.each([
   expect(readServerFile(home)).toBeNull();
 });
 
-test("clear removes server.json only while it names the pid given", () => {
+test("clear removes server.json only while it names the pid given, leaving nothing aside", async () => {
   writeServerFile(home, { pid: 123, port: 47683, version: "1" });
   clearServerFile(home, 456);
-  expect(readServerFile(home)).not.toBeNull();
+  expect(readServerFile(home)).toEqual({ pid: 123, port: 47683, version: "1" });
+  expect(await readdir(home)).toEqual(["server.json"]);
   clearServerFile(home, 123);
+  expect(await readdir(home)).toEqual([]);
   expect(existsSync(join(home, "server.json"))).toBe(false);
   clearServerFile(home, 123);
 });

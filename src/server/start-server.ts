@@ -1,5 +1,5 @@
-import { mkdir } from "node:fs/promises";
-import { createServer, type Server } from "node:http";
+import { chmod, mkdir, stat } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { groveHome } from "../core/grove-home.js";
@@ -8,8 +8,8 @@ import type { Store } from "../core/journal/store.types.js";
 import { registerApi } from "./api/register-api.js";
 import { readOrCreateToken } from "./auth/read-or-create-token.js";
 import { clearServerFile } from "./clear-server-file.js";
-import { handleRequest } from "./http/handle-request.js";
-import { listenOnFreePort } from "./http/listen-on-free-port.js";
+import { handleRequest, type RequestDeps } from "./http/handle-request.js";
+import { listenOnLoopback } from "./http/listen-on-loopback.js";
 import { createRouter } from "./http/router.js";
 import { lockServer } from "./lock-server.js";
 import type { ServerContext } from "./server-context.types.js";
@@ -39,17 +39,22 @@ function stopListening(http: Server): Promise<void> {
   });
 }
 
+async function privateHome(home: string): Promise<void> {
+  await mkdir(home, { recursive: true, mode: 0o700 });
+  if (((await stat(home)).mode & 0o077) !== 0) await chmod(home, 0o700);
+}
+
 /**
- * Starts the dashboard server on 127.0.0.1: takes `<home>/server.lock` (`lockServer`; ServerRunningError while another
- * server holds it), listens on `port` (default 47683) or the next free one of 20, and records `{ pid, port, version }` in
- * `<home>/server.json`. `close` stops it, giving open connections a second, and removes server.json and the lock.
+ * Starts the dashboard server: makes `<home>` private (0700), takes `<home>/server.lock` (`lockServer`), listens on
+ * 127.0.0.1 and `[::1]` at `port` (default 47683) or the next of 20 free on both, and records `{ pid, port, version }`
+ * in `<home>/server.json`. `close` stops it, giving open connections a second, and removes server.json and the lock.
  */
 export async function startServer(options: StartServerOptions): Promise<RunningServer> {
   const home = options.home ?? groveHome();
   const uiDir = options.uiDir ?? fileURLToPath(new URL("../ui/", import.meta.url));
-  await mkdir(home, { recursive: true, mode: 0o700 });
+  await privateHome(home);
   const release = await lockServer(home);
-  const http = createServer();
+  let servers: Server[] = [];
   let store: Store | null = null;
   try {
     const token = await readOrCreateToken(home);
@@ -59,7 +64,7 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     const close = (): Promise<void> => {
       closing ??= (async () => {
         try {
-          await stopListening(http);
+          await Promise.all(servers.map(stopListening));
           clearServerFile(home, process.pid);
           opened.close();
         } finally {
@@ -83,15 +88,16 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     };
     const router = createRouter();
     registerApi(router);
-    const deps = { router, context, uiDir, closing: () => closing !== null };
-    http.on("request", (req, res) => void handleRequest(req, res, deps));
-    const port = await listenOnFreePort(http, options.port ?? DEFAULT_PORT);
-    context.port = port;
-    writeServerFile(home, { pid: process.pid, port, version: options.version });
-    return { port, url: `http://127.0.0.1:${port}/`, token, context, close };
+    const deps: RequestDeps = { router, context, uiDir, closing: () => closing !== null };
+    const onRequest = (req: IncomingMessage, res: ServerResponse): void => void handleRequest(req, res, deps);
+    const listening = await listenOnLoopback(() => createServer(onRequest), options.port ?? DEFAULT_PORT);
+    servers = listening.servers;
+    context.port = listening.port;
+    writeServerFile(home, { pid: process.pid, port: listening.port, version: options.version });
+    return { port: listening.port, url: `http://127.0.0.1:${listening.port}/`, token, context, close };
   } catch (error) {
     store?.close();
-    await stopListening(http);
+    await Promise.all(servers.map(stopListening));
     await release();
     throw error;
   }

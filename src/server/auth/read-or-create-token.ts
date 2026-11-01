@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { link, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, link, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const TOKEN = /^[0-9a-f]{64}$/;
@@ -15,6 +15,7 @@ async function readToken(path: string): Promise<string | null> {
   });
   if (text === null) return null;
   if (!TOKEN.test(text.trim())) throw new Error(`${path} does not hold a grove token; delete it and start again`);
+  if (((await stat(path)).mode & 0o077) !== 0) await chmod(path, 0o600);
   return text.trim();
 }
 
@@ -33,9 +34,9 @@ async function create(path: string, token: string): Promise<boolean> {
 }
 
 /**
- * Reads `<home>/token`, first creating it when missing as 32 random bytes in hex with mode 0600. The token is written
- * whole to a `wx` temp file and linked into place, so callers racing to create it all get the one that won.
- * Throws when the file holds anything but a token.
+ * Reads `<home>/token`, first creating it when missing as 32 random bytes in hex with mode 0600, and narrowing an
+ * existing one to 0600. The token is written whole to a `wx` temp file and linked into place, so callers racing to
+ * create it all get the one that won. Throws when the file holds anything but a token.
  */
 export async function readOrCreateToken(home: string): Promise<string> {
   const path = join(home, "token");

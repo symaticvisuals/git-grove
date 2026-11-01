@@ -1,82 +1,80 @@
-import { randomUUID } from "node:crypto";
-import { link, readFile, rename, rm } from "node:fs/promises";
+import { stat } from "node:fs/promises";
+import { uptime } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LockHeldError } from "../core/runner/lock-held.error.js";
 import { acquirePidLock } from "../core/runner/pid-lock.js";
+import { probeHealth } from "./probe-health.js";
+import { readLockPid } from "./read-lock-pid.js";
 import { readServerFile } from "./read-server-file.js";
-import { serverAlive } from "./server-alive.js";
+import type { ServerInfo } from "./server-info.types.js";
 import { ServerRunningError } from "./server-running.error.js";
+import { ServerUnresponsiveError } from "./server-unresponsive.error.js";
+import { takeOverServerLock } from "./take-over-server-lock.js";
 
 type Release = () => Promise<void>;
+type Attempt = { release: Release } | { holder: number | null };
 
 const STARTUP_GRACE_MS = 2000;
 const POLL_MS = 50;
 
-function hasCode(error: unknown, code: string): boolean {
-  return error instanceof Error && "code" in error && error.code === code;
-}
-
-function heldBy(home: string, pid: number | null): ServerRunningError {
-  const info = readServerFile(home);
-  return new ServerRunningError(pid !== null && info?.pid === pid ? info.port : null, pid);
-}
-
-async function servingPort(home: string, holder: number): Promise<number | null> {
-  const deadline = Date.now() + STARTUP_GRACE_MS;
-  let info = readServerFile(home);
-  while (info?.pid !== holder && Date.now() < deadline) {
-    await sleep(POLL_MS);
-    info = readServerFile(home);
-  }
-  return info?.pid === holder && (await serverAlive(info)) ? info.port : null;
-}
-
-async function takeOver(path: string, home: string, holder: number): Promise<Release> {
-  const aside = `${path}.${process.pid}.${randomUUID()}`;
-  const moved = await rename(path, aside).then(
-    () => true,
-    (error: unknown) => {
-      if (hasCode(error, "ENOENT")) return false;
-      throw error;
-    },
-  );
-  if (moved) {
-    const named = (await readFile(aside, "utf8").catch(() => "")).trim();
-    if (named !== String(holder)) {
-      try {
-        await link(aside, path);
-      } catch (error) {
-        if (!hasCode(error, "EEXIST")) await rename(aside, path);
-      }
-      await rm(aside, { force: true });
-      throw heldBy(home, /^\d+$/.test(named) ? Number(named) : null);
-    }
-    await rm(aside, { force: true });
-  }
+async function attempt(path: string): Promise<Attempt> {
   try {
-    return await acquirePidLock(path);
+    return { release: await acquirePidLock(path) };
   } catch (error) {
-    if (error instanceof LockHeldError) throw heldBy(home, error.pid);
+    if (error instanceof LockHeldError) return { holder: error.pid };
     throw error;
   }
 }
 
+async function within<T>(deadline: number, read: () => T | null): Promise<T | null> {
+  let value = read();
+  while (value === null && Date.now() < deadline) {
+    await sleep(POLL_MS);
+    value = read();
+  }
+  return value;
+}
+
+async function predatesBoot(path: string): Promise<boolean> {
+  const written = await stat(path).then((s) => s.mtimeMs, () => null);
+  return written !== null && written < Date.now() - uptime() * 1000;
+}
+
+function granted(release: Release | null, home: string, path: string): Release {
+  if (release !== null) return release;
+  const holder = readLockPid(path);
+  const info = readServerFile(home);
+  throw new ServerRunningError(holder !== null && info?.pid === holder ? info.port : null, holder);
+}
+
 /**
- * Takes `<home>/server.lock`. A lock naming a live process stands only while that process's server answers
- * `/api/health` on the port in server.json, given up to 2 s to write server.json if it is still starting;
- * otherwise the lock is stale (its pid was reused) and is taken over: moved aside and replaced only while it still
- * names that pid, or put back. Throws ServerRunningError while the lock stands.
+ * Takes `<home>/server.lock`, taking over a lock a live process holds only on clear evidence that its server is gone:
+ * the lock predates the last boot, or the port in server.json refuses or answers as another process. It waits up to
+ * 2 s for a starting server to write a pid into the lock and server.json, then takes over a lock still empty or not a
+ * pid. Throws ServerRunningError while the holder's server answers, and ServerUnresponsiveError when it is silent
+ * or has written no server.json, so a login service retries.
  */
 export async function lockServer(home: string): Promise<Release> {
   const path = join(home, "server.lock");
-  try {
-    return await acquirePidLock(path);
-  } catch (error) {
-    if (!(error instanceof LockHeldError)) throw error;
-    if (error.pid === null) throw heldBy(home, null);
-    const port = await servingPort(home, error.pid);
-    if (port !== null) throw new ServerRunningError(port, error.pid);
-    return takeOver(path, home, error.pid);
+  const deadline = Date.now() + STARTUP_GRACE_MS;
+  let tried = await attempt(path);
+  if ("release" in tried) return tried.release;
+  if (tried.holder === null) {
+    await within(deadline, () => readLockPid(path));
+    tried = await attempt(path);
+    if ("release" in tried) return tried.release;
+    if (tried.holder === null) return granted(await takeOverServerLock(path, null), home, path);
   }
+  const holder = tried.holder;
+  if (await predatesBoot(path)) return granted(await takeOverServerLock(path, holder), home, path);
+  const info = await within<ServerInfo>(deadline, () => {
+    const read = readServerFile(home);
+    return read?.pid === holder ? read : null;
+  });
+  if (info === null) throw new ServerUnresponsiveError(holder, "it has written no server.json");
+  const probe = await probeHealth(info.port);
+  if (probe.kind === "answered" && probe.pid === holder) throw new ServerRunningError(info.port, holder);
+  if (probe.kind === "silent") throw new ServerUnresponsiveError(holder, `its server on port ${info.port} does not answer`);
+  return granted(await takeOverServerLock(path, holder), home, path);
 }

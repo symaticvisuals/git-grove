@@ -5,19 +5,28 @@ const PORT = 47683;
 const TOKEN = "ab".repeat(32);
 const SERVER = { port: PORT, token: TOKEN };
 const HOST = `127.0.0.1:${PORT}`;
-const COOKIE = `grove_token=${TOKEN}`;
 const SAME_ORIGIN_POST = {
   method: "POST",
-  cookie: COOKIE,
   tokenHeader: TOKEN,
   origin: `http://${HOST}`,
   secFetchSite: "same-origin",
   contentType: "application/json",
 };
+const PUBLIC_PATHS = [
+  "/",
+  "/index.html",
+  "/app.js",
+  "/styles.css",
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/favicon.svg",
+  "/icons/icon-192.png",
+  "/fonts/mono.woff2",
+  "/api/health",
+];
 
-function facts(url: string, extra: Partial<Omit<RequestFacts, "path" | "query">> = {}): RequestFacts {
-  const parsed = new URL(url, "http://127.0.0.1");
-  return { method: "GET", host: HOST, ...extra, path: parsed.pathname, query: parsed.searchParams };
+function facts(url: string, extra: Partial<Omit<RequestFacts, "path">> = {}): RequestFacts {
+  return { method: "GET", host: HOST, ...extra, path: new URL(url, "http://127.0.0.1").pathname };
 }
 
 function status(gate: Gate): number | string {
@@ -26,83 +35,46 @@ function status(gate: Gate): number | string {
 
 describe("Host", () => {
   test.each([
-    ["127.0.0.1", HOST, "ok"],
-    ["localhost", `localhost:${PORT}`, "ok"],
-    ["a foreign name on our port", `evil.test:${PORT}`, 421],
-    ["our address on another port", "127.0.0.1:1", 421],
-    ["localhost on another port", "localhost:3000", 421],
-    ["our address with no port", "127.0.0.1", 421],
-  ])("%s gives %s", (_name, host, expected) => {
-    expect(status(checkRequest(facts("/api/projects", { host, cookie: COOKIE }), SERVER))).toBe(expected);
+    ["127.0.0.1", "ok", HOST],
+    ["localhost", "ok", `localhost:${PORT}`],
+    ["a foreign name on our port", 421, `evil.test:${PORT}`],
+    ["our address on another port", 421, "127.0.0.1:1"],
+    ["localhost on another port", 421, "localhost:3000"],
+    ["our address with no port", 421, "127.0.0.1"],
+  ])("%s gives %s", (_name, expected, host) => {
+    expect(status(checkRequest(facts("/api/projects", { host, tokenHeader: TOKEN }), SERVER))).toBe(expected);
   });
 
   test("a missing Host gives 421", () => {
-    expect(status(checkRequest({ ...facts("/", { cookie: COOKIE }), host: undefined }, SERVER))).toBe(421);
+    expect(status(checkRequest({ ...facts("/"), host: undefined }, SERVER))).toBe(421);
   });
 
-  test("a foreign Host gives 421 on a cookie-free path too", () => {
-    expect(status(checkRequest(facts("/api/health", { host: `evil.test:${PORT}` }), SERVER))).toBe(421);
-    expect(status(checkRequest(facts("/sw.js", { host: `evil.test:${PORT}` }), SERVER))).toBe(421);
+  test.each(["/", "/app.js", "/api/health", "/sw.js"])("a foreign Host gives 421 on the public %s too", (path) => {
+    expect(status(checkRequest(facts(path, { host: `evil.test:${PORT}` }), SERVER))).toBe(421);
   });
 });
 
-describe("the token in the address", () => {
-  test("GET /?token=<t> sets the cookie and redirects to /", () => {
-    expect(checkRequest(facts(`/?token=${TOKEN}`), SERVER)).toEqual({ kind: "set-cookie", location: "/" });
+describe("public files", () => {
+  test.each(PUBLIC_PATHS)("GET %s needs no token", (path) => {
+    expect(checkRequest(facts(path), SERVER)).toEqual({ kind: "ok" });
   });
 
-  test("the redirect keeps the other query parameters", () => {
-    expect(checkRequest(facts(`/?a=1&token=${TOKEN}&b=2`), SERVER)).toEqual({ kind: "set-cookie", location: "/?a=1&b=2" });
+  test("a token in the query string does not stand in for the header", () => {
+    expect(status(checkRequest(facts(`/api/projects?token=${TOKEN}`), SERVER))).toBe(401);
+  });
+});
+
+describe("the token header", () => {
+  test.each(["/api/projects", "/api/features/x", "/api", "/events"])("GET %s without X-Grove-Token gives 401", (path) => {
+    expect(status(checkRequest(facts(path), SERVER))).toBe(401);
   });
 
-  test("the redirect never leaves this server", () => {
-    expect(checkRequest(facts(`/.//evil.test/?token=${TOKEN}`), SERVER)).toEqual({ kind: "set-cookie", location: "/evil.test/" });
+  test.each(["/api/projects", "/events"])("GET %s with X-Grove-Token is ok", (path) => {
+    expect(checkRequest(facts(path, { tokenHeader: TOKEN }), SERVER)).toEqual({ kind: "ok" });
   });
 
   test.each([["a wrong token", "x".repeat(64)], ["a short token", "ab"], ["an empty token", ""]])("%s gives 401", (_name, token) => {
-    expect(status(checkRequest(facts(`/?token=${token}`), SERVER))).toBe(401);
-  });
-
-  test("a wrong token in the address gives 401 even with the cookie", () => {
-    expect(status(checkRequest(facts("/?token=nope", { cookie: COOKIE }), SERVER))).toBe(401);
-  });
-});
-
-describe("cookie-free paths", () => {
-  test.each(["/manifest.webmanifest", "/sw.js", "/favicon.svg", "/icons/icon-192.png", "/fonts/mono.woff2", "/api/health"])(
-    "GET %s is ok without the cookie",
-    (path) => {
-      expect(checkRequest(facts(path), SERVER)).toEqual({ kind: "ok" });
-    },
-  );
-
-  test.each(["/", "/index.html", "/app.js", "/icons/", "/icons/..%2findex.html", "/icons/a/b.png", "/fonts/..", "/api/health/x"])(
-    "GET %s needs the cookie",
-    (path) => {
-      expect(status(checkRequest(facts(path), SERVER))).toBe(401);
-    },
-  );
-
-  test("a POST to a cookie-free path still needs the cookie", () => {
-    expect(status(checkRequest(facts("/api/health", { method: "POST", tokenHeader: TOKEN }), SERVER))).toBe(401);
-  });
-});
-
-describe("the cookie", () => {
-  test("an API request without the cookie gives 401", () => {
-    expect(status(checkRequest(facts("/api/projects"), SERVER))).toBe(401);
-  });
-
-  test("a wrong cookie gives 401", () => {
-    expect(status(checkRequest(facts("/api/projects", { cookie: "grove_token=nope" }), SERVER))).toBe(401);
-  });
-
-  test("the token header alone does not stand in for the cookie", () => {
-    expect(status(checkRequest(facts("/api/projects", { tokenHeader: TOKEN }), SERVER))).toBe(401);
-  });
-
-  test("the cookie is found among others, even behind a decoy of the same name", () => {
-    expect(checkRequest(facts("/api/projects", { cookie: `a=1; grove_token=decoy; ${COOKIE}` }), SERVER)).toEqual({ kind: "ok" });
+    expect(status(checkRequest(facts("/api/projects", { tokenHeader: token }), SERVER))).toBe(401);
   });
 });
 
@@ -122,17 +94,16 @@ describe("POST", () => {
   });
 
   test.each([
-    ["without X-Grove-Token", { tokenHeader: undefined }, 403],
-    ["with a wrong X-Grove-Token", { tokenHeader: "x".repeat(64) }, 403],
-    ["with Origin: http://localhost:3000", { origin: "http://localhost:3000" }, 403],
-    ["with Origin: null", { origin: "null" }, 403],
-    ["with the other allowed name as its Origin", { origin: `http://localhost:${PORT}` }, 403],
-    ["with Sec-Fetch-Site: cross-site", { secFetchSite: "cross-site" }, 403],
-    ["with Sec-Fetch-Site: same-site", { secFetchSite: "same-site" }, 403],
-    ["with text/plain", { contentType: "text/plain" }, 415],
-    ["with no content type", { contentType: undefined }, 415],
-    ["without the cookie", { cookie: undefined }, 401],
-  ])("a POST %s gives %s", (_name, change, expected) => {
+    ["without X-Grove-Token", 401, { tokenHeader: undefined }],
+    ["with a wrong X-Grove-Token", 401, { tokenHeader: "x".repeat(64) }],
+    ["with Origin: http://localhost:3000", 403, { origin: "http://localhost:3000" }],
+    ["with Origin: null", 403, { origin: "null" }],
+    ["with the other allowed name as its Origin", 403, { origin: `http://localhost:${PORT}` }],
+    ["with Sec-Fetch-Site: cross-site", 403, { secFetchSite: "cross-site" }],
+    ["with Sec-Fetch-Site: same-site", 403, { secFetchSite: "same-site" }],
+    ["with text/plain", 415, { contentType: "text/plain" }],
+    ["with no content type", 415, { contentType: undefined }],
+  ])("a POST %s gives %s", (_name, expected, change) => {
     expect(status(checkRequest(facts("/api/shutdown", { ...SAME_ORIGIN_POST, ...change }), SERVER))).toBe(expected);
   });
 
@@ -141,12 +112,12 @@ describe("POST", () => {
     expect(checkRequest(facts("/api/shutdown", post), SERVER)).toEqual({ kind: "ok" });
   });
 
-  test("the address token is not accepted on a POST", () => {
-    expect(status(checkRequest(facts(`/api/shutdown?token=${TOKEN}`, { ...SAME_ORIGIN_POST, cookie: undefined }), SERVER))).toBe(401);
+  test.each(["/api/health", "/"])("a POST to the public %s still needs the token", (path) => {
+    expect(status(checkRequest(facts(path, { ...SAME_ORIGIN_POST, tokenHeader: undefined }), SERVER))).toBe(401);
   });
 
   test("any method but GET and HEAD is held to the POST rules", () => {
-    expect(status(checkRequest(facts("/api/shutdown", { method: "DELETE", cookie: COOKIE }), SERVER))).toBe(403);
+    expect(status(checkRequest(facts("/api/shutdown", { method: "DELETE", tokenHeader: TOKEN }), SERVER))).toBe(415);
     expect(status(checkRequest(facts("/api/shutdown", { method: "OPTIONS", origin: "http://evil.test" }), SERVER))).toBe(401);
   });
 });

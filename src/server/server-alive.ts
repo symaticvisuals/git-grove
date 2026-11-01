@@ -1,6 +1,5 @@
+import { probeHealth } from "./probe-health.js";
 import type { ServerInfo } from "./server-info.types.js";
-
-const HEALTH_TIMEOUT_MS = 1000;
 
 function pidRuns(pid: number): boolean {
   try {
@@ -11,18 +10,9 @@ function pidRuns(pid: number): boolean {
   }
 }
 
-function healthPid(value: unknown): number | null {
-  if (typeof value !== "object" || value === null || !("ok" in value) || !("pid" in value)) return null;
-  return value.ok === true && typeof value.pid === "number" ? value.pid : null;
-}
-
-/** True when `info.pid` runs and `GET /api/health` on `info.port` answers as that same process. */
+/** True when `info.pid` runs and `GET /api/health` on `info.port` answers as that same process within 1 s. */
 export async function serverAlive(info: ServerInfo): Promise<boolean> {
   if (!pidRuns(info.pid)) return false;
-  try {
-    const res = await fetch(`http://127.0.0.1:${info.port}/api/health`, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
-    return res.ok && healthPid(await res.json()) === info.pid;
-  } catch {
-    return false;
-  }
+  const probe = await probeHealth(info.port);
+  return probe.kind === "answered" && probe.pid === info.pid;
 }

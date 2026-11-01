@@ -7,7 +7,6 @@ export type UiFixture = { dir: string; cleanup: () => Promise<void> };
 const INDEX = `<!doctype html>
 <html>
 <head>
-<meta name="grove-token" content="%GROVE_TOKEN%">
 <meta name="grove-version" content="%GROVE_VERSION%">
 <script type="module" src="/app.js"></script>
 </head>
@@ -18,6 +17,7 @@ const INDEX = `<!doctype html>
 const FILES: Record<string, string> = {
   "index.html": INDEX,
   "app.js": "export {};\n",
+  "other.html": "<!doctype html><title>other</title>\n",
   "manifest.webmanifest": '{ "name": "git grove", "display": "standalone" }\n',
   "sw.js": "self.addEventListener('fetch', () => {});\n",
   "favicon.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>\n',
@@ -25,7 +25,7 @@ const FILES: Record<string, string> = {
   "fonts/mono.woff2": "woff2",
 };
 
-/** Writes a throwaway `uiDir`: an `index.html` holding the `%GROVE_TOKEN%` and `%GROVE_VERSION%` placeholders, and the public assets. */
+/** Writes a throwaway `uiDir`: an `index.html` holding the `%GROVE_VERSION%` placeholder, a second page, and the public assets. */
 export async function uiFixture(): Promise<UiFixture> {
   const root = await mkdtemp(join(tmpdir(), "git-grove-ui-"));
   const dir = join(root, "ui");

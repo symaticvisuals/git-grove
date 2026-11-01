@@ -9,7 +9,22 @@ import { serveStatic } from "./serve-static.js";
 
 export type RequestDeps = { router: Router; context: ServerContext; uiDir: string; closing: () => boolean };
 
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
+
 const SECURITY_HEADERS: Record<string, string> = {
+  "content-security-policy": CONTENT_SECURITY_POLICY,
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   "x-frame-options": "DENY",
@@ -17,8 +32,6 @@ const SECURITY_HEADERS: Record<string, string> = {
   "cross-origin-opener-policy": "same-origin",
   "cache-control": "no-store",
 };
-
-const COOKIE_ATTRIBUTES = "HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000";
 
 function header(req: IncomingMessage, name: string): string | undefined {
   const value = req.headers[name];
@@ -44,15 +57,17 @@ async function respond(req: IncomingMessage, res: ServerResponse, deps: RequestD
     reply(400, { error: "bad request target" });
     return;
   }
-  const url = new URL(target, "http://127.0.0.1");
+  const url = URL.parse(target, "http://127.0.0.1");
+  if (url === null) {
+    reply(400, { error: "bad request target" });
+    return;
+  }
   const { context } = deps;
   const gate = checkRequest(
     {
       method,
       path: url.pathname,
-      query: url.searchParams,
       host: header(req, "host"),
-      cookie: header(req, "cookie"),
       tokenHeader: header(req, "x-grove-token"),
       origin: header(req, "origin"),
       secFetchSite: header(req, "sec-fetch-site"),
@@ -62,11 +77,6 @@ async function respond(req: IncomingMessage, res: ServerResponse, deps: RequestD
   );
   if (gate.kind === "deny") {
     reply(gate.status, { error: gate.reason });
-    return;
-  }
-  if (gate.kind === "set-cookie") {
-    res.writeHead(302, { location: gate.location, "set-cookie": `grove_token=${context.token}; ${COOKIE_ATTRIBUTES}` });
-    res.end();
     return;
   }
 
@@ -94,7 +104,7 @@ async function respond(req: IncomingMessage, res: ServerResponse, deps: RequestD
     reply(405, { error: "method not allowed" });
     return;
   }
-  await serveStatic(res, { uiDir: deps.uiDir, path: url.pathname, page: { token: context.token, version: context.version } });
+  await serveStatic(res, { uiDir: deps.uiDir, path: url.pathname, version: context.version });
 }
 
 /**

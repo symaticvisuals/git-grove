@@ -1,14 +1,12 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { createServer as createHttpServer } from "node:http";
+import { existsSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { PortsInUseError } from "../../src/server/http/ports-in-use.error.js";
 import { ServerRunningError } from "../../src/server/server-running.error.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
-import { writeServerFile } from "../../src/server/write-server-file.js";
 import { serverRequest } from "../support/server-request.js";
 import { type UiFixture, uiFixture } from "../support/ui-fixture.js";
 
@@ -22,6 +20,12 @@ const SECURITY_HEADERS = {
   "cache-control": "no-store",
 };
 
+const ipv6 = await new Promise<boolean>((resolve) => {
+  const probe = createServer();
+  probe.once("error", () => resolve(false));
+  probe.listen(0, "::1", () => probe.close(() => resolve(true)));
+});
+
 let home: string;
 let ui: UiFixture;
 let servers: RunningServer[];
@@ -34,6 +38,7 @@ beforeEach(async () => {
   blockers = [];
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(servers.map((server) => server.close()));
   await Promise.all(blockers.map((blocker) => new Promise((resolve) => blocker.close(resolve))));
   await rm(home, { recursive: true, force: true });
@@ -46,69 +51,38 @@ async function start(options: { port?: number; home?: string; onShutdown?: (code
   return server;
 }
 
-function occupy(port: number): Promise<Server | null> {
+function occupy(port: number, host = "127.0.0.1"): Promise<Server | null> {
   const blocker = createServer();
   return new Promise((resolve) => {
     blocker.once("error", () => resolve(null));
-    blocker.listen(port, "127.0.0.1", () => {
+    blocker.listen(port, host, () => {
       blockers.push(blocker);
       resolve(blocker);
     });
   });
 }
 
-async function occupyFreePort(): Promise<number> {
-  const blocker = await occupy(0);
+async function occupyFreePort(host = "127.0.0.1"): Promise<number> {
+  const blocker = await occupy(0, host);
   const address = blocker?.address();
   if (address === null || address === undefined || typeof address === "string") throw new Error("no port");
   return address.port;
 }
 
-async function closedPort(): Promise<number> {
-  const blocker = createServer();
-  await new Promise<void>((resolve) => blocker.listen(0, "127.0.0.1", resolve));
-  const address = blocker.address();
-  await new Promise((resolve) => blocker.close(resolve));
-  if (address === null || typeof address === "string") throw new Error("no port");
-  return address.port;
-}
-
-/** A stand-in that answers `/api/health` as process `pid`, as a grove server would, after running `onProbe`. */
-async function fakeHealth(pid: number, onProbe: () => void = () => undefined): Promise<number> {
-  const fake = createHttpServer((_req, res) => {
-    onProbe();
-    res.end(JSON.stringify({ ok: true, version: "0.0.1", pid }));
-  });
-  await new Promise<void>((resolve) => fake.listen(0, "127.0.0.1", resolve));
-  blockers.push(fake);
-  const address = fake.address();
-  if (address === null || typeof address === "string") throw new Error("no port");
-  return address.port;
-}
-
-function lockFile(): string {
-  return join(home, "server.lock");
-}
-
-function cookieOf(server: RunningServer): string {
-  return `grove_token=${server.token}`;
+function tokenOf(server: RunningServer): Record<string, string> {
+  return { "x-grove-token": server.token };
 }
 
 function post(server: RunningServer, path: string, headers: Record<string, string> = {}, body = "{}"): Promise<Response> {
   return fetch(`${server.url}${path.slice(1)}`, {
     method: "POST",
-    headers: { cookie: cookieOf(server), "x-grove-token": server.token, "content-type": "application/json", ...headers },
+    headers: { ...tokenOf(server), "content-type": "application/json", ...headers },
     body,
   });
 }
 
 function serverFile(): string {
   return join(home, "server.json");
-}
-
-function readServerFilePort(): unknown {
-  const parsed: unknown = JSON.parse(readFileSync(serverFile(), "utf8"));
-  return typeof parsed === "object" && parsed !== null && "port" in parsed ? parsed.port : null;
 }
 
 test("records pid, port and version in server.json and serves /api/health", async () => {
@@ -130,6 +104,14 @@ test("the token is the one in the token file", async () => {
   expect(server.context.home).toBe(home);
 });
 
+test("an existing home folder open to others is narrowed to 0700", async () => {
+  const shared = join(home, "shared");
+  await mkdir(shared);
+  await chmod(shared, 0o755);
+  await start({ home: shared });
+  expect((await stat(shared)).mode & 0o777).toBe(0o700);
+});
+
 test("a second server with the same home refuses while the first runs", async () => {
   const first = await start();
   const second = start();
@@ -138,52 +120,26 @@ test("a second server with the same home refuses while the first runs", async ()
   expect(JSON.parse(await readFile(serverFile(), "utf8"))).toMatchObject({ port: first.port });
 });
 
-test("a lock held by a live process whose server.json port answers as another process is taken over", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid, port: await fakeHealth(process.pid + 1), version: "0.0.1" });
-  const before = (await stat(lockFile())).ino;
-  const server = await start();
-  expect((await stat(lockFile())).ino).not.toBe(before);
-  expect(JSON.parse(await readFile(serverFile(), "utf8"))).toEqual({ pid: process.pid, port: server.port, version: VERSION });
-});
-
-test("a lock held by a live process with no server.json is taken over once a starting server would have written it", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  const before = (await stat(lockFile())).ino;
-  const startedAt = Date.now();
-  const server = await start();
-  expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1900);
-  expect((await stat(lockFile())).ino).not.toBe(before);
-  expect(readServerFilePort()).toBe(server.port);
-});
-
-test("a lock that changes hands while it is checked is put back, not taken over", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  const handOver = (): void => writeFileSync(lockFile(), String(process.ppid));
-  writeServerFile(home, { pid: process.pid, port: await fakeHealth(process.pid + 1, handOver), version: "0.0.1" });
-  const second = start();
-  await expect(second).rejects.toBeInstanceOf(ServerRunningError);
-  await expect(second).rejects.toMatchObject({ pid: process.ppid });
-  expect(await readFile(lockFile(), "utf8")).toBe(String(process.ppid));
-  expect(await readdir(home)).not.toContainEqual(expect.stringMatching(/^server\.lock\./));
-});
-
-test("a server still starting is waited for, and then refused", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid + 1, port: await closedPort(), version: "0.0.0" });
-  const before = (await stat(lockFile())).ino;
-  const port = await fakeHealth(process.pid);
-  setTimeout(() => writeServerFile(home, { pid: process.pid, port, version: "0.0.1" }), 200);
-  const second = start();
-  await expect(second).rejects.toBeInstanceOf(ServerRunningError);
-  await expect(second).rejects.toMatchObject({ port, pid: process.pid });
-  expect((await stat(lockFile())).ino).toBe(before);
-});
-
 test("takes the next port when the asked one is busy", async () => {
   const busy = await occupyFreePort();
   const server = await start({ port: busy });
   expect(server.port).toBe(busy + 1);
+});
+
+test.skipIf(!ipv6)("listens on [::1] at the same port as 127.0.0.1", async () => {
+  const server = await start();
+  const viaIpv6 = await serverRequest(server.port, { address: "::1", path: "/api/health", headers: { host: `localhost:${server.port}` } });
+  expect(viaIpv6.status).toBe(200);
+  expect(JSON.parse(viaIpv6.body)).toMatchObject({ pid: process.pid });
+  await server.close();
+  await expect(serverRequest(server.port, { address: "::1", path: "/api/health" })).rejects.toThrow();
+});
+
+test.skipIf(!ipv6)("takes the next port when [::1] at the asked one is busy", async () => {
+  const busy = await occupyFreePort("::1");
+  const server = await start({ port: busy });
+  expect(server.port).toBe(busy + 1);
+  await expect(fetch(`http://127.0.0.1:${busy}/api/health`)).rejects.toThrow();
 });
 
 test("every port in the range being busy is a PortsInUseError, and nothing is left behind", async () => {
@@ -199,60 +155,34 @@ test("every port in the range being busy is a PortsInUseError, and nothing is le
   expect(existsSync(join(home, "server.lock"))).toBe(false);
 });
 
-test("GET /?token= sets an HttpOnly SameSite=Strict cookie and redirects without the token", async () => {
+test("/ serves index.html with the version, no token, a CSP and no-store, without the token header", async () => {
   const server = await start();
-  const res = await fetch(`${server.url}?token=${server.token}`, { redirect: "manual" });
-  expect(res.status).toBe(302);
-  expect(res.headers.get("location")).toBe("/");
-  const cookie = res.headers.get("set-cookie") ?? "";
-  expect(cookie).toContain(`grove_token=${server.token}`);
-  expect(cookie).toContain("HttpOnly");
-  expect(cookie).toContain("SameSite=Strict");
-  expect(cookie).toContain("Path=/");
-  expect(cookie).toContain("Max-Age=31536000");
-});
-
-test("/ with the cookie serves index.html with the token in a meta tag, a CSP and no-store", async () => {
-  const server = await start();
-  const res = await fetch(server.url, { headers: { cookie: cookieOf(server) } });
+  const res = await fetch(server.url);
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
   const body = await res.text();
-  expect(body).toContain(`<meta name="grove-token" content="${server.token}">`);
   expect(body).toContain(`<meta name="grove-version" content="${VERSION}">`);
+  expect(body).not.toContain(server.token);
   const csp = res.headers.get("content-security-policy") ?? "";
+  expect(csp).toContain("default-src 'self'");
   expect(csp).toContain("script-src 'self'");
   expect(csp).toContain("frame-ancestors 'none'");
-  expect(csp).toContain("default-src 'self'");
   expect(res.headers.get("cache-control")).toBe("no-store");
 });
 
-test("/ without the cookie is 401 and does not hold the token", async () => {
+test("/Index.html and any other page carry the CSP too", async () => {
   const server = await start();
-  const res = await fetch(server.url);
-  expect(res.status).toBe(401);
-  expect(await res.text()).not.toContain(server.token);
-});
-
-test("every response carries the security headers", async () => {
-  const server = await start();
-  const replies = [
-    await fetch(server.url, { headers: { cookie: cookieOf(server) } }),
-    await fetch(`${server.url}api/health`),
-    await fetch(`${server.url}api/nope`),
-    await fetch(`${server.url}sw.js`),
-    await fetch(`${server.url}?token=${server.token}`, { redirect: "manual" }),
-  ];
-  for (const res of replies) {
-    for (const [name, value] of Object.entries(SECURITY_HEADERS)) expect(res.headers.get(name), `${res.url} ${name}`).toBe(value);
+  for (const path of ["/Index.html", "/other.html", "/index.html"]) {
+    const res = await fetch(`${server.url}${path.slice(1)}`);
+    expect(res.headers.get("content-security-policy"), path).toContain("script-src 'self'");
+    if (res.status === 200) expect(await res.text(), path).not.toContain("%GROVE_VERSION%");
   }
-  const rebound = await serverRequest(server.port, { headers: { host: `evil.test:${server.port}` } });
-  expect(rebound.headers).toMatchObject(SECURITY_HEADERS);
 });
 
-test("the public assets load without the cookie", async () => {
+test("static files return 200 without the token header", async () => {
   const server = await start();
   const cases: [string, string][] = [
+    ["app.js", "text/javascript; charset=utf-8"],
     ["manifest.webmanifest", "application/manifest+json"],
     ["sw.js", "text/javascript; charset=utf-8"],
     ["favicon.svg", "image/svg+xml"],
@@ -264,18 +194,63 @@ test("the public assets load without the cookie", async () => {
     expect(res.status, path).toBe(200);
     expect(res.headers.get("content-type"), path).toBe(type);
   }
-  expect((await fetch(`${server.url}app.js`)).status).toBe(401);
-  expect((await fetch(`${server.url}app.js`, { headers: { cookie: cookieOf(server) } })).status).toBe(200);
 });
 
-test("a rebound Host is 421 even with the cookie", async () => {
+test("API calls without the token header are 401, and with it they pass the gate", async () => {
   const server = await start();
-  const rebound = await serverRequest(server.port, { headers: { host: `evil.test:${server.port}`, cookie: cookieOf(server) } });
+  for (const path of ["api/projects", "events"]) {
+    expect((await fetch(`${server.url}${path}`)).status, path).toBe(401);
+    expect((await fetch(`${server.url}${path}`, { headers: { "x-grove-token": "f".repeat(64) } })).status, path).toBe(401);
+    expect((await fetch(`${server.url}${path}`, { headers: tokenOf(server) })).status, path).toBe(404);
+  }
+  expect((await fetch(`${server.url}api/projects?token=${server.token}`)).status).toBe(401);
+  expect((await fetch(`${server.url}api/health`)).status).toBe(200);
+});
+
+test("every response carries the security headers and the CSP", async () => {
+  const server = await start();
+  const replies = [
+    await fetch(server.url),
+    await fetch(`${server.url}api/health`),
+    await fetch(`${server.url}api/nope`),
+    await fetch(`${server.url}api/nope`, { headers: tokenOf(server) }),
+    await fetch(`${server.url}sw.js`),
+    await fetch(`${server.url}nope.js`),
+    await post(server, "/api/shutdown", { "content-type": "text/plain" }),
+  ];
+  for (const res of replies) {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) expect(res.headers.get(name), `${res.url} ${name}`).toBe(value);
+    expect(res.headers.get("content-security-policy"), res.url).toContain("frame-ancestors 'none'");
+  }
+  const rebound = await serverRequest(server.port, { headers: { host: `evil.test:${server.port}` } });
+  expect(rebound.headers).toMatchObject(SECURITY_HEADERS);
+  expect(rebound.headers["content-security-policy"]).toContain("default-src 'self'");
+});
+
+test("no response sets a cookie", async () => {
+  const server = await start();
+  for (const res of [await fetch(server.url), await fetch(`${server.url}?token=${server.token}`), await fetch(`${server.url}api/health`)]) {
+    expect(res.headers.get("set-cookie")).toBeNull();
+  }
+});
+
+test("a rebound Host is 421, even with the token header", async () => {
+  const server = await start();
+  const rebound = await serverRequest(server.port, { path: "/api/nope", headers: { host: `evil.test:${server.port}`, ...tokenOf(server) } });
   expect(rebound.status).toBe(421);
-  expect(rebound.body).not.toContain(server.token);
-  const localhost = await serverRequest(server.port, { headers: { host: `localhost:${server.port}`, cookie: cookieOf(server) } });
+  for (const path of ["/", "/api/health"]) {
+    expect((await serverRequest(server.port, { path, headers: { host: `evil.test:${server.port}` } })).status, path).toBe(421);
+  }
+  const localhost = await serverRequest(server.port, { path: "/api/health", headers: { host: `localhost:${server.port}` } });
   expect(localhost.status).toBe(200);
-  expect(localhost.body).toContain(server.token);
+});
+
+test("a request target that does not parse is 400 and is not logged", async () => {
+  const server = await start();
+  const write = vi.spyOn(process.stderr, "write");
+  const res = await serverRequest(server.port, { path: "//" });
+  expect(res.status).toBe(400);
+  expect(write).not.toHaveBeenCalled();
 });
 
 test("POST /api/shutdown needs the header, then closes the server and calls onShutdown(75)", async () => {
@@ -283,12 +258,8 @@ test("POST /api/shutdown needs the header, then closes the server and calls onSh
   const stopped = new Promise<number>((resolve) => (resolveCode = resolve));
   const server = await start({ onShutdown: (code) => resolveCode(code) });
 
-  const refused = await fetch(`${server.url}api/shutdown`, {
-    method: "POST",
-    headers: { cookie: cookieOf(server), "content-type": "application/json" },
-    body: "{}",
-  });
-  expect(refused.status).toBe(403);
+  const refused = await fetch(`${server.url}api/shutdown`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  expect(refused.status).toBe(401);
   expect((await fetch(`${server.url}api/health`)).status).toBe(200);
 
   const accepted = await post(server, "/api/shutdown");
@@ -301,7 +272,7 @@ test("POST /api/shutdown needs the header, then closes the server and calls onSh
 
 test("GET /api/shutdown changes nothing", async () => {
   const server = await start();
-  const res = await fetch(`${server.url}api/shutdown`, { headers: { cookie: cookieOf(server) } });
+  const res = await fetch(`${server.url}api/shutdown`, { headers: tokenOf(server) });
   expect(res.status).toBe(404);
   expect((await fetch(`${server.url}api/health`)).status).toBe(200);
 });
@@ -320,7 +291,7 @@ test("a chunked body that grows past 64 KB is 413 without a content-length to go
   const res = await serverRequest(server.port, {
     method: "POST",
     path: "/api/shutdown",
-    headers: { cookie: cookieOf(server), "x-grove-token": server.token, "content-type": "application/json", "transfer-encoding": "chunked" },
+    headers: { ...tokenOf(server), "content-type": "application/json", "transfer-encoding": "chunked" },
     body: JSON.stringify({ pad: "x".repeat(70 * 1024) }),
   });
   expect(res.status).toBe(413);
@@ -343,7 +314,6 @@ test("a body declared over 64 KB is 413 before any of it arrives", async () => {
     const headers = [
       "POST /api/shutdown HTTP/1.1",
       `Host: 127.0.0.1:${server.port}`,
-      `Cookie: ${cookieOf(server)}`,
       `X-Grove-Token: ${server.token}`,
       "Content-Type: application/json",
       `Content-Length: ${1024 * 1024}`,
@@ -359,7 +329,7 @@ test("no response carries Access-Control-Allow-Origin", async () => {
   const evil = { origin: "http://evil.test" };
   const replies = [
     await fetch(`${server.url}api/health`, { headers: evil }),
-    await fetch(server.url, { headers: { ...evil, cookie: cookieOf(server) } }),
+    await fetch(server.url, { headers: evil }),
     await fetch(`${server.url}api/projects`, { headers: evil }),
     await post(server, "/api/shutdown", evil),
     await fetch(`${server.url}api/shutdown`, {
@@ -380,21 +350,12 @@ test("a path that climbs out of the ui folder is 404", async () => {
   const secret = join(ui.dir, "..", "secret.txt");
   await writeFile(secret, "secret");
   await symlink(secret, join(ui.dir, "linked.txt"));
-  const cookie = cookieOf(server);
-  for (const path of ["/..%2fsecret.txt", "/icons/..%2f..%2fsecret.txt", "/%2e%2e/secret.txt", "/../secret.txt", "/linked.txt", "/icons", "/nope.js"]) {
-    const res = await serverRequest(server.port, { path, headers: { cookie } });
+  const paths = ["/..%2fsecret.txt", "/icons/..%2f..%2fsecret.txt", "/%2e%2e/secret.txt", "/../secret.txt", "/linked.txt", "/icons", "/nope.js"];
+  for (const path of paths) {
+    const res = await serverRequest(server.port, { path });
     expect(res.status, path).toBe(404);
     expect(res.body, path).not.toContain("secret");
   }
-});
-
-test("a climbing path behind a cookie-free folder neither skips the cookie nor reaches index.html", async () => {
-  const server = await start();
-  const anonymous = await serverRequest(server.port, { path: "/icons/..%2findex.html" });
-  expect(anonymous.status).toBe(401);
-  expect(anonymous.body).not.toContain(server.token);
-  const signedIn = await serverRequest(server.port, { path: "/icons/..%2findex.html", headers: { cookie: cookieOf(server) } });
-  expect(signedIn.status).toBe(404);
 });
 
 test("close removes server.json and lets the next server start", async () => {

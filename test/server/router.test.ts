@@ -28,6 +28,13 @@ test("match is null for another method, another shape or a param that does not d
   expect(router.match("GET", "/api/repos/%E0%A4%A/features")).toBeNull();
 });
 
+test("literal segments compare as sent, so an encoded /api never reaches an /api route", () => {
+  const router = createRouter();
+  router.get("/api/projects", ok);
+  expect(router.match("GET", "/%61pi/projects")).toBeNull();
+  expect(router.match("GET", "/api/%70rojects")).toBeNull();
+});
+
 test("a stream route matches GET only", () => {
   const router = createRouter();
   const fn = (): void => undefined;

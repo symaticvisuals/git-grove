@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
@@ -47,7 +48,7 @@ test("serveCommand --port 0 exits 75 after /api/shutdown", async () => {
   const token = await readFile(join(home, "token"), "utf8");
   const res = await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, {
     method: "POST",
-    headers: { cookie: `grove_token=${token}`, "x-grove-token": token, "content-type": "application/json" },
+    headers: { "x-grove-token": token, "content-type": "application/json" },
   });
   expect(res.status).toBe(202);
   expect(await exited).toBe(75);
@@ -87,12 +88,65 @@ test("serve starts over a lock left by a live process that is not a server, and 
   const token = await readFile(join(home, "token"), "utf8");
   const res = await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, {
     method: "POST",
-    headers: { cookie: `grove_token=${token}`, "x-grove-token": token, "content-type": "application/json" },
+    headers: { "x-grove-token": token, "content-type": "application/json" },
   });
   expect(res.status).toBe(202);
   expect(await exited).toBe(75);
   expect(cli.out.join("")).not.toContain("already running");
   expect(existsSync(lock)).toBe(false);
+});
+
+const STAND_IN_SERVER = `
+const { writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const home = process.argv[1];
+writeFileSync(join(home, "server.lock"), String(process.pid));
+const server = require("node:http").createServer((_req, res) => res.end(JSON.stringify({ ok: true, version: "0.0.1", pid: process.pid })));
+server.listen(0, "127.0.0.1", () => {
+  writeFileSync(join(home, "server.json"), JSON.stringify({ pid: process.pid, port: server.address().port, version: "0.0.1" }));
+  process.stdout.write("ready\\n");
+});
+`;
+
+test("serve B leaves the lock alone while server A is stopped, and exits non-zero so the service retries", async () => {
+  const serverA = spawn(process.execPath, ["-e", STAND_IN_SERVER, home], { stdio: ["ignore", "pipe", "inherit"] });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      serverA.stdout.on("data", (chunk: Buffer) => {
+        if (chunk.toString("utf8").includes("ready")) resolve();
+      });
+      serverA.once("exit", () => reject(new Error("server A exited")));
+    });
+    const info = readServerFile(home);
+    expect(info).not.toBeNull();
+    if (info === null) return;
+    expect(await serverAlive(info)).toBe(true);
+    process.kill(info.pid, "SIGSTOP");
+    const cli = io();
+    expect(await run(["serve", "--port", "0"], cli.io)).toBe(1);
+    expect(cli.err.join("")).toContain(`process ${info.pid} holds the server lock, but its server on port ${info.port} does not answer`);
+    expect(await readFile(join(home, "server.lock"), "utf8")).toBe(String(info.pid));
+    expect(readServerFile(home)).toEqual(info);
+  } finally {
+    serverA.kill("SIGKILL");
+  }
+});
+
+test.each(["SIGINT", "SIGTERM", "SIGHUP"] as const)("serve stops cleanly and exits 0 on %s", async (signal) => {
+  const others = process.listeners(signal);
+  process.removeAllListeners(signal);
+  try {
+    const cli = io();
+    const exited = serveCommand(cli.io, { port: 0 });
+    await waitForLiveServer();
+    process.emit(signal, signal);
+    expect(await exited).toBe(0);
+    expect(existsSync(join(home, "server.json"))).toBe(false);
+    expect(existsSync(join(home, "server.lock"))).toBe(false);
+    expect(process.listenerCount(signal)).toBe(0);
+  } finally {
+    for (const listener of others) process.on(signal, listener);
+  }
 });
 
 test("serve says where the running server is and exits 0", async () => {

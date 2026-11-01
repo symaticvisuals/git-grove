@@ -9,6 +9,7 @@ import { StoreUnavailableError } from "../core/journal/store-unavailable.error.j
 import { RefusedError } from "../core/runner/refused.error.js";
 import { RepoLockedError } from "../core/runner/repo-locked.error.js";
 import { PortsInUseError } from "../server/http/ports-in-use.error.js";
+import { ServerUnresponsiveError } from "../server/server-unresponsive.error.js";
 
 const ONE_LINE_ERRORS = [
   BareRepoError,
@@ -19,6 +20,7 @@ const ONE_LINE_ERRORS = [
   InvalidInputError,
   RefusedError,
   RepoLockedError,
+  ServerUnresponsiveError,
   StoreCorruptError,
   StoreUnavailableError,
 ];
