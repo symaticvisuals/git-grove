@@ -1,3 +1,4 @@
+import { InvalidInputError } from "../core/actions/invalid-input.error.js";
 import { BareRepoError } from "../core/facts/bare-repo.error.js";
 import { NotARepoError } from "../core/facts/not-a-repo.error.js";
 import { NotAWorktreeError } from "../core/facts/not-a-worktree.error.js";
@@ -13,6 +14,7 @@ const ONE_LINE_ERRORS = [
   NotARepoError,
   NotAWorktreeError,
   GitVersionError,
+  InvalidInputError,
   RefusedError,
   RepoLockedError,
   StoreCorruptError,

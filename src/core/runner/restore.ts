@@ -40,11 +40,49 @@ export type RestoreResult =
 
 /**
  * Moves `branch` back to a pin (default: its newest), after pinning its current tip, or creates it at the pin
- * when the branch no longer exists. Takes the repo lock first and refuses if the branch tip changes before the move
- * (`beforeMove` is a test seam). Refuses, before pinning anything, while any worktree has a rebase, merge, cherry-pick
- * or bisect of the branch in progress, when the worktree holding the branch has uncommitted changes, and when a worktree
- * still has a deleted branch checked out. A worktree whose folder is gone holds nothing: the ref is moved directly.
+ * when the branch no longer exists. The caller holds the repo lock and read `facts` under it. Refuses if the branch
+ * tip changes before the move (`beforeMove` is a test seam). Refuses, before pinning anything, while any worktree has
+ * a rebase, merge, cherry-pick or bisect of the branch in progress, when the worktree holding the branch has
+ * uncommitted changes, and when a worktree still has a deleted branch checked out. A worktree whose folder is gone
+ * holds nothing: the ref is moved directly.
  */
+export async function restoreHeld(
+  facts: RepoFacts,
+  branch: string,
+  pinRef?: string,
+  beforeMove?: () => Promise<void>,
+): Promise<RestoreResult> {
+  const target = pinRef ?? (await listPins(facts.root, branch))[0]?.ref;
+  if (target === undefined) throw new RefusedError(`git-grove: no pin found for ${branch}`);
+  const to = await revParse(facts.root, target);
+  if (to === null) throw new RefusedError(`git-grove: cannot resolve ${target}`);
+  refuseMidOperation(facts, branch);
+  const from = await revParse(facts.root, `refs/heads/${branch}`);
+  const holder = holderOf(facts, branch);
+  if (from === null) {
+    if (holder) throw new RefusedError(`git-grove: ${holder.path} has ${branch} checked out but the branch is gone`);
+    const commitsBack = await countCommits(facts.root, [to, "--not", "--branches", "--remotes", "--tags"]);
+    await runGit(["update-ref", `refs/heads/${branch}`, to, ""], { cwd: facts.root, write: true });
+    return { kind: "created", to, pinRef: target, commitsBack };
+  }
+
+  const changes = holder?.changes;
+  if (changes && changes.staged + changes.unstaged + changes.untracked > 0) {
+    throw new RefusedError(`git-grove: ${holder.path} has uncommitted changes`);
+  }
+
+  const pinnedCurrent = await pin(facts.root, branch, from, new Date());
+  await beforeMove?.();
+  if ((await revParse(facts.root, `refs/heads/${branch}`)) !== from) {
+    throw new RefusedError(`git-grove: ${branch} moved while restoring; run again`);
+  }
+  if (holder) await runGit(["reset", "--keep", to], { cwd: holder.path, write: true });
+  else await runGit(["update-ref", `refs/heads/${branch}`, to, from], { cwd: facts.root, write: true });
+  const commitsBack = await countCommits(facts.root, [`${from}..${to}`]);
+  return { kind: "moved", from, to, pinnedCurrent, pinRef: target, commitsBack };
+}
+
+/** Takes the repo lock, reads the repository and runs {@link restoreHeld} under the lock. */
 export async function restore(
   cwd: string,
   branch: string,
@@ -52,35 +90,5 @@ export async function restore(
   beforeMove?: () => Promise<void>,
 ): Promise<RestoreResult> {
   const probe = await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd });
-  return withRepoLock(probe.stdout.trim(), async () => {
-    const facts = await readRepoFacts(cwd);
-    const target = pinRef ?? (await listPins(facts.root, branch))[0]?.ref;
-    if (target === undefined) throw new RefusedError(`git-grove: no pin found for ${branch}`);
-    const to = await revParse(facts.root, target);
-    if (to === null) throw new RefusedError(`git-grove: cannot resolve ${target}`);
-    refuseMidOperation(facts, branch);
-    const from = await revParse(facts.root, `refs/heads/${branch}`);
-    const holder = holderOf(facts, branch);
-    if (from === null) {
-      if (holder) throw new RefusedError(`git-grove: ${holder.path} has ${branch} checked out but the branch is gone`);
-      const commitsBack = await countCommits(facts.root, [to, "--not", "--branches", "--remotes", "--tags"]);
-      await runGit(["update-ref", `refs/heads/${branch}`, to, ""], { cwd: facts.root, write: true });
-      return { kind: "created", to, pinRef: target, commitsBack };
-    }
-
-    const changes = holder?.changes;
-    if (changes && changes.staged + changes.unstaged + changes.untracked > 0) {
-      throw new RefusedError(`git-grove: ${holder.path} has uncommitted changes`);
-    }
-
-    const pinnedCurrent = await pin(facts.root, branch, from, new Date());
-    await beforeMove?.();
-    if ((await revParse(facts.root, `refs/heads/${branch}`)) !== from) {
-      throw new RefusedError(`git-grove: ${branch} moved while restoring; run again`);
-    }
-    if (holder) await runGit(["reset", "--keep", to], { cwd: holder.path, write: true });
-    else await runGit(["update-ref", `refs/heads/${branch}`, to, from], { cwd: facts.root, write: true });
-    const commitsBack = await countCommits(facts.root, [`${from}..${to}`]);
-    return { kind: "moved", from, to, pinnedCurrent, pinRef: target, commitsBack };
-  });
+  return withRepoLock(probe.stdout.trim(), async () => restoreHeld(await readRepoFacts(cwd), branch, pinRef, beforeMove));
 }

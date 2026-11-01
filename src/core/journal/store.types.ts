@@ -21,13 +21,22 @@ export type TipSwap = {
   acks?: readonly number[];
 };
 
+export type ActivityKind = "action" | "worktree-added" | "worktree-removed" | "scan-error";
+
+export type ActivityItem = { kind: ActivityKind; branch: string | null; title: string; detail: string; at: number };
+
+export type StoredActivity = ActivityItem & { id: number; repoId: number };
+
+export type StoredRepo = { id: number; commonDir: string; root: string };
+
 /**
- * Grove's local database: repositories, each branch's last recorded tip, and the journal of tip changes.
+ * Grove's local database: repositories, each branch's last recorded tip, the journal of tip changes, and activity.
  * `ref` is a branch name; times are epoch milliseconds.
  */
 export type Store = {
   repoId(commonDir: string, root: string): number;
   findRepoId(commonDir: string): number | null;
+  repos(): StoredRepo[];
   lastTips(repoId: number): Map<string, LastTip>;
   saveTip(repoId: number, ref: string, sha: Sha, parentSha: Sha, at: number): void;
   /** Applies the swap only while the saved tip is still `from`, recording `entry` and acking `acks` in the same transaction. */
@@ -37,5 +46,9 @@ export type Store = {
   /** `unresolved` keeps `rewritten` and `deleted` entries that are not acked. */
   entries(repoId: number, options?: { unresolved?: boolean }): JournalEntry[];
   ack(repoId: number, entryId: number, at: number): void;
+  /** Returns the item's id. */
+  addActivity(repoId: number, item: ActivityItem): number;
+  /** Newest first; `repoId` null reads every repository's. */
+  activity(repoId: number | null, limit: number): StoredActivity[];
   close(): void;
 };

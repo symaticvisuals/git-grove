@@ -132,3 +132,28 @@ test("swapTip moves a tip only from the expected sha, and records its entry only
     store.close();
   }
 });
+
+test("activity reads newest first, for one repository or all, and repos lists every repository", () => {
+  const store = openStore();
+  try {
+    const one = store.repoId("/repos/activity-one/.git", "/repos/activity-one");
+    const two = store.repoId("/repos/activity-two/.git", "/repos/activity-two");
+    const item = { kind: "action", branch: "feat", detail: "" } as const;
+    const first = store.addActivity(one, { ...item, title: "first", at: 10 });
+    store.addActivity(two, { ...item, kind: "scan-error", branch: null, title: "second", at: 20 });
+    store.addActivity(one, { ...item, title: "third", at: 30 });
+
+    expect(store.activity(one, 5).map((entry) => entry.title)).toEqual(["third", "first"]);
+    expect(store.activity(null, 2).map((entry) => entry.title)).toEqual(["third", "second"]);
+    expect(store.activity(one, 5).at(-1)).toEqual({ ...item, title: "first", at: 10, id: first, repoId: one });
+    expect(store.activity(two, 1)[0]).toMatchObject({ kind: "scan-error", branch: null });
+    expect(store.repos()).toEqual(
+      expect.arrayContaining([
+        { id: one, commonDir: "/repos/activity-one/.git", root: "/repos/activity-one" },
+        { id: two, commonDir: "/repos/activity-two/.git", root: "/repos/activity-two" },
+      ]),
+    );
+  } finally {
+    store.close();
+  }
+});

@@ -1,4 +1,5 @@
 import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
+import { ackAlerts } from "../../core/journal/ack-alerts.js";
 import { openStore } from "../../core/journal/open-store.js";
 import { plural } from "../../core/rules/plural.js";
 import type { CliIo } from "../cli-io.types.js";
@@ -12,10 +13,8 @@ export async function ackCommand(io: CliIo, branch: string): Promise<number> {
   const store = openStore();
   try {
     const repoId = store.findRepoId(facts.commonDir);
-    const open = repoId === null ? [] : store.entries(repoId, { unresolved: true }).filter((entry) => entry.branch === branch);
-    const now = Date.now();
-    for (const entry of open) if (repoId !== null && entry.id !== undefined) store.ack(repoId, entry.id, now);
-    io.out(open.length === 0 ? `nothing to acknowledge on ${branch}\n` : `acknowledged ${plural(open.length, "alert")} on ${branch}\n`);
+    const acked = repoId === null ? 0 : ackAlerts(store, repoId, branch);
+    io.out(acked === 0 ? `nothing to acknowledge on ${branch}\n` : `acknowledged ${plural(acked, "alert")} on ${branch}\n`);
   } finally {
     store.close();
   }

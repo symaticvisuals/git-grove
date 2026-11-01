@@ -6,7 +6,7 @@ import type { Sha } from "../facts/facts.types.js";
 import type { ChangeKind } from "./classify-tip-change.js";
 import { StoreCorruptError } from "./store-corrupt.error.js";
 import { StoreUnavailableError } from "./store-unavailable.error.js";
-import type { JournalEntry, LastTip, Store, TipSwap } from "./store.types.js";
+import type { ActivityKind, JournalEntry, LastTip, Store, StoredActivity, TipSwap } from "./store.types.js";
 
 type Row = Record<string, SQLOutputValue>;
 
@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS journal (
   acked_at INTEGER,
   UNIQUE (repo_id, ref, old_sha, new_sha)
 );
+CREATE TABLE IF NOT EXISTS activity (
+  id INTEGER PRIMARY KEY,
+  repo_id INTEGER NOT NULL REFERENCES repos (id),
+  kind TEXT NOT NULL,
+  branch TEXT,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS activity_by_repo ON activity (repo_id, at);
 `;
 
 const CHANGE_COLUMNS = "ref, old_sha, new_sha, kind, lost, matched_by_patch, matched_by_meta, pin_ref, at, found_later, acked_at";
@@ -49,6 +59,17 @@ const KINDS: Record<ChangeKind, true> = { advanced: true, rebased: true, amended
 
 function isChangeKind(value: string): value is ChangeKind {
   return Object.hasOwn(KINDS, value);
+}
+
+const ACTIVITY_KINDS: Record<ActivityKind, true> = {
+  action: true,
+  "worktree-added": true,
+  "worktree-removed": true,
+  "scan-error": true,
+};
+
+function isActivityKind(value: string): value is ActivityKind {
+  return Object.hasOwn(ACTIVITY_KINDS, value);
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -99,6 +120,20 @@ function readEntry(row: Row): JournalEntry {
     at: integer(row, "at"),
     foundLater: integer(row, "found_later") === 1,
     acked: orNull(row, "acked_at", integer) !== null,
+  };
+}
+
+function readActivity(row: Row): StoredActivity {
+  const kind = text(row, "kind");
+  if (!isActivityKind(kind)) throw new StoreCorruptError("activity.kind");
+  return {
+    id: integer(row, "id"),
+    repoId: integer(row, "repo_id"),
+    kind,
+    branch: orNull(row, "branch", text),
+    title: text(row, "title"),
+    detail: text(row, "detail"),
+    at: integer(row, "at"),
   };
 }
 
@@ -155,6 +190,7 @@ export function openStore(path: string = defaultPath()): Store {
       "INSERT INTO repos (common_dir, root) VALUES (?, ?) ON CONFLICT (common_dir) DO UPDATE SET root = excluded.root RETURNING id",
     ),
     findRepoId: db.prepare("SELECT id FROM repos WHERE common_dir = ?"),
+    repos: db.prepare("SELECT id, common_dir, root FROM repos ORDER BY id"),
     lastTips: db.prepare("SELECT ref, sha, parent_sha FROM tips WHERE repo_id = ?"),
     saveTip: db.prepare(
       `INSERT INTO tips (repo_id, ref, sha, parent_sha, seen_at) VALUES (?, ?, ?, ?, ?)
@@ -182,6 +218,15 @@ export function openStore(path: string = defaultPath()): Store {
        WHERE repo_id = ? AND kind IN ('rewritten', 'deleted') AND acked_at IS NULL ORDER BY at, id`,
     ),
     ack: db.prepare("UPDATE journal SET acked_at = ? WHERE repo_id = ? AND id = ? AND acked_at IS NULL"),
+    addActivity: db.prepare(
+      "INSERT INTO activity (repo_id, kind, branch, title, detail, at) VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+    ),
+    activity: db.prepare(
+      "SELECT id, repo_id, kind, branch, title, detail, at FROM activity WHERE repo_id = ? ORDER BY at DESC, id DESC LIMIT ?",
+    ),
+    allActivity: db.prepare(
+      "SELECT id, repo_id, kind, branch, title, detail, at FROM activity ORDER BY at DESC, id DESC LIMIT ?",
+    ),
   };
 
   const insertEntry = (repoId: number, entry: JournalEntry): number => {
@@ -219,6 +264,11 @@ export function openStore(path: string = defaultPath()): Store {
       const row = statements.findRepoId.get(commonDir);
       return row === undefined ? null : integer(row, "id");
     },
+    repos() {
+      return statements.repos
+        .all()
+        .map((row) => ({ id: integer(row, "id"), commonDir: text(row, "common_dir"), root: text(row, "root") }));
+    },
     lastTips(repoId) {
       const tips = new Map<string, LastTip>();
       for (const row of statements.lastTips.all(repoId)) {
@@ -243,6 +293,15 @@ export function openStore(path: string = defaultPath()): Store {
     },
     ack(repoId, entryId, at) {
       statements.ack.run(at, repoId, entryId);
+    },
+    addActivity(repoId, { kind, branch, title, detail, at }) {
+      const row = statements.addActivity.get(repoId, kind, branch, title, detail, at);
+      if (row === undefined) throw new StoreCorruptError("activity.id");
+      return integer(row, "id");
+    },
+    activity(repoId, limit) {
+      const rows = repoId === null ? statements.allActivity.all(limit) : statements.activity.all(repoId, limit);
+      return rows.map(readActivity);
     },
     close() {
       db.close();
