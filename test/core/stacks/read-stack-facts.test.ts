@@ -86,3 +86,40 @@ test("a single gets one level whose parent is the trunk", async () => {
   expect(single?.levels).toHaveLength(1);
   expect(single?.levels[0]).toMatchObject({ branch: "solo", parent: "main", depth: 1, parentMerged: false });
 });
+
+test("a deleted parent leaves the child with parentMissing and parentMerged false", async () => {
+  await repo.branch("feat/ui", "feat/api");
+  await repo.git("config", "branch.feat/ui.stackparent", "feat/api");
+  await commitOn("feat/api", "api.txt", "api work");
+  await repo.git("merge", "--squash", "feat/api");
+  await repo.git("commit", "-m", "squash api");
+  await repo.git("branch", "-D", "feat/api");
+
+  const features = await readStackFacts(repo.path, await readRepoFacts(repo.path));
+  const ui = features.flatMap((f) => f.levels).find((l) => l.branch === "feat/ui");
+  expect(ui).toMatchObject({ parentMissing: true, parentMerged: false });
+});
+
+test("a parent with no commits beyond trunk is not merged", async () => {
+  await repo.branch("feat/ui", "feat/api");
+  await repo.git("config", "branch.feat/ui.stackparent", "feat/api");
+  await commitOn("feat/ui", "ui.txt", "ui work");
+
+  const features = await readStackFacts(repo.path, await readRepoFacts(repo.path));
+  const ui = features.flatMap((f) => f.levels).find((l) => l.branch === "feat/ui");
+  expect(ui).toMatchObject({ parentMerged: false, parentMissing: false });
+});
+
+test("a git failure on one level leaves parentMerged false instead of rejecting", async () => {
+  await repo.git("switch", "--orphan", "island");
+  await repo.commit("island.txt", "island\n", "island root");
+  await repo.branch("feat/ui", "island");
+  await repo.git("config", "branch.feat/ui.stackparent", "island");
+  await repo.git("config", "branch.island.stackparent", "main");
+  await commitOn("feat/ui", "ui.txt", "ui work");
+  await repo.git("switch", "main");
+
+  const features = await readStackFacts(repo.path, await readRepoFacts(repo.path));
+  const ui = features.flatMap((f) => f.levels).find((l) => l.branch === "feat/ui");
+  expect(ui?.parentMerged).toBe(false);
+});

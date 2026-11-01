@@ -1,4 +1,5 @@
 import type { BranchFacts, RepoFacts, StackEdge } from "../facts/facts.types.js";
+import { GitError } from "../git/git.error.js";
 import { runGit } from "../git/run-git.js";
 import { groupFeatures } from "./group-features.js";
 import { isMerged } from "./is-merged.js";
@@ -17,6 +18,16 @@ async function isAncestor(cwd: string, ancestor: string, descendant: string): Pr
 async function forkOf(cwd: string, edge: StackEdge | undefined, branch: BranchFacts, parent: BranchFacts): Promise<string> {
   if (edge?.forkPoint && (await isAncestor(cwd, edge.forkPoint, branch.tip))) return edge.forkPoint;
   return (await runGit(["merge-base", branch.tip, parent.tip], { cwd })).stdout.trim();
+}
+
+async function parentLanded(cwd: string, parentTip: string, trunkRef: string): Promise<boolean> {
+  try {
+    if ((await count(cwd, `${trunkRef}..${parentTip}`)) === 0) return false;
+    return await isMerged(cwd, parentTip, trunkRef);
+  } catch (error) {
+    if (error instanceof GitError) return false;
+    throw error;
+  }
 }
 
 async function mapLimited<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -55,9 +66,19 @@ export async function readStackFacts(cwd: string, facts: RepoFacts): Promise<Fea
     if (parentBranch) {
       const fork = await forkOf(cwd, edge, branch, parentBranch);
       parentCommitsSinceFork = await count(cwd, `${fork}..${parentBranch.tip}`);
-      parentMerged = await isMerged(cwd, parentBranch.tip, facts.trunk.ref);
+      parentMerged = await parentLanded(cwd, parentBranch.tip, facts.trunk.ref);
     }
-    return { branch: name, parent: parentName, depth: depths.get(name) ?? 1, worktree, parentCommitsSinceFork, behindTrunk, parentMerged };
+    const parentMissing = parentName !== trunkName && parentBranch === undefined;
+    return {
+      branch: name,
+      parent: parentName,
+      depth: depths.get(name) ?? 1,
+      worktree,
+      parentCommitsSinceFork,
+      behindTrunk,
+      parentMerged,
+      parentMissing,
+    };
   };
 
   const groups = groupFeatures(facts);

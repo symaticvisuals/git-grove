@@ -8,6 +8,7 @@ export type Level = {
   parentCommitsSinceFork: number;
   behindTrunk: number;
   parentMerged: boolean;
+  parentMissing: boolean;
 };
 
 export type FeatureKind = "stack" | "single" | "detached";
