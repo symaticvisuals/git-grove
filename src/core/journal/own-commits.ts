@@ -20,7 +20,10 @@ export async function ownCommits(cwd: string, base: Sha, tip: Sha): Promise<OwnC
   const range = `${base}..${tip}`;
   const [listed, patches] = await Promise.all([
     runGit(["rev-list", "--reverse", "--no-commit-header", "--format=%H%x00%ae%x00%at%x00%s", range], { cwd }),
-    runGit(["log", "-p", "--no-color", "--diff-merges=off", "--format=commit %H", range], { cwd }),
+    runGit(
+      ["log", "-p", "--no-color", "--no-textconv", "--no-ext-diff", "--diff-merges=off", "--format=commit %H", range],
+      { cwd },
+    ),
   ]);
   const patchIds =
     patches.stdout === ""

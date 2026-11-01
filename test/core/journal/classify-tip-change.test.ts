@@ -38,6 +38,22 @@ async function forkFeature(): Promise<{ fork: string; commits: [string, string, 
   return { fork, commits: [a, b, c] };
 }
 
+/** Commits a base on main and forks `feat` with a, a merge of side branch s, b, then c as the tip. */
+async function forkFeatureWithMerge(): Promise<{ fork: string; oldTip: string }> {
+  const fork = await repo.commit("base.txt", "base\n", "base");
+  await repo.branch("feat");
+  await repo.switch("feat");
+  await repo.commit("a.txt", "a\n", "add a");
+  await repo.branch("side");
+  await repo.switch("side");
+  await repo.commit("s.txt", "s\n", "add s");
+  await repo.switch("feat");
+  await repo.commit("b.txt", "b\n", "add b");
+  await repo.git("merge", "--no-ff", "--no-edit", "-m", "merge side", "side");
+  const oldTip = await repo.commit("c.txt", "c\n", "add c");
+  return { fork, oldTip };
+}
+
 async function moveMain(file: string, text: string): Promise<string> {
   await repo.switch("main");
   const tip = await repo.commit(file, text, "move main");
@@ -101,6 +117,16 @@ test("amending the tip with its message edited is amended", async () => {
   expect(change).toMatchObject({ kind: "amended", lost: [], matchedByPatch: 2, matchedByMeta: 0 });
 });
 
+test("amending the tip with a reset author and its message kept is amended", async () => {
+  const { fork, commits } = await forkFeature();
+  await writeFile(join(repo.path, "c.txt"), "c, amended\n");
+  await repo.git("add", "c.txt");
+  await repo.git("commit", "--amend", "--reset-author", "--no-edit");
+
+  const change = await classify("feat", commits[2], await sha("feat"), fork, fork);
+  expect(change).toMatchObject({ kind: "amended", lost: [], matchedByPatch: 2, matchedByMeta: 0 });
+});
+
 test("dropping the middle commit is rewritten with that commit lost", async () => {
   const { fork, commits } = await forkFeature();
   await repo.git("rebase", "--onto", commits[0], commits[1], "feat");
@@ -114,6 +140,15 @@ test("dropping the tip commit with nothing in its place is rewritten with that c
   await repo.git("reset", "--hard", commits[1]);
 
   const change = await classify("feat", commits[2], commits[1], fork, fork);
+  expect(change).toMatchObject({ kind: "rewritten", lost: [commits[2]] });
+});
+
+test("dropping the tip and committing something unrelated is rewritten with the tip lost", async () => {
+  const { fork, commits } = await forkFeature();
+  await repo.git("reset", "--hard", commits[1]);
+  const newTip = await repo.commit("d.txt", "d\n", "add d");
+
+  const change = await classify("feat", commits[2], newTip, fork, fork);
   expect(change).toMatchObject({ kind: "rewritten", lost: [commits[2]] });
 });
 
@@ -147,20 +182,29 @@ test("a child restacked after its parent was squash-merged is rebased", async ()
 });
 
 test("a merge commit in the own range, rebased with --rebase-merges, is rebased", async () => {
-  const fork = await repo.commit("base.txt", "base\n", "base");
-  await repo.branch("feat");
-  await repo.switch("feat");
-  await repo.commit("a.txt", "a\n", "add a");
-  await repo.branch("side");
-  await repo.switch("side");
-  await repo.commit("s.txt", "s\n", "add s");
-  await repo.switch("feat");
-  await repo.commit("b.txt", "b\n", "add b");
-  await repo.git("merge", "--no-ff", "--no-edit", "-m", "merge side", "side");
-  const oldTip = await repo.commit("c.txt", "c\n", "add c");
+  const { fork, oldTip } = await forkFeatureWithMerge();
   const main = await moveMain("main.txt", "main\n");
   await repo.git("rebase", "--rebase-merges", "main");
 
   const change = await classify("feat", oldTip, await sha("feat"), fork, main);
   expect(change).toMatchObject({ kind: "rebased", lost: [], matchedByPatch: 4, matchedByMeta: 1 });
+});
+
+test("a clean merge commit linearized away by a plain rebase is rebased", async () => {
+  const { fork, oldTip } = await forkFeatureWithMerge();
+  const main = await moveMain("main.txt", "main\n");
+  await repo.git("rebase", "main");
+
+  const change = await classify("feat", oldTip, await sha("feat"), fork, main);
+  expect(change).toMatchObject({ kind: "rebased", lost: [], matchedByPatch: 4, matchedByMeta: 0 });
+});
+
+test("amending the tip with its message edited, below a merge commit, is amended", async () => {
+  const { fork, oldTip } = await forkFeatureWithMerge();
+  await writeFile(join(repo.path, "c.txt"), "c, amended\n");
+  await repo.git("add", "c.txt");
+  await repo.git("commit", "--amend", "-m", "add c, reworded");
+
+  const change = await classify("feat", oldTip, await sha("feat"), fork, fork);
+  expect(change).toMatchObject({ kind: "amended", lost: [] });
 });
