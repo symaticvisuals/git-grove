@@ -6,7 +6,16 @@ import { pin } from "../runner/pin.js";
 import { classifyTipChange, type TipChange } from "./classify-tip-change.js";
 import type { JournalEntry, LastTip, Store, TipSwap } from "./store.types.js";
 
-type Move = { root: string; branch: BranchFacts; last: LastTip; parentTip: Sha; isTrunk: boolean; now: number };
+type Move = {
+  root: string;
+  branch: BranchFacts;
+  last: LastTip;
+  parentTip: Sha;
+  isTrunk: boolean;
+  now: number;
+  /** Whether moving this branch from `oldTip` to `newTip` exactly reverses a rewrite already journaled for it. */
+  undoesRewrite: (oldTip: Sha, newTip: Sha) => boolean;
+};
 
 function entryOf(change: TipChange, pinRef: string | null, at: number): JournalEntry {
   return { ...change, pinRef, at, foundLater: false, acked: false };
@@ -102,7 +111,7 @@ async function journalMove(move: Move): Promise<TipSwap> {
   }
   const pinRef = await pin(root, branch.name, last.sha, new Date(now));
   const change = await classifyTipChange({ cwd: root, ...tips, ...(await basesOf(move)) });
-  return swap(entryOf(change, pinRef, now));
+  return swap({ ...entryOf(change, pinRef, now), acked: move.undoesRewrite(last.sha, branch.tip) });
 }
 
 async function journalDeletion(root: string, branch: string, oldTip: Sha, now: number): Promise<TipSwap> {
@@ -123,8 +132,10 @@ async function journalDeletion(root: string, branch: string, oldTip: Sha, now: n
 
 /**
  * Journals every local branch whose tip moved or vanished since the last call and resolves to the entries it added.
- * A branch seen for the first time only records its tip. A non-fast-forward move pins the old tip before classifying;
- * a vanished branch whose tip nothing else reaches is pinned and journaled as `deleted`.
+ * A branch seen for the first time only records its tip. A non-fast-forward move pins the old tip before classifying,
+ * and is journaled already acked when it exactly reverses a `rewritten` entry of the same branch (new tip back to
+ * that entry's old tip, from its new tip). A vanished branch whose tip nothing else reaches is pinned and journaled
+ * as `deleted`.
  * An old tip git no longer has is replaced without an entry; a branch git fails on keeps its tip until the next call.
  * Each tip is saved by compare-and-swap with its entry, so concurrent calls journal a change once and never roll back.
  */
@@ -136,6 +147,11 @@ export async function observe(cwd: string, store: Store, now: number = Date.now(
   const repoId = store.repoId(facts.commonDir, root);
   const present = new Set(facts.branches.map((branch) => branch.name));
   const parentTips = stackParentTips(facts);
+  let rewrites: JournalEntry[] | null = null;
+  const undoesRewrite = (branch: string, oldTip: Sha, newTip: Sha): boolean => {
+    rewrites ??= store.entries(repoId).filter((entry) => entry.kind === "rewritten");
+    return rewrites.some((entry) => entry.branch === branch && entry.newTip === oldTip && entry.oldTip === newTip);
+  };
   const added: JournalEntry[] = [];
   const commit = (swap: TipSwap | null): void => {
     if (swap === null) return;
@@ -156,7 +172,8 @@ export async function observe(cwd: string, store: Store, now: number = Date.now(
       commit({ ref: branch.name, from: null, to: { sha: branch.tip, parentSha: parentTip }, at: now, entry: null });
     } else {
       const isTrunk = facts.trunk.ref === `refs/heads/${branch.name}`;
-      commit(await unlessGitFails(journalMove({ root, branch, last, parentTip, isTrunk, now })));
+      const undoes = (oldTip: Sha, newTip: Sha): boolean => undoesRewrite(branch.name, oldTip, newTip);
+      commit(await unlessGitFails(journalMove({ root, branch, last, parentTip, isTrunk, now, undoesRewrite: undoes })));
     }
   }
 

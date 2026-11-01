@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { run } from "../../src/cli/main.js";
+import { openStore } from "../../src/core/journal/open-store.js";
+import type { JournalEntry } from "../../src/core/journal/store.types.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
 
 type Result = { code: number; out: string; err: string };
@@ -363,15 +365,48 @@ test("a landed branch whose reflog was expired is still checked for removal", as
   expect(rulesOf((await statusJson()).findings)).toContain("unsafe-merged-worktree");
 });
 
-test("a rewrite alert clears once the lost commits are back on the branch", async () => {
+async function journalEntries(): Promise<JournalEntry[]> {
+  const commonDir = (await repo.git("rev-parse", "--path-format=absolute", "--git-common-dir")).trim();
+  const store = openStore();
+  try {
+    const repoId = store.findRepoId(commonDir);
+    return repoId === null ? [] : store.entries(repoId);
+  } finally {
+    store.close();
+  }
+}
+
+test("resetting a squash back to the original raises nothing and journals the undo acked", async () => {
   await grove(["status"]);
   const original = (await repo.git("rev-parse", "feat")).trim();
   await squash();
+  const squashed = (await repo.git("rev-parse", "feat")).trim();
   await grove(["status"]);
   await repo.git("reset", "--hard", original);
 
   const doc = await statusJson();
-  expect(doc.journal.map((entry) => field(entry, "oldTip"))).not.toContain(original);
+  expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
+  expect(doc.journal).toEqual([]);
+  const undo = (await journalEntries()).find((entry) => entry.oldTip === squashed && entry.newTip === original);
+  expect(undo).toMatchObject({ acked: true });
+});
+
+test("resetting back after a commit on top of the squash alerts and pins that commit", async () => {
+  await grove(["status"]);
+  const original = (await repo.git("rev-parse", "feat")).trim();
+  await squash();
+  await grove(["status"]);
+  const extra = await repo.commit("d.txt", "d\n", "add d");
+  await grove(["status"]);
+  await repo.git("reset", "--hard", original);
+
+  const rewritten = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "history-rewritten");
+  expect(rewritten).toHaveLength(1);
+  const pinRef = /kept at (\S+)/.exec(String(field(rewritten[0], "detail")))?.[1] ?? "";
+  expect((await repo.git("rev-parse", pinRef)).trim()).toBe(extra);
+  const entry = (await journalEntries()).find((candidate) => candidate.oldTip === extra);
+  expect(entry).toMatchObject({ kind: "rewritten", newTip: original, acked: false });
+  expect(entry?.lost).toContain(extra);
 });
 
 test("restore recreates a deleted branch at its pin", async () => {
