@@ -2,42 +2,18 @@ import { realpath } from "node:fs/promises";
 import { countDetachedOnly } from "../../core/facts/count-detached-only.js";
 import type { RepoFacts } from "../../core/facts/facts.types.js";
 import { readEnvMissing } from "../../core/facts/read-env-missing.js";
-import { readRemovalFacts } from "../../core/facts/read-removal-facts.js";
+import { readMergedRemovals } from "../../core/facts/read-merged-removals.js";
 import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
-import { GitError } from "../../core/git/git.error.js";
 import { isAncestor } from "../../core/git/is-ancestor.js";
 import { unlessGitFails } from "../../core/git/unless-git-fails.js";
 import { observe } from "../../core/journal/observe.js";
 import { openStore } from "../../core/journal/open-store.js";
 import type { JournalEntry, Store } from "../../core/journal/store.types.js";
 import { evaluate } from "../../core/rules/evaluate.js";
-import { safeToRemove } from "../../core/rules/safe-to-remove.js";
-import type { Verdict } from "../../core/rules/verdict.types.js";
 import { branchLanded } from "../../core/stacks/branch-landed.js";
 import { readStackFacts } from "../../core/stacks/read-stack-facts.js";
 import type { CliIo } from "../cli-io.types.js";
 import { renderStatus } from "../render-status.js";
-
-async function verdictFor(facts: RepoFacts, path: string): Promise<Verdict> {
-  try {
-    return safeToRemove(await readRemovalFacts(facts.root, path, facts));
-  } catch (error) {
-    if (!(error instanceof GitError)) throw error;
-    return { ok: false, reasons: [{ code: "unreadable", detail: "could not read this worktree", paths: [] }] };
-  }
-}
-
-/** Verdicts for the linked worktrees, off the trunk, whose branch has landed on it. */
-async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
-  const removals = new Map<string, Verdict>();
-  for (const worktree of facts.worktrees) {
-    const branch = facts.branches.find((candidate) => candidate.name === worktree.branch);
-    if (worktree.isMain || branch === undefined || branch.name === facts.trunk.name) continue;
-    if (!(await branchLanded(facts.root, branch, facts.trunk.ref))) continue;
-    removals.set(worktree.path, await verdictFor(facts, worktree.path));
-  }
-  return removals;
-}
 
 /** Commits only the detached HEAD of each prunable worktree holds; null for a worktree git fails to count. */
 async function strandedCommits(facts: RepoFacts): Promise<Map<string, number | null>> {
@@ -82,7 +58,7 @@ export async function statusCommand(io: CliIo, options: { json: boolean }): Prom
     await observe(io.cwd, store, now);
     const facts = await readRepoFacts(io.cwd);
     const features = await readStackFacts(facts.root, facts);
-    const removals = await mergedRemovals(facts);
+    const removals = await readMergedRemovals(facts);
     const envMissing = await readEnvMissing(facts.root, facts).catch(() => new Map<string, string[]>());
     const detachedOnly = await strandedCommits(facts);
     const repoId = store.repoId(facts.commonDir, facts.root);

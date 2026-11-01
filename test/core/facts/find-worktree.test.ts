@@ -32,3 +32,13 @@ test("findWorktree finds a worktree by a relative or symlinked path and names an
   expect(error).toBeInstanceOf(NotAWorktreeError);
   expect(describeError(error)).toBe("git-grove: nowhere is not a worktree of this repository");
 });
+
+test("findWorktree finds a worktree whose folder is gone through a symlinked path to its parent", async () => {
+  const path = join(await realpath(repo.path), ".worktrees", "gone");
+  await repo.worktree(path, "gone");
+  await rm(path, { recursive: true, force: true });
+  await symlink(await realpath(repo.path), join(links, "repo"));
+  const facts = await readRepoFacts(repo.path);
+
+  expect((await findWorktree(facts, join(links, "repo"), ".worktrees/gone")).branch).toBe("gone");
+});

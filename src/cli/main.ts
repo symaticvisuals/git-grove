@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { requireGitVersion } from "../core/git/require-git-version.js";
 import type { CliIo } from "./cli-io.types.js";
@@ -23,6 +24,7 @@ type Parsed = {
     "skip-env"?: boolean;
     install?: boolean;
     open?: boolean;
+    rescue?: boolean;
   };
   positionals: string[];
 };
@@ -37,6 +39,7 @@ type Flags = {
   skipEnv: boolean;
   install: boolean;
   open: boolean;
+  rescue: boolean;
 };
 
 type Command = (io: CliIo) => Promise<number>;
@@ -57,9 +60,12 @@ const USAGE = `Usage: git grove <command> [options]
   add-level <feature> <branch>      add the next level, on the deepest one
           [--on <parent-branch>]      or on --on's branch; same options as new
           [--skip-env] [--install] [--open] [--dry-run] [--json]
+  rm <worktree> [--rescue]          remove a worktree's folder when nothing would
+          [--dry-run] [--json]        be lost, keeping its branch; --rescue first
+                                    copies ignored files only it has into main
 `;
 
-const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level"]);
+const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm"]);
 
 function hasVersion(value: unknown): value is { version: string } {
   return typeof value === "object" && value !== null && "version" in value && typeof value.version === "string";
@@ -91,6 +97,7 @@ function parse(argv: string[]): Parsed {
       "skip-env": { type: "boolean" },
       install: { type: "boolean" },
       open: { type: "boolean" },
+      rescue: { type: "boolean" },
     },
   });
 }
@@ -101,6 +108,7 @@ function route(positionals: string[], flags: Flags): Command | null {
   const creating = flags.branch !== undefined || flags.from !== undefined || flags.on !== undefined || flags.skipEnv || flags.install || flags.open;
   const options = { dryRun, json };
   const level = { env: !flags.skipEnv, install: flags.install, open: flags.open };
+  if (flags.rescue && name !== "rm") return null;
   if (name === "new") {
     return first !== undefined && second === undefined && !stash && flags.on === undefined
       ? (io) => runActionCommand(io, "new", { feature: first, branch: flags.branch, from: flags.from, ...level }, options)
@@ -112,6 +120,11 @@ function route(positionals: string[], flags: Flags): Command | null {
       : null;
   }
   if (creating) return null;
+  if (name === "rm") {
+    return first !== undefined && second === undefined && !stash
+      ? (io) => runActionCommand(io, "remove", { worktree: resolve(io.cwd, first), rescue: flags.rescue }, { dryRun, json })
+      : null;
+  }
   if (name === "restack") {
     return first !== undefined && second === undefined
       ? (io) => runActionCommand(io, "restack", { feature: first, stash }, { dryRun, json })
@@ -171,6 +184,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
     skipEnv: values["skip-env"] === true,
     install: values.install === true,
     open: values.open === true,
+    rescue: values.rescue === true,
   });
   if (command === null) {
     const [name] = args.positionals;
