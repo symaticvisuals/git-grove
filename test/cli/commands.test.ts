@@ -733,3 +733,26 @@ test("a hotfix cherry-picked to main, then the branch rebased onto main, raises 
   expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
   expect((await journalEntries()).find((entry) => entry.branch === "feat")).toMatchObject({ kind: "rebased", lost: [] });
 });
+
+test("a bare-repository worktree layout says it is not supported, on every command", async () => {
+  const layout = await mkdtemp(join(tmpdir(), "git-grove-bare-"));
+  try {
+    await repo.git("clone", "--quiet", "--bare", repo.path, join(layout, ".bare"));
+    await writeFile(join(layout, ".git"), "gitdir: ./.bare\n");
+    await repo.git("-C", layout, "worktree", "add", "--quiet", join(layout, "main"), "main");
+    await repo.git("-C", layout, "worktree", "add", "--quiet", "-b", "feat-a", join(layout, "feat-a"), "main");
+    const unsupported = { code: 1, out: "", err: "git-grove: bare repositories are not supported yet\n" };
+    for (const [argv, cwd] of [
+      [["status"], join(layout, "feat-a")],
+      [["status"], layout],
+      [["check", "remove", "../feat-a"], join(layout, "main")],
+      [["restore", "feat-a"], join(layout, "feat-a")],
+      [["pins", "list"], join(layout, "main")],
+      [["ack", "feat-a"], join(layout, "main")],
+    ] satisfies [string[], string][]) {
+      expect(await grove(argv, cwd), argv.join(" ")).toEqual(unsupported);
+    }
+  } finally {
+    await rm(layout, { recursive: true, force: true });
+  }
+});

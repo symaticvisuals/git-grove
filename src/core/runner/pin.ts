@@ -1,29 +1,38 @@
 import type { Sha } from "../facts/facts.types.js";
 import { GitError } from "../git/git.error.js";
 import { runGit } from "../git/run-git.js";
-
-export const PINS_PREFIX = "refs/grove/pins/";
+import { listPins } from "./list-pins.js";
+import { PINS_PREFIX } from "./pins-prefix.js";
 
 function stamp(at: Date): string {
   return at.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
-async function refExists(cwd: string, ref: string): Promise<boolean> {
-  return (await runGit(["show-ref", "--verify", "--quiet", ref], { cwd, allowFailure: true })).code === 0;
+/** The object `ref` points at, or null when it does not exist. */
+async function target(cwd: string, ref: string): Promise<string | null> {
+  const result = await runGit(["show-ref", "--verify", "--hash", ref], { cwd, allowFailure: true });
+  return result.code === 0 ? result.stdout.trim() : null;
 }
 
 /**
- * Creates `refs/grove/pins/<branch>/<UTC timestamp>` at `sha`, appending `-2`, `-3`… when the ref exists,
- * including when another process creates it first. Returns the ref.
+ * Pins `sha` for `branch` and returns the ref. A pin of the branch already at `sha` is reused; otherwise it creates
+ * `refs/grove/pins/<branch>/<UTC timestamp>`, appending `-2`, `-3`… when the ref holds another sha,
+ * including when another process creates it first.
  */
 export async function pin(cwd: string, branch: string, sha: Sha, at: Date): Promise<string> {
+  const existing = (await listPins(cwd, branch)).find((entry) => entry.sha === sha);
+  if (existing) return existing.ref;
   const base = `${PINS_PREFIX}${branch}/${stamp(at)}`;
   for (let attempt = 1; ; attempt++) {
     const ref = attempt === 1 ? base : `${base}-${attempt}`;
-    if (await refExists(cwd, ref)) continue;
+    const before = await target(cwd, ref);
+    if (before === sha) return ref;
+    if (before !== null) continue;
     const args = ["update-ref", ref, sha, ""];
     const created = await runGit(args, { cwd, write: true, allowFailure: true });
     if (created.code === 0) return ref;
-    if (!(await refExists(cwd, ref))) throw new GitError(args, created.code, created.stderr);
+    const after = await target(cwd, ref);
+    if (after === sha) return ref;
+    if (after === null) throw new GitError(args, created.code, created.stderr);
   }
 }

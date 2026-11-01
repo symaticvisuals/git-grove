@@ -1,6 +1,6 @@
 import type { Sha } from "../facts/facts.types.js";
 import { runGit } from "../git/run-git.js";
-import { PINS_PREFIX } from "./pin.js";
+import { PINS_PREFIX } from "./pins-prefix.js";
 
 export type PinEntry = { ref: string; sha: Sha; branch: string; at: string };
 

@@ -144,3 +144,9 @@ test("a locked worktree whose folder is gone degrades instead of failing the rea
   const entry = facts.worktrees.find((w) => w.branch === "feat/gone");
   expect(entry).toMatchObject({ changes: null, operation: null, touchedAt: null, locked: true });
 });
+
+test("untracked files count even when status.showUntrackedFiles is no", async () => {
+  await repo.git("config", "status.showUntrackedFiles", "no");
+  const facts = await readRepoFacts(repo.path);
+  expect(facts.worktrees.find((w) => w.branch === "feat/a")?.changes?.untracked).toBe(1);
+});

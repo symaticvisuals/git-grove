@@ -96,3 +96,35 @@ test("a folder that does not exist rejects with a GitError saying so", async () 
   expect(error instanceof Error ? error.message : "").toContain(`${missing} does not exist`);
   expect(describeError(error)).not.toContain("git not found");
 });
+
+/** Runs `work` with GIT_GROVE_MAX_BUFFER set to `bytes`, then removes it. */
+async function withMaxBuffer<T>(bytes: number, work: () => Promise<T>): Promise<T> {
+  process.env["GIT_GROVE_MAX_BUFFER"] = String(bytes);
+  try {
+    return await work();
+  } finally {
+    delete process.env["GIT_GROVE_MAX_BUFFER"];
+  }
+}
+
+test("output larger than grove reads rejects with a GitError, even with allowFailure", async () => {
+  await repo.commit("big.txt", "x".repeat(4096), "big");
+  const error = await withMaxBuffer(1024, () => runGit(["show", "HEAD"], { cwd: repo.path, allowFailure: true })).catch(
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(GitError);
+  expect(error instanceof GitError ? error.code : 0).toBe(-1);
+});
+
+test("a git killed by a signal rejects with a GitError", async () => {
+  const error = await runGit(["-c", "alias.boom=!kill -9 $PPID", "boom"], { cwd: repo.path, allowFailure: true }).catch(
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(GitError);
+  expect(error instanceof Error ? error.message : "").toContain("SIGKILL");
+});
+
+test("git runs with GIT_NO_LAZY_FETCH=1, so a partial clone never fetches", async () => {
+  const result = await runGit(["-c", "alias.lazy=!printenv GIT_NO_LAZY_FETCH", "lazy"], { cwd: repo.path });
+  expect(result.stdout).toBe("1\n");
+});

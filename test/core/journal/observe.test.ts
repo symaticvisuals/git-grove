@@ -363,3 +363,27 @@ test("a deletion check git cannot run keeps the tip, and the deletion is journal
   expect(found).toMatchObject([{ branch: "feat", oldTip: b, newTip: null, kind: "deleted", lost: [a, b] }]);
   expect(await sha(found[0]?.pinRef ?? "")).toBe(b);
 });
+
+test("a branch whose diff is larger than grove reads is skipped, and two runs pin its old tip once", async () => {
+  const fork = await repo.commit("base.txt", "base\n", "base");
+  await repo.branch("feat");
+  await repo.switch("feat");
+  await repo.commit("data.csv", "row\n".repeat(5000), "add data");
+  await repo.commit("b.txt", "b\n", "add b");
+  await observe(repo.path, store, NOW);
+  const oldTip = await sha("feat");
+  await squash(fork);
+
+  process.env["GIT_GROVE_MAX_BUFFER"] = "8192";
+  try {
+    expect(await observe(repo.path, store, NOW + 1000)).toEqual([]);
+    expect(await observe(repo.path, store, NOW + 2000)).toEqual([]);
+  } finally {
+    delete process.env["GIT_GROVE_MAX_BUFFER"];
+  }
+  expect((await groveRefs()).split("\n")).toHaveLength(1);
+  expect(store.lastTips(await repoIdOf()).get("feat")?.sha).toBe(oldTip);
+
+  expect(await observe(repo.path, store, NOW + 3000)).toMatchObject([{ branch: "feat", kind: "rewritten", oldTip }]);
+  expect((await groveRefs()).split("\n")).toHaveLength(1);
+});

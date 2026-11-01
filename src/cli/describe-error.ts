@@ -1,3 +1,4 @@
+import { BareRepoError } from "../core/facts/bare-repo.error.js";
 import { NotARepoError } from "../core/facts/not-a-repo.error.js";
 import { NotAWorktreeError } from "../core/facts/not-a-worktree.error.js";
 import { GitError } from "../core/git/git.error.js";
@@ -8,6 +9,7 @@ import { RefusedError } from "../core/runner/refused.error.js";
 import { RepoLockedError } from "../core/runner/repo-locked.error.js";
 
 const ONE_LINE_ERRORS = [
+  BareRepoError,
   NotARepoError,
   NotAWorktreeError,
   GitVersionError,

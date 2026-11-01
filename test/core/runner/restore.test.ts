@@ -123,3 +123,10 @@ test("restore moves a branch whose worktree folder is gone without touching that
   expect(result).toMatchObject({ kind: "moved", to: original, commitsBack: 3 });
   expect((await repo.git("rev-parse", "feat/x")).trim()).toBe(original);
 });
+
+test("restore refuses on an untracked file even when status.showUntrackedFiles is no", async () => {
+  await repo.git("config", "status.showUntrackedFiles", "no");
+  await writeFile(join(repo.path, "stray.txt"), "x\n");
+  await expect(restore(repo.path, "feat/x")).rejects.toThrow("has uncommitted changes");
+  expect((await repo.git("rev-parse", "feat/x")).trim()).toBe(squashed);
+});

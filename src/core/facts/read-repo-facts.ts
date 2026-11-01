@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { runGit } from "../git/run-git.js";
 import { parseWorktreeList, type RawWorktree } from "../git/parse-worktree-list.js";
+import { BareRepoError } from "./bare-repo.error.js";
 import type { BranchFacts, Operation, RepoFacts, StackEdge, WorktreeFacts } from "./facts.types.js";
 import { NotARepoError } from "./not-a-repo.error.js";
 import { resolveTrunk } from "./resolve-trunk.js";
@@ -79,7 +80,7 @@ async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string
   }
   const [gitDirOut, statusOut] = await Promise.all([
     runGit(["rev-parse", "--absolute-git-dir"], { cwd: raw.path, allowFailure: true }).catch(() => null),
-    runGit(["status", "--porcelain=v2"], { cwd: raw.path, allowFailure: true }).catch(() => null),
+    runGit(["status", "--porcelain=v2", "--untracked-files=normal"], { cwd: raw.path, allowFailure: true }).catch(() => null),
   ]);
   const gitDir =
     gitDirOut?.code === 0 ? gitDirOut.stdout.trim() : isMain ? commonDir : join(commonDir, "worktrees", basename(raw.path));
@@ -174,20 +175,22 @@ async function readPins(cwd: string): Promise<RepoFacts["pins"]> {
 
 /**
  * Reads everything git says about the repository containing `cwd`, with no judgment applied.
- * Throws NotARepoError outside a repository and in one with no commits.
+ * Throws NotARepoError outside a repository and in one with no commits, and BareRepoError when the repository
+ * is bare, including the layout of a bare repository with linked worktrees beside it.
  */
 export async function readRepoFacts(cwd: string): Promise<RepoFacts> {
-  const probe = await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"], {
+  const probe = await runGit(["rev-parse", "--path-format=absolute", "--git-common-dir", "--is-bare-repository"], {
     cwd,
     allowFailure: true,
   }).catch(() => null);
-  const [commonDir, toplevel] = probe?.code === 0 ? probe.stdout.trim().split("\n") : [];
-  if (commonDir === undefined || toplevel === undefined) {
-    throw new NotARepoError(`git-grove: not inside a git repository (${cwd})`);
-  }
+  const [commonDir, bare] = probe?.code === 0 ? probe.stdout.trim().split("\n") : [];
+  if (commonDir === undefined) throw new NotARepoError(`git-grove: not inside a git repository (${cwd})`);
+  if (bare === "true") throw new BareRepoError();
 
-  const raws = parseWorktreeList((await runGit(["worktree", "list", "--porcelain"], { cwd: toplevel })).stdout);
-  const root = raws[0]?.path ?? toplevel;
+  const raws = parseWorktreeList((await runGit(["worktree", "list", "--porcelain"], { cwd })).stdout);
+  if (raws[0]?.bare) throw new BareRepoError();
+  const root = raws[0]?.path;
+  if (root === undefined) throw new NotARepoError(`git-grove: not inside a git repository (${cwd})`);
   if ((await runGit(["rev-parse", "--verify", "HEAD"], { cwd: root, allowFailure: true })).code !== 0) {
     throw new NotARepoError("git-grove: this repository has no commits yet");
   }

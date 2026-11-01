@@ -58,3 +58,16 @@ test("the built bin outside a repository prints exactly one line on stderr", asy
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+test("an unexpected error prints one line and exits 1", async () => {
+  const boom = `data:text/javascript,process.cwd = () => { throw new Error("boom"); };`;
+  const env = { ...process.env, GIT_GROVE_HOME: home };
+  const result = await execFileAsync(process.execPath, ["--import", boom, BIN, "status"], { cwd: repo.path, env, encoding: "utf8" }).then(
+    ({ stdout, stderr }) => ({ code: 0, stdout, stderr }),
+    (error: unknown) => {
+      const output = error instanceof Error && "stdout" in error && "stderr" in error ? error : null;
+      return { code: exitCode(error), stdout: String(output?.stdout ?? ""), stderr: String(output?.stderr ?? "") };
+    },
+  );
+  expect(result).toEqual({ code: 1, stdout: "", stderr: "git-grove: unexpected error: boom\n" });
+});
