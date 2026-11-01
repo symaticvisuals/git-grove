@@ -682,3 +682,40 @@ test("a parent merged with a merge commit gives the child a Parent merged findin
   expect(merged).toHaveLength(1);
   expect(merged[0]).toMatchObject({ title: "Parent merged", subject: { kind: "level", id: "feat/feat-ui" } });
 });
+
+/** Adds a detached worktree at .worktrees/<name> with `commits` commits of its own, deletes its folder, returns its HEAD. */
+async function goneSandbox(name: string, commits: number): Promise<string> {
+  const path = join(repo.path, ".worktrees", name);
+  await repo.git("worktree", "add", "--detach", path, "main");
+  for (let i = 0; i < commits; i++) {
+    await write(join(path, `exp${i}.txt`), "experiment\n");
+    await repo.git("-C", path, "add", `exp${i}.txt`);
+    await repo.git("-C", path, "commit", "-m", `experiment ${i}`);
+  }
+  const head = (await repo.git("-C", path, "rev-parse", "HEAD")).trim();
+  await rm(path, { recursive: true, force: true });
+  return head;
+}
+
+test("a detached worktree whose folder is gone, with commits only on its HEAD, says how to rescue them", async () => {
+  const head = await goneSandbox("sandbox", 1);
+  const prunable = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "prunable");
+  expect(prunable).toEqual([expect.objectContaining({ severity: "loses-work", action: `git branch rescue/sandbox ${head}` })]);
+});
+
+test("a detached worktree whose folder is gone with nothing of its own can be pruned", async () => {
+  await goneSandbox("empty", 0);
+  const prunable = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "prunable");
+  expect(prunable).toEqual([expect.objectContaining({ severity: "needs-action", action: "git worktree prune" })]);
+});
+
+test("check remove of an orphan-history worktree with a local commit exits 3 with a reason", async () => {
+  const path = join(repo.path, ".worktrees", "pages");
+  await repo.git("worktree", "add", "--orphan", "-b", "gh-pages", path);
+  await write(join(path, "index.html"), "docs\n");
+  await repo.git("-C", path, "add", "index.html");
+  await repo.git("-C", path, "commit", "-m", "publish docs");
+
+  const result = await grove(["check", "remove", ".worktrees/pages"]);
+  expect(result).toMatchObject({ code: 3, err: "", out: "1 commit not pushed or merged\n" });
+});

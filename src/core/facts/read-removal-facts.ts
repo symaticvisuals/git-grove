@@ -3,9 +3,11 @@ import { join, sep } from "node:path";
 import { runGit } from "../git/run-git.js";
 import { isMerged } from "../stacks/is-merged.js";
 import type { RemovalFacts } from "../rules/verdict.types.js";
+import { countDetachedOnly } from "./count-detached-only.js";
 import type { RepoFacts, WorktreeFacts } from "./facts.types.js";
 import { listIgnoredFiles } from "./list-ignored-files.js";
 import { MainWorktreeError } from "./main-worktree.error.js";
+import { NotAWorktreeError } from "./not-a-worktree.error.js";
 import { sameFileInBoth } from "./same-file-in-both.js";
 
 type Read<T> = { value: T; failed: string | null };
@@ -15,13 +17,17 @@ async function countCommits(cwd: string, args: string[]): Promise<number> {
   return Number.parseInt(stdout.trim(), 10);
 }
 
-async function readUnpushed(cwd: string, worktree: WorktreeFacts, facts: RepoFacts): Promise<number> {
+async function readUnpushed(cwd: string, worktree: WorktreeFacts, facts: RepoFacts): Promise<Read<number>> {
   const branch = facts.branches.find((candidate) => candidate.name === worktree.branch);
-  if (!branch) return 0;
-  const tracked = branch.upstream && !branch.upstream.gone ? branch.upstream : null;
-  const ahead = tracked ? tracked.ahead : await countCommits(cwd, [`${facts.trunk.ref}..${branch.tip}`]);
-  if (ahead === 0) return 0;
-  return (await isMerged(cwd, branch.tip, facts.trunk.ref)) ? 0 : ahead;
+  if (!branch) return { value: 0, failed: null };
+  try {
+    const tracked = branch.upstream && !branch.upstream.gone ? branch.upstream : null;
+    const ahead = tracked ? tracked.ahead : await countCommits(cwd, [`${facts.trunk.ref}..${branch.tip}`]);
+    if (ahead === 0) return { value: 0, failed: null };
+    return { value: (await isMerged(cwd, branch.tip, facts.trunk.ref)) ? 0 : ahead, failed: null };
+  } catch {
+    return { value: 0, failed: "unpushed commits" };
+  }
 }
 
 async function readUncommitted(worktree: WorktreeFacts): Promise<Read<number>> {
@@ -60,9 +66,12 @@ async function readPrecious(worktree: WorktreeFacts, main: WorktreeFacts, others
   }
 }
 
-async function readDetached(cwd: string, worktree: WorktreeFacts): Promise<number> {
-  if (worktree.branch !== null || worktree.head === null) return 0;
-  return countCommits(cwd, [worktree.head, "--not", "--branches", "--remotes", "--tags"]);
+async function readDetached(cwd: string, worktree: WorktreeFacts): Promise<Read<number>> {
+  if (worktree.branch !== null || worktree.head === null) return { value: 0, failed: null };
+  return countDetachedOnly(cwd, worktree.head).then(
+    (value) => ({ value, failed: null }),
+    () => ({ value: 0, failed: "detached commits" }),
+  );
 }
 
 async function folderExists(path: string): Promise<boolean> {
@@ -76,15 +85,15 @@ async function folderExists(path: string): Promise<boolean> {
  * Gathers everything that deleting a worktree could lose: uncommitted and untracked work,
  * commits that are neither pushed nor merged, commits only a detached HEAD holds, stashes for its branch,
  * ignored files that exist nowhere else, and worktrees nested inside it.
- * A read that fails is reported in `unreadable` and never counted as empty.
+ * A read that fails is reported in `unreadable` and never counted as empty; the other reads still count.
  * A prunable worktree whose folder is gone skips the on-disk checks and keeps the repository-level ones;
  * one whose folder still exists is reported as unreadable.
- * Throws MainWorktreeError for the main worktree.
+ * Throws MainWorktreeError for the main worktree and NotAWorktreeError for a path that is no worktree.
  */
 export async function readRemovalFacts(cwd: string, worktreePath: string, facts: RepoFacts): Promise<RemovalFacts> {
   const worktree = facts.worktrees.find((candidate) => candidate.path === worktreePath);
   const main = facts.worktrees.find((candidate) => candidate.isMain);
-  if (!worktree) throw new Error(`${worktreePath} is not a worktree of this repository`);
+  if (!worktree) throw new NotAWorktreeError(worktreePath);
   if (worktree.isMain || !main) throw new MainWorktreeError(worktreePath);
 
   const others = facts.worktrees.filter((candidate) => candidate !== worktree).map((candidate) => candidate.path);
@@ -105,12 +114,14 @@ export async function readRemovalFacts(cwd: string, worktreePath: string, facts:
     path: worktree.path,
     uncommitted: uncommitted.value,
     untracked: untracked.value,
-    unpushed,
-    detachedCommits,
+    unpushed: unpushed.value,
+    detachedCommits: detachedCommits.value,
     stashes: worktree.branch === null ? 0 : facts.stashes.filter((stash) => stash.branch === worktree.branch).length,
     preciousIgnored: precious.value.files,
     ignoredTruncated: precious.value.truncated,
     nestedWorktrees,
-    unreadable: [...orphaned, uncommitted.failed, untracked.failed, precious.failed].filter((item) => item !== null),
+    unreadable: [...orphaned, uncommitted.failed, untracked.failed, precious.failed, unpushed.failed, detachedCommits.failed].filter(
+      (item) => item !== null,
+    ),
   };
 }

@@ -5,7 +5,7 @@ import { runGit } from "../git/run-git.js";
 
 export const IGNORED_FILE_LIMIT = 2000;
 
-const REGENERABLE_SEGMENTS = new Set([
+const REGENERABLE_FOLDERS = new Set([
   "node_modules",
   "dist",
   "build",
@@ -13,13 +13,15 @@ const REGENERABLE_SEGMENTS = new Set([
   ".turbo",
   ".venv",
   "venv",
-  "__pycache__",
   "target",
   ".cache",
   "coverage",
 ]);
 
-/** `unreadable` holds the worktree-relative folders (ending in `/`) the walk could not open. */
+const JUNK_FOLDERS = new Set(["__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"]);
+const JUNK_FILES = new Set([".DS_Store", "Thumbs.db", "desktop.ini"]);
+
+/** `unreadable` holds the worktree-relative folders (ending in `/`) and files the walk could not inspect. */
 export type IgnoredListing = { files: string[]; truncated: boolean; unreadable: string[] };
 
 export type IgnoredListingOptions = {
@@ -27,8 +29,25 @@ export type IgnoredListingOptions = {
   accept?: (relative: string) => boolean;
 };
 
-function isRegenerable(relative: string): boolean {
-  return relative.split("/").some((segment) => REGENERABLE_SEGMENTS.has(segment));
+function isJunk(relative: string): boolean {
+  const segments = relative.split("/").filter((segment) => segment !== "");
+  return segments.some((segment) => JUNK_FOLDERS.has(segment)) || JUNK_FILES.has(segments.at(-1) ?? "");
+}
+
+/**
+ * Whether `entry` (as git listed it) is, or lies inside, a regenerable folder that is itself ignored:
+ * either git reported that folder whole, or `git check-ignore` matches it. A regenerable name on a tracked folder
+ * does not count, so a hand-made ignored file in a tracked `build/` is still examined.
+ */
+async function inIgnoredRegenerable(entry: string, isIgnoredFolder: (folder: string) => Promise<boolean>): Promise<boolean> {
+  const segments = entry.replace(/\/$/, "").split("/");
+  const folders = entry.endsWith("/") ? segments : segments.slice(0, -1);
+  for (const [index, segment] of folders.entries()) {
+    if (!REGENERABLE_FOLDERS.has(segment)) continue;
+    const folder = `${segments.slice(0, index + 1).join("/")}/`;
+    if (folder === entry || (await isIgnoredFolder(folder))) return true;
+  }
+  return false;
 }
 
 function isInside(path: string, folders: readonly string[]): boolean {
@@ -58,28 +77,29 @@ async function* walk(
     const child = `${relative}${entry.name}`;
     if (entry.name === ".git" || entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      if (isInside(join(root, child), skipFolders)) continue;
+      if (JUNK_FOLDERS.has(entry.name) || isInside(join(root, child), skipFolders)) continue;
       yield* walk(root, `${child}/`, skipFolders, unreadable);
-    } else {
+    } else if (!JUNK_FILES.has(entry.name)) {
       yield child;
     }
   }
 }
 
-async function isSymlink(path: string): Promise<boolean> {
+async function fileKind(path: string): Promise<"symlink" | "file" | "unreadable"> {
   try {
-    return (await lstat(path)).isSymbolicLink();
+    return (await lstat(path)).isSymbolicLink() ? "symlink" : "file";
   } catch {
-    return true;
+    return "unreadable";
   }
 }
 
 /**
  * Lists the gitignored files in a worktree, worktree-relative, with directories expanded.
- * Ignored roots git reports under a regenerable folder (node_modules, dist, build ...) are dropped;
- * inside any other ignored folder every file counts. Symlinks and folders that are other worktrees are skipped.
+ * Entries in a regenerable folder (node_modules, dist, build ...) are dropped only when that folder is itself ignored;
+ * inside any other ignored folder every file counts. OS and tool junk (.DS_Store, __pycache__, .mypy_cache ...)
+ * is dropped everywhere. Symlinks and folders that are other worktrees are skipped.
  * Directory entries git reports alongside their contents are collapsed to one entry per file.
- * Folders that cannot be opened are skipped and listed in `unreadable`.
+ * Folders that cannot be opened and files that cannot be inspected are listed in `unreadable`.
  * Stops and reports `truncated` once more than `limit` accepted files have been examined.
  */
 export async function listIgnoredFiles(
@@ -92,6 +112,17 @@ export async function listIgnoredFiles(
   const { stdout } = await runGit(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], {
     cwd: worktreePath,
   });
+  const ignoredFolders = new Map<string, Promise<boolean>>();
+  const isIgnoredFolder = (folder: string): Promise<boolean> => {
+    const known = ignoredFolders.get(folder);
+    if (known) return known;
+    const check = runGit(["check-ignore", "-q", "--no-index", folder], { cwd: worktreePath, allowFailure: true }).then(
+      (result) => result.code === 0,
+      () => false,
+    );
+    ignoredFolders.set(folder, check);
+    return check;
+  };
   const nested = otherWorktrees.filter((other) => other.startsWith(worktreePath + sep));
   const files = new Set<string>();
   const unreadable: string[] = [];
@@ -100,9 +131,11 @@ export async function listIgnoredFiles(
     return files.size > limit;
   };
   for (const entry of stdout.split("\0")) {
-    if (entry === "" || isRegenerable(entry)) continue;
+    if (entry === "" || isJunk(entry) || (await inIgnoredRegenerable(entry, isIgnoredFolder))) continue;
     if (!entry.endsWith("/")) {
-      if (!(await isSymlink(join(worktreePath, entry))) && add(entry)) return { files: [], truncated: true, unreadable };
+      const kind = await fileKind(join(worktreePath, entry));
+      if (kind === "unreadable") unreadable.push(entry);
+      else if (kind === "file" && add(entry)) return { files: [], truncated: true, unreadable };
     } else if (!isInside(join(worktreePath, entry), nested)) {
       for await (const file of walk(worktreePath, entry, nested, unreadable)) {
         if (add(file)) return { files: [], truncated: true, unreadable };

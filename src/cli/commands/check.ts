@@ -1,5 +1,4 @@
-import { realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { findWorktree } from "../../core/facts/find-worktree.js";
 import { readRemovalFacts } from "../../core/facts/read-removal-facts.js";
 import { readRepoFacts } from "../../core/facts/read-repo-facts.js";
 import { safeToRemove } from "../../core/rules/safe-to-remove.js";
@@ -14,10 +13,6 @@ const MAIN_WORKTREE: Verdict = {
   reasons: [{ code: "main-worktree", detail: "the main worktree is never removed", paths: [] }],
 };
 
-async function realpathOrSelf(path: string): Promise<string> {
-  return realpath(path).catch(() => path);
-}
-
 function describe(reason: Reason): string {
   return reason.paths.length > 0 ? `${reason.detail}: ${reason.paths.join(", ")}` : reason.detail;
 }
@@ -28,16 +23,7 @@ function describe(reason: Reason): string {
  */
 export async function checkCommand(io: CliIo, target: string, options: { json: boolean }): Promise<number> {
   const facts = await readRepoFacts(io.cwd);
-  const wanted = await realpathOrSelf(resolve(io.cwd, target));
-  const candidates = await Promise.all(
-    facts.worktrees.map(async (worktree) => ({ worktree, real: await realpathOrSelf(worktree.path) })),
-  );
-  const worktree = candidates.find((candidate) => candidate.worktree.path === wanted || candidate.real === wanted)?.worktree;
-  if (worktree === undefined) {
-    io.err(`git-grove: ${target} is not a worktree of this repository\n`);
-    return 1;
-  }
-
+  const worktree = await findWorktree(facts, io.cwd, target);
   const verdict = worktree.isMain ? MAIN_WORKTREE : safeToRemove(await readRemovalFacts(facts.root, worktree.path, facts));
   if (options.json) io.out(`${JSON.stringify(verdict, null, 2)}\n`);
   else if (verdict.ok) io.out(`safe to remove ${worktree.path}\n`);

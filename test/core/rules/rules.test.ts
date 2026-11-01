@@ -78,6 +78,7 @@ function ctx(over: { worktrees?: WorktreeFacts[]; levels?: Level[] } & Partial<R
     unresolved: [],
     removals: new Map(),
     envMissing: new Map(),
+    detachedOnly: new Map(),
     now: NOW,
     ...rest,
   };
@@ -194,6 +195,17 @@ test("prunable fires on a prunable worktree", () => {
   const hit = run("prunable", ctx({ worktrees: [wt("/r/a", { prunable: true }), wt("/r/b")] }));
   expect(hit).toHaveLength(1);
   expect(hit[0]).toMatchObject({ severity: "needs-action", action: "git worktree prune" });
+});
+
+test("prunable on a detached worktree holding commits only on its HEAD is loses-work with a rescue branch", () => {
+  const head = "d".repeat(40);
+  const sandbox = wt("/r/.worktrees/sandbox", { prunable: true, branch: null, head });
+  const hit = run("prunable", ctx({ worktrees: [sandbox], detachedOnly: new Map([[sandbox.path, 2]]) }));
+  expect(hit).toHaveLength(1);
+  expect(hit[0]).toMatchObject({ severity: "loses-work", action: `git branch rescue/sandbox ${head}` });
+  expect(hit[0]?.detail).toContain("2 commits only on its detached HEAD");
+  const empty = run("prunable", ctx({ worktrees: [sandbox], detachedOnly: new Map([[sandbox.path, 0]]) }));
+  expect(empty[0]).toMatchObject({ severity: "needs-action", action: "git worktree prune" });
 });
 
 test("idle fires on a non-main worktree untouched for more than 14 days", () => {

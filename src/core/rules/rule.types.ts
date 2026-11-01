@@ -14,13 +14,17 @@ export type Finding = {
   action: string | null;
 };
 
-/** `removals` is keyed by worktree path; `envMissing` by worktree path to the missing file names. */
+/**
+ * `removals` is keyed by worktree path; `envMissing` by worktree path to the missing file names;
+ * `detachedOnly` by the path of a prunable detached worktree to the commits only its HEAD holds.
+ */
 export type RuleContext = {
   facts: RepoFacts;
   features: Feature[];
   unresolved: JournalEntry[];
   removals: Map<string, Verdict>;
   envMissing: Map<string, string[]>;
+  detachedOnly: Map<string, number>;
   now: number;
 };
 

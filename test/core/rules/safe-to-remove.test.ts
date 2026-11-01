@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm, realpath, rename, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, realpath, rename, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { countDetachedOnly } from "../../../src/core/facts/count-detached-only.js";
 import { readEnvMissing } from "../../../src/core/facts/read-env-missing.js";
 import { readRemovalFacts } from "../../../src/core/facts/read-removal-facts.js";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
@@ -215,4 +216,86 @@ test("a prunable worktree whose folder still exists is not safe", async () => {
   const verdict = await verdictFor(wt);
   expect(verdict.ok).toBe(false);
   expect(verdict.reasons.map((reason) => reason.code)).toContain("unreadable");
+});
+
+async function ignoreAlso(...patterns: string[]): Promise<void> {
+  const base = ".worktrees/\n.local/\nnode_modules/\n.env*\nout/\n";
+  await repo.commit(".gitignore", `${base}${patterns.map((pattern) => `${pattern}\n`).join("")}`, "ignore more");
+}
+
+test("a hand-made ignored file inside a tracked build folder is precious", async () => {
+  await ignoreAlso("*.local.json");
+  await repo.commit("build/entitlements.json", "{}\n", "build config");
+  const wt = await mergedWorktree("sign");
+  await write(join(wt, "build", "signing.local.json"), '{"apiKey":"only-here"}\n');
+  const verdict = await verdictFor(wt);
+  expect(verdict.ok).toBe(false);
+  expect(verdict.reasons).toEqual([expect.objectContaining({ code: "precious-ignored", paths: ["build/signing.local.json"] })]);
+});
+
+test("files in an ignored dist folder that also holds a tracked file are not precious", async () => {
+  await ignoreAlso("dist/");
+  await write(join(root, "dist", "keep.txt"), "keep\n");
+  await repo.git("add", "-f", "dist/keep.txt");
+  await repo.git("commit", "-m", "keep dist");
+  const wt = await mergedWorktree("built");
+  await write(join(wt, "dist", "bundle.js"), "bundle\n");
+  expect(await verdictFor(wt)).toEqual({ ok: true, reasons: [] });
+});
+
+test("OS and tool junk is never precious, while .idea is", async () => {
+  await ignoreAlso(".DS_Store", ".pytest_cache/", ".mypy_cache/", ".idea/", "__pycache__/", "Thumbs.db");
+  const wt = await mergedWorktree("py");
+  await write(join(wt, ".DS_Store"), "junk");
+  await write(join(wt, ".local", ".DS_Store"), "junk");
+  await write(join(wt, "Thumbs.db"), "junk");
+  await write(join(wt, ".pytest_cache", "v", "cache", "nodeids"), "{}");
+  for (let i = 0; i < 2100; i++) await write(join(wt, ".mypy_cache", "3.12", `m${i}.json`), "");
+  await write(join(wt, ".idea", "workspace.xml"), "<project/>");
+  const verdict = await verdictFor(wt);
+  expect(verdict.reasons).toEqual([expect.objectContaining({ code: "precious-ignored", paths: [".idea/workspace.xml"] })]);
+});
+
+test("a failed unpushed or detached read is unreadable and keeps the other reasons", async () => {
+  const bogus = "1234567890abcdef1234567890abcdef12345678";
+  const wt = await mergedWorktree("bogus");
+  await write(join(wt, "new.txt"), "n\n");
+  const facts = await readRepoFacts(root);
+  const badTip = { ...facts, branches: facts.branches.map((b) => (b.name === "bogus" ? { ...b, tip: bogus } : b)) };
+  const unpushed = safeToRemove(await readRemovalFacts(root, wt, badTip));
+  expect(unpushed.reasons.map((reason) => reason.code)).toEqual(["untracked", "unreadable"]);
+  expect(unpushed.reasons[1]?.detail).toContain("unpushed commits");
+
+  const badHead = { ...facts, worktrees: facts.worktrees.map((w) => (w.path === wt ? { ...w, branch: null, head: bogus } : w)) };
+  const detached = safeToRemove(await readRemovalFacts(root, wt, badHead));
+  expect(detached.reasons.map((reason) => reason.code)).toEqual(["untracked", "unreadable"]);
+  expect(detached.reasons[1]?.detail).toContain("detached commits");
+});
+
+test("an ignored file grove cannot inspect is unreadable, not skipped", async () => {
+  await ignoreAlso("*.local.json");
+  await repo.commit("keep/a.txt", "a\n", "keep");
+  const wt = await mergedWorktree("shut");
+  await write(join(wt, "keep", "x.local.json"), "s\n");
+  await chmod(join(wt, "keep"), 0o644);
+  try {
+    const verdict = await verdictFor(wt);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reasons.find((reason) => reason.code === "unreadable")?.detail).toContain("keep/x.local.json");
+  } finally {
+    await chmod(join(wt, "keep"), 0o755);
+  }
+});
+
+test("a prunable detached worktree still counts the commits only its HEAD holds", async () => {
+  const wt = join(root, ".worktrees", "sandbox");
+  await repo.git("worktree", "add", "--detach", wt);
+  await write(join(wt, "exp.txt"), "x\n");
+  await repo.git("-C", wt, "add", "exp.txt");
+  await repo.git("-C", wt, "commit", "-m", "experiment");
+  await rm(wt, { recursive: true, force: true });
+  const facts = await readRepoFacts(root);
+  const sandbox = facts.worktrees.find((w) => w.path === wt);
+  expect(sandbox?.head).not.toBeNull();
+  expect(await countDetachedOnly(root, sandbox?.head ?? "")).toBe(1);
 });

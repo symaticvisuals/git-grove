@@ -1,4 +1,9 @@
+import { basename } from "node:path";
 import type { Finding, Rule } from "../rule.types.js";
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
 
 export const prunable: Rule = {
   id: "prunable",
@@ -6,6 +11,19 @@ export const prunable: Rule = {
     const out: Finding[] = [];
     for (const w of ctx.facts.worktrees) {
       if (!w.prunable) continue;
+      const detachedHead = w.branch === null ? w.head : null;
+      const stranded = ctx.detachedOnly.get(w.path) ?? 0;
+      if (detachedHead !== null && stranded > 0) {
+        out.push({
+          rule: "prunable",
+          severity: "loses-work",
+          subject: { kind: "worktree", id: w.path },
+          title: "Worktree folder is gone",
+          detail: `${w.path} no longer exists on disk, with ${plural(stranded, "commit")} only on its detached HEAD`,
+          action: `git branch rescue/${basename(w.path)} ${detachedHead}`,
+        });
+        continue;
+      }
       out.push({
         rule: "prunable",
         severity: "needs-action",

@@ -1,4 +1,5 @@
 import { realpath } from "node:fs/promises";
+import { countDetachedOnly } from "../../core/facts/count-detached-only.js";
 import type { RepoFacts } from "../../core/facts/facts.types.js";
 import { readEnvMissing } from "../../core/facts/read-env-missing.js";
 import { readRemovalFacts } from "../../core/facts/read-removal-facts.js";
@@ -38,6 +39,17 @@ async function mergedRemovals(facts: RepoFacts): Promise<Map<string, Verdict>> {
   return removals;
 }
 
+/** Commits only the detached HEAD of each prunable worktree holds; a worktree git fails on is left out. */
+async function strandedCommits(facts: RepoFacts): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  for (const worktree of facts.worktrees) {
+    if (!worktree.prunable || worktree.branch !== null || worktree.head === null) continue;
+    const count = await unlessGitFails(countDetachedOnly(facts.root, worktree.head), null);
+    if (count !== null) counts.set(worktree.path, count);
+  }
+  return counts;
+}
+
 /**
  * Keeps the entries whose lost commits are neither back on their branch nor landed on the trunk.
  * A `deleted` entry, or one whose branch is gone, resolves once its lost tip lands;
@@ -73,9 +85,10 @@ export async function statusCommand(io: CliIo, options: { json: boolean }): Prom
     const features = await readStackFacts(facts.root, facts);
     const removals = await mergedRemovals(facts);
     const envMissing = await readEnvMissing(facts.root, facts).catch(() => new Map<string, string[]>());
+    const detachedOnly = await strandedCommits(facts);
     const repoId = store.repoId(facts.commonDir, facts.root);
     const journal = await stillUnresolved(store, repoId, facts, now);
-    const findings = evaluate({ facts, features, unresolved: journal, removals, envMissing, now });
+    const findings = evaluate({ facts, features, unresolved: journal, removals, envMissing, detachedOnly, now });
     if (options.json) {
       const doc = { repo: { root: facts.root, commonDir: facts.commonDir }, trunk: facts.trunk, features, findings, journal };
       io.out(`${JSON.stringify(doc, null, 2)}\n`);
