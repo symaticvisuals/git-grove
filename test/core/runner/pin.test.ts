@@ -20,6 +20,13 @@ test("pin names the ref by branch and UTC time, suffixing when taken", async () 
   expect(await pin(repo.path, "feat/coupons-ui", sha, at)).toBe("refs/grove/pins/feat/coupons-ui/20261101T231942Z-2");
 });
 
+test("concurrent pins at the same time each get their own ref", async () => {
+  const at = new Date(Date.UTC(2026, 10, 1, 4, 0, 0));
+  const refs = await Promise.all([1, 2, 3].map(() => pin(repo.path, "feat/race", sha, at)));
+  expect(new Set(refs).size).toBe(3);
+  expect((await listPins(repo.path, "feat/race")).map((entry) => entry.ref).sort()).toEqual([...refs].sort());
+});
+
 test("listPins returns newest first and filters by branch", async () => {
   await pin(repo.path, "feat/x", sha, new Date(Date.UTC(2026, 10, 1, 1, 0, 0)));
   await pin(repo.path, "feat/x", sha, new Date(Date.UTC(2026, 10, 1, 1, 0, 0)));
