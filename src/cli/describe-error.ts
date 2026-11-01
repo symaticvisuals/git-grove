@@ -1,0 +1,26 @@
+import { NotARepoError } from "../core/facts/not-a-repo.error.js";
+import { GitError } from "../core/git/git.error.js";
+import { GitVersionError } from "../core/git/git-version.error.js";
+import { StoreCorruptError } from "../core/journal/store-corrupt.error.js";
+import { RefusedError } from "../core/runner/refused.error.js";
+import { RepoLockedError } from "../core/runner/repo-locked.error.js";
+
+const ONE_LINE_ERRORS = [NotARepoError, GitVersionError, RefusedError, RepoLockedError, StoreCorruptError];
+
+function firstLine(text: string): string {
+  return text.split("\n")[0] ?? "";
+}
+
+function isGitMissing(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT" && "syscall" in error && error.syscall === "spawn git";
+}
+
+/**
+ * Turns an error a person can act on into one line for stderr, or returns null for anything else (a bug).
+ */
+export function describeError(error: unknown): string | null {
+  if (isGitMissing(error)) return "git-grove: git not found on PATH";
+  if (error instanceof GitError) return `git-grove: ${firstLine(error.message)}`;
+  if (error instanceof Error && ONE_LINE_ERRORS.some((kind) => error instanceof kind)) return firstLine(error.message);
+  return null;
+}

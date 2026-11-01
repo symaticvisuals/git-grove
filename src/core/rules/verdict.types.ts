@@ -7,7 +7,8 @@ export type ReasonCode =
   | "precious-ignored"
   | "too-many-ignored"
   | "nested-worktree"
-  | "unreadable";
+  | "unreadable"
+  | "main-worktree";
 
 export type Reason = { code: ReasonCode; detail: string; paths: string[] };
 
