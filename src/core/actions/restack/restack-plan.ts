@@ -10,15 +10,20 @@ function shortRef(ref: string): string {
   return ref.replace(/^refs\/(?:heads|remotes)\//, "");
 }
 
+function shellWord(word: string): string {
+  return /^[\w./@:+-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+}
+
 function settingAside(read: RestackRead, level: RestackLevel): boolean {
   return read.stash && level.dirty.length > 0;
 }
 
-function moveCheck(read: RestackRead, level: RestackLevel, index: number): Check {
+function moveCheck(level: RestackLevel): Check {
   const text = `${level.label} onto ${level.ontoLabel}`;
-  if (index > 0) return { ok: true, text, why: "Conflicts are checked when this level runs" };
-  if (read.conflicts === null) return { ok: true, text, why: "Conflicts not checked (needs git 2.40)" };
-  if (read.conflicts.length > 0) return { ok: false, text, why: `conflicts likely in ${listPaths(read.conflicts)}` };
+  if (!level.conflicts.predicted) return { ok: true, text, why: "Conflicts are checked when this level runs" };
+  const { paths } = level.conflicts;
+  if (paths === null) return { ok: true, text, why: "Conflicts not checked (needs git 2.40)" };
+  if (paths.length > 0) return { ok: false, text, why: `conflicts likely in ${listPaths(paths)}` };
   return { ok: true, text, why: `${plural(level.own, "commit")}, no conflicts expected` };
 }
 
@@ -31,21 +36,23 @@ function dirtyChecks(read: RestackRead, level: RestackLevel): Check[] {
   return [{ ok: true, text: `${changes} will be set aside`, why: `${listPaths(level.dirty)} ${back}` }];
 }
 
+function busyLine(root: string, branch: string, busy: RestackLevel["busy"]): string[] {
+  if (!busy?.operation) return [];
+  return [`${branch} has a ${busy.operation} in progress in ${displayPath(root, busy.path)}. Finish or abort it first.`];
+}
+
 function blockersOf(root: string, read: RestackRead): string[] {
   const blockers = read.levels.length === 0 ? ["Nothing to restack: every level is on top of its parent"] : [];
   for (const level of read.levels) {
-    const { branch } = level.move;
+    const { branch, onto } = level.move;
     if (level.holder === undefined) blockers.push(`${branch} has no worktree; restack it by hand`);
-    if (level.busy?.operation) {
-      const there = displayPath(root, level.busy.path);
-      blockers.push(`${branch} has a ${level.busy.operation} in progress in ${there}. Finish or abort it first.`);
-    }
+    blockers.push(...busyLine(root, branch, level.busy), ...busyLine(root, onto, level.ontoBusy));
     if (level.dirty.length > 0 && !read.stash) {
       blockers.push(`${branch} has uncommitted changes. Turn on set aside, or commit them first.`);
     }
   }
   for (const branch of read.rewritten) blockers.push(`${branch} has a rewrite to restore or keep first`);
-  return blockers;
+  return [...new Set(blockers)];
 }
 
 function effectsOf(root: string, read: RestackRead): string[] {
@@ -55,7 +62,9 @@ function effectsOf(root: string, read: RestackRead): string[] {
       effects.push(`Set aside the uncommitted changes in ${displayPath(root, level.holder.path)} and put them back after.`);
     }
     if (level.move.ontoTrunk) {
-      effects.push(`Record ${read.trunk.name} as the parent of ${level.move.branch}, since ${level.parent} is merged.`);
+      const { branch } = level.move;
+      const trunk = read.trunk.name;
+      effects.push(`Record ${trunk} as the parent of ${branch}, since ${level.parent} is merged, and keep it in ${read.feature.name}.`);
     }
   }
   return [...effects, "Record where each level now forks from its parent."];
@@ -66,10 +75,17 @@ function commandsOf(root: string, read: RestackRead): string[] {
     const { branch, onto, ontoTrunk } = level.move;
     const git = level.holder === undefined ? "git" : `git -C ${relative(root, level.holder.path) || "."}`;
     const aside = settingAside(read, level);
+    const base = ontoTrunk ? shortRef(read.trunk.ref) : onto;
     return [
-      ...(aside ? [`${git} stash push --include-untracked -m "${read.stashMessage}"`] : []),
-      `${git} rebase --no-update-refs --no-autosquash --onto ${ontoTrunk ? shortRef(read.trunk.ref) : onto} ${level.fork} ${branch}`,
-      ...(ontoTrunk ? [`${git} config branch.${branch}.stackparent ${read.trunk.name}`] : []),
+      ...(aside ? [`${git} stash push --include-untracked -m ${shellWord(read.stashMessage)}`] : []),
+      `${git} rebase --no-update-refs --no-autosquash --onto ${base} ${level.fork} ${branch}`,
+      `${git} config branch.${branch}.stackforkpoint "$(git rev-parse ${base})"`,
+      ...(ontoTrunk
+        ? [
+            `${git} config branch.${branch}.stackparent ${read.trunk.name}`,
+            `${git} config branch.${branch}.grovefeature ${shellWord(read.feature.name)}`,
+          ]
+        : []),
       ...(aside ? [`${git} stash pop --index`] : []),
     ];
   });
@@ -99,10 +115,10 @@ function expectsOf(read: RestackRead): Expectation[] {
 }
 
 /**
- * The plan for a restack: a check per level that moves (conflicts predicted for the first, whose new base is final),
- * one per level left alone, the exact git commands, and a step per level between the pin step and the final check.
- * It is blocked when nothing would move, when a level that moves has no worktree, an operation in progress or
- * uncommitted changes that are not to be set aside, and when any level has an open rewrite.
+ * The plan for a restack: a check per level that moves (conflicts predicted when its new base does not move), one per
+ * level left alone, the git commands, and a step per level between the pin step and the final check. It is blocked when
+ * nothing would move, when a level that moves has no worktree, an operation in progress on it or on a new base that does
+ * not move, or uncommitted changes that are not to be set aside, and when any level has an open rewrite.
  */
 export function restackPlan(facts: RepoFacts, read: RestackRead): Plan {
   const { root } = facts;
@@ -119,7 +135,7 @@ export function restackPlan(facts: RepoFacts, read: RestackRead): Plan {
     folders: null,
     choices: null,
     checks: [
-      ...read.levels.map((level, index) => moveCheck(read, level, index)),
+      ...read.levels.map(moveCheck),
       ...untouched,
       ...read.levels.flatMap((level) => dirtyChecks(read, level)),
     ],

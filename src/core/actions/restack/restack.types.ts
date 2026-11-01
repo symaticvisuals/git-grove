@@ -5,6 +5,8 @@ import type { RestackMove } from "./order-restack.js";
 /**
  * A level a restack moves, as its plan read it. `number` is the level's two-digit depth; `parent` is the branch it forked
  * from, the old parent when it moves onto the trunk. `ontoRef` is resolved again just before the level moves.
+ * `conflicts` is predicted when its new base does not move in this run (`paths` null when git cannot predict);
+ * `ontoBusy` is an operation in progress on a new base that does not move.
  */
 export type RestackLevel = {
   move: RestackMove;
@@ -21,12 +23,11 @@ export type RestackLevel = {
   holder: WorktreeFacts | undefined;
   dirty: string[];
   busy: WorktreeFacts | undefined;
+  ontoBusy: WorktreeFacts | undefined;
+  conflicts: { predicted: false } | { predicted: true; paths: string[] | null };
 };
 
-/**
- * Everything a restack plan read. `untouched` labels the levels left alone; `conflicts` is the prediction for the first
- * level that moves, null when git cannot make one; `stashMessage` names what the run sets aside.
- */
+/** Everything a restack plan read. `untouched` labels the levels left alone; `stashMessage` names what the run sets aside. */
 export type RestackRead = {
   feature: Feature;
   stash: boolean;
@@ -36,5 +37,4 @@ export type RestackRead = {
   tips: Map<string, Sha>;
   trunk: RepoFacts["trunk"];
   rewritten: string[];
-  conflicts: string[] | null;
 };

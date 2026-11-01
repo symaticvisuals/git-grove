@@ -194,3 +194,21 @@ test("a squash probe whose git output is too large to read counts as not merged"
     delete process.env["GIT_GROVE_MAX_BUFFER"];
   }
 });
+
+test("the roots of one feature are ordered oldest fork point first, whatever the config order", async () => {
+  const base = (await repo.git("rev-parse", "main")).trim();
+  await repo.commit("later.txt", "later\n", "later");
+  await repo.branch("feat/new");
+  await repo.branch("feat/old", base);
+  for (const name of ["feat/new", "feat/old"]) {
+    await repo.git("config", `branch.${name}.stackparent`, "main");
+    await repo.git("config", `branch.${name}.grovefeature`, "checkout");
+  }
+  const features = await readStackFacts(repo.path, await readRepoFacts(repo.path));
+  const checkout = features.find((feature) => feature.name === "checkout");
+  expect(checkout?.levels.map((level) => [level.branch, level.depth])).toEqual([
+    ["feat/old", 1],
+    ["feat/new", 1],
+  ]);
+  expect(features.filter((feature) => feature.name === "checkout")).toHaveLength(1);
+});

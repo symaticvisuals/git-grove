@@ -85,3 +85,25 @@ test("detached worktrees form one detached feature, prunable ones excluded", () 
   );
   expect(result).toEqual([{ name: "detached", kind: "detached", branches: [] }]);
 });
+
+test("roots that share a grovefeature form one stack, tree by tree, in the order given", () => {
+  const edges = [
+    edge("feat/model", "main", "checkout"),
+    edge("feat/ui", "main", "checkout"),
+    edge("feat/email", "feat/ui"),
+    edge("feat/admin", "main", "checkout"),
+    edge("feat/other", "main"),
+  ];
+  const branches = ["feat/model", "feat/ui", "feat/email", "feat/admin", "feat/other"];
+  expect(groupFeatures(facts(branches, edges, []))).toEqual([
+    { name: "checkout", kind: "stack", branches: ["feat/model", "feat/ui", "feat/email", "feat/admin"] },
+    { name: "feat/other", kind: "stack", branches: ["feat/other"] },
+  ]);
+  const ranked = groupFeatures(facts(branches, edges, []), new Map([["feat/model", 1], ["feat/ui", 3], ["feat/admin", 2]]));
+  expect(ranked[0]?.branches).toEqual(["feat/model", "feat/admin", "feat/ui", "feat/email"]);
+});
+
+test("a root without a grovefeature never joins a feature named after its branch", () => {
+  const result = groupFeatures(facts(["feat/a", "feat/b"], [edge("feat/a", "main", "feat/b"), edge("feat/b", "main")], []));
+  expect(result.map((group) => group.branches)).toEqual([["feat/a"], ["feat/b"]]);
+});

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import type { ActionContext } from "../../../src/core/actions/action.types.js";
+import type { Receipt, StepEvent } from "../../../src/core/actions/plan.types.js";
 import { InvalidInputError } from "../../../src/core/actions/invalid-input.error.js";
 import { readDirtyPaths } from "../../../src/core/actions/read-dirty-paths.js";
 import { prepareAction } from "../../../src/core/actions/registry.js";
@@ -118,12 +119,29 @@ test("plan moves ui then email and leaves admin alone", async () => {
   const rebases = plan.commands.filter((command) => command.includes(" rebase "));
   expect(rebases).toHaveLength(2);
   for (const command of rebases) expect(command).toContain("rebase --no-update-refs --no-autosquash --onto");
+  expect(plan.commands).toContain('git -C .worktrees/checkout/02-feat-ui config branch.feat/ui.stackforkpoint "$(git rev-parse feat/model)"');
+  expect(plan.commands).toContain('git -C .worktrees/checkout/03-feat-email config branch.feat/email.stackforkpoint "$(git rev-parse feat/ui)"');
 });
 
-test("only the first level that moves has its conflicts predicted", async () => {
+test("a level whose new base moves in this run has its conflicts checked when it runs", async () => {
   await fixture();
   const { plan } = await prepareAction("restack", ctx, restack());
   expect(plan.checks).toContainEqual({ ok: true, text: "02 feat/ui onto 01 feat/model", why: "1 commit, no conflicts expected" });
+  expect(plan.checks).toContainEqual({
+    ok: true,
+    text: "03 feat/email onto 02 feat/ui",
+    why: "Conflicts are checked when this level runs",
+  });
+});
+
+test("a level whose sibling moves first still has its conflict with their parent predicted", async () => {
+  await addAdmin();
+  await commitIn(folder("feat/admin"), "shared.txt", "admin\ntwo\nthree\n", "admin edits shared");
+  await drift("shared.txt", "model\ntwo\nthree\n");
+  const { plan } = await prepareAction("restack", ctx, restack());
+  expect(plan.moves).toEqual(["feat/ui", "feat/admin", "feat/email"]);
+  expect(plan.checks).toContainEqual({ ok: true, text: "02 feat/ui onto 01 feat/model", why: "1 commit, no conflicts expected" });
+  expect(plan.checks).toContainEqual({ ok: false, text: "02 feat/admin onto 01 feat/model", why: "conflicts likely in shared.txt" });
   expect(plan.checks).toContainEqual({
     ok: true,
     text: "03 feat/email onto 02 feat/ui",
@@ -194,9 +212,16 @@ test("a conflict on level 03 stops there and keeps level 02 done", async () => {
     text: "03 feat/email onto 02 feat/ui",
     why: "Conflicts are checked when this level runs",
   });
-  const receipt = await runPrepared(ctx, prepared, ignore);
+  const events: StepEvent[] = [];
+  const receipt = await runPrepared(ctx, prepared, (event) => events.push(event));
 
   expect(receipt).toMatchObject({ ok: false, refused: false, title: "Stopped at level 03: conflict in shared.txt" });
+  const last = prepared.plan.steps.length - 1;
+  expect(prepared.plan.steps[last]?.title).toBe("Check nothing was lost");
+  expect(events.filter((event) => event.index === last).map((event) => [event.state, event.detail])).toEqual([
+    ["running", "every old commit matched"],
+    ["done", "every old commit matched"],
+  ]);
   expect(await tip("feat/email")).toBe(emailTip);
   expect(await readFile(join(email, "draft.txt"), "utf8")).toBe("draft\n");
   expect(await readDirtyPaths(email)).toEqual(["draft.txt"]);
@@ -217,16 +242,34 @@ test("a set-aside change that no longer applies stays in the stash, and the run 
   await fixture();
   const email = await tip("feat/email");
   const receipt = await runPrepared(ctx, await prepareAction("restack", ctx, restack(true)), ignore);
+  const stash = (await repo.git("rev-parse", "refs/stash")).trim();
 
   expect(receipt).toMatchObject({ ok: false, refused: false, title: "Stopped at level 02: your change did not apply cleanly" });
   expect(receipt.lines).toEqual([
     "feat/ui is restacked and stays done",
-    "Your change is kept in the stash of .worktrees/checkout/02-feat-ui; it did not apply cleanly",
+    `Your change is kept in the stash as ${stash.slice(0, 7)} ("grove restack checkout"). It did not apply cleanly; ` +
+      `.worktrees/checkout/02-feat-ui is unchanged. Apply it by hand with git stash apply ${stash}.`,
     "feat/email was not restacked",
   ]);
   expect(await isAncestor(repo.path, await tip("feat/model"), await tip("feat/ui"))).toBe(true);
   expect(await tip("feat/email")).toBe(email);
-  expect((await repo.git("stash", "list", "--format=%s")).trim()).toBe("On feat/ui: grove restack checkout");
+  expect((await repo.git("stash", "list", "--format=%H %s")).trim()).toBe(`${stash} On feat/ui: grove restack checkout`);
+});
+
+test("a set-aside change that conflicts once put back is named by its sha, with the files it left conflicted", async () => {
+  const ui = folder("feat/ui");
+  await writeFile(join(ui, "shared.txt"), "mine\ntwo\nthree\n");
+  await drift("shared.txt", "model\ntwo\nthree\n");
+  const receipt = await runPrepared(ctx, await prepareAction("restack", ctx, restack(true)), ignore);
+  const stash = (await repo.git("rev-parse", "refs/stash")).trim();
+
+  expect(receipt).toMatchObject({ ok: false, title: "Stopped at level 02: your change did not apply cleanly" });
+  expect(receipt.lines).toContain(
+    `Your change is kept in the stash as ${stash.slice(0, 7)} ("grove restack checkout"). It did not apply cleanly; ` +
+      ".worktrees/checkout/02-feat-ui now has it partly applied, with conflicts in shared.txt. " +
+      `Fix those files, then run git stash apply ${stash}.`,
+  );
+  expect((await repo.git("stash", "list", "--format=%H")).trim()).toBe(stash);
 });
 
 test("a parent squash-merged into main moves the child onto main and records main as its parent", async () => {
@@ -236,14 +279,23 @@ test("a parent squash-merged into main moves the child onto main and records mai
   await observe(repo.path, store);
   const prepared = await prepareAction("restack", ctx, restack());
   expect(prepared.plan.checks).toContainEqual(expect.objectContaining({ ok: true, text: "02 feat/ui onto main" }));
+  expect(prepared.plan.commands).toContain("git -C .worktrees/checkout/02-feat-ui config branch.feat/ui.grovefeature checkout");
 
   const receipt = await runPrepared(ctx, prepared, ignore);
   expect(receipt.ok).toBe(true);
   expect(await config("branch.feat/ui.stackparent")).toBe("main");
+  expect(await config("branch.feat/ui.grovefeature")).toBe("checkout");
+  expect(await config("branch.feat/admin.grovefeature")).toBe("checkout");
   expect((await repo.git("rev-list", "--count", "main..feat/ui")).trim()).toBe("1");
   expect(await isAncestor(repo.path, await tip("feat/ui"), await tip("feat/email"))).toBe(true);
   await observe(repo.path, store);
   expect(await openAlerts()).toEqual([]);
+
+  const again = await prepareAction("restack", ctx, restack());
+  const levels = again.plan.expects.flatMap((expect) => (expect.kind === "tip" ? [expect.branch] : []));
+  expect(again.plan.context).toBe("checkout");
+  expect(levels).toEqual(expect.arrayContaining(["feat/model", "feat/ui", "feat/admin", "feat/email"]));
+  expect(again.plan.blockers).toEqual(["Nothing to restack: every level is on top of its parent"]);
 });
 
 test("a level with an unresolved rewrite blocks the restack", async () => {
@@ -337,3 +389,61 @@ test("a level that moves while the run pins is refused before anything moves", a
   expect(receipt.lines.join("\n")).toContain("feat/email moved");
   expect(await tip("feat/ui")).toBe(ui);
 });
+
+test("a parent with an operation in progress blocks the levels on it", async () => {
+  await drift();
+  await repo.git("-C", folder("feat/model"), "bisect", "start");
+  const { plan } = await prepareAction("restack", ctx, restack());
+  expect(plan.blockers).toContain("feat/model has a bisect in progress in .worktrees/checkout/01-feat-model. Finish or abort it first.");
+});
+
+test("a change to which levels move refuses the restack before anything moves", async () => {
+  const before = await tip("feat/model");
+  await fixture();
+  const prepared = await prepareAction("restack", ctx, restack());
+  const ui = await tip("feat/ui");
+  await repo.git("config", "branch.feat/admin.stackforkpoint", before);
+  const receipt = await runPrepared(ctx, prepared, ignore);
+  expect(receipt).toMatchObject({ ok: false, refused: true, title: "Changed since you looked" });
+  expect(receipt.lines.join("\n")).toContain("The levels that move changed");
+  expect(await tip("feat/ui")).toBe(ui);
+});
+
+/** A `git` on PATH that runs the real one, except that `rebase --abort` exits 1 or is killed. */
+async function gitWhoseAbort(outcome: "fails" | "dies"): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "git-grove-bin-"));
+  const real = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const stop = outcome === "fails" ? "exit 1" : "kill -9 $$";
+  const script = `#!/bin/sh\nfor arg in "$@"; do [ "$arg" = "--abort" ] && ${stop}; done\nexec "${real}" "$@"\n`;
+  await writeFile(join(dir, "git"), script, { mode: 0o755 });
+  return dir;
+}
+
+for (const outcome of ["fails", "dies"] as const) {
+  test(`a rebase whose abort ${outcome} keeps the set-aside change in the stash and says so`, async () => {
+    const email = folder("feat/email");
+    await commitIn(email, "shared.txt", "email\ntwo\nthree\n", "email edits shared");
+    await drift("shared.txt", "model\ntwo\nthree\n");
+    await writeFile(join(email, "draft.txt"), "draft\n");
+    const prepared = await prepareAction("restack", ctx, restack(true));
+    const bin = await gitWhoseAbort(outcome);
+    const savedPath = process.env["PATH"];
+    process.env["PATH"] = `${bin}:${savedPath ?? ""}`;
+    let receipt: Receipt | undefined;
+    try {
+      receipt = await runPrepared(ctx, prepared, ignore);
+    } finally {
+      process.env["PATH"] = savedPath;
+      await rm(bin, { recursive: true, force: true });
+    }
+    const stash = (await repo.git("rev-parse", "refs/stash")).trim();
+    expect(receipt).toMatchObject({ ok: false, title: "Stopped at level 03: conflict in shared.txt" });
+    expect(receipt.lines).toContain(".worktrees/checkout/03-feat-email still has a rebase in progress; finish or abort it there");
+    expect(receipt.lines).toContain(
+      `Your change was not put back, because a rebase is still in progress in .worktrees/checkout/03-feat-email; ` +
+        `it is in the stash as ${stash.slice(0, 7)} ("grove restack checkout")`,
+    );
+    expect(receipt.lines).toContain("feat/ui is restacked and stays done");
+    expect((await repo.git("stash", "list", "--format=%H")).trim()).toBe(stash);
+  });
+}

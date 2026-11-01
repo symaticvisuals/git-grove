@@ -18,8 +18,8 @@ async function countCommits(cwd: string, range: string): Promise<number> {
 
 /**
  * Reads what restacking `feature` would do: each level that moves with its fork point, its new base and its worktree,
- * the levels left alone, and the conflicts git predicts for the first level that moves. A fork point the branch's
- * config does not give comes from the parent tip grove last saved for it, else the merge base.
+ * and the levels left alone. Conflicts are predicted for each level whose new base does not move in this run. A fork
+ * point the branch's config does not give comes from the parent tip grove last saved for it, else the merge base.
  */
 export async function readRestack(ctx: ActionContext, facts: RepoFacts, feature: Feature, stash: boolean): Promise<RestackRead> {
   const { root } = facts;
@@ -29,6 +29,7 @@ export async function readRestack(ctx: ActionContext, facts: RepoFacts, feature:
   const depths = new Map(feature.levels.map((level) => [level.branch, level.depth]));
   const numberOf = (branch: string): string => String(depths.get(branch) ?? 1).padStart(2, "0");
   const { moves, untouched } = orderRestack(feature, facts.trunk.name);
+  const moving = new Set(moves.map((move) => move.branch));
 
   const levels: RestackLevel[] = [];
   for (const move of moves) {
@@ -39,13 +40,15 @@ export async function readRestack(ctx: ActionContext, facts: RepoFacts, feature:
     const edge = facts.edges.find((candidate) => candidate.branch === move.branch);
     const fork = await forkOf(root, edge, branch, parent, hints.get(move.branch)?.parentSha);
     const holder = holderIn(facts, move.branch);
+    const ontoSha = move.ontoTrunk ? facts.trunk.sha : parent.tip;
+    const settled = !moving.has(move.onto);
     levels.push({
       move,
       number: numberOf(move.branch),
       label: `${numberOf(move.branch)} ${move.branch}`,
       ontoLabel: move.ontoTrunk ? facts.trunk.name : `${numberOf(move.onto)} ${move.onto}`,
       ontoRef: move.ontoTrunk ? facts.trunk.ref : `refs/heads/${move.onto}`,
-      ontoSha: move.ontoTrunk ? facts.trunk.sha : parent.tip,
+      ontoSha,
       parent: parentName,
       tip: branch.tip,
       fork,
@@ -54,10 +57,11 @@ export async function readRestack(ctx: ActionContext, facts: RepoFacts, feature:
       holder,
       dirty: holder === undefined ? [] : await readDirtyPaths(holder.path),
       busy: busyIn(facts, move.branch),
+      ontoBusy: settled ? busyIn(facts, move.onto) : undefined,
+      conflicts: settled ? { predicted: true, paths: await predictConflicts(root, fork, ontoSha, branch.tip) } : { predicted: false },
     });
   }
 
-  const [first] = levels;
   const tips = new Map<string, Sha>();
   for (const level of feature.levels) {
     const tip = branches.get(level.branch)?.tip;
@@ -72,6 +76,5 @@ export async function readRestack(ctx: ActionContext, facts: RepoFacts, feature:
     tips,
     trunk: facts.trunk,
     rewritten: rewrittenLevels(ctx.store, facts.commonDir, feature.levels.map((level) => level.branch)),
-    conflicts: first === undefined ? [] : await predictConflicts(root, first.fork, first.ontoSha, first.tip),
   };
 }
