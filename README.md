@@ -43,5 +43,5 @@ branch is. Errors print one line on stderr and exit 1.
 ## Requirements
 
 - Node.js 24 or newer
-- git 2.38 or newer
+- git 2.39 or newer
 - a repository with a working tree (bare repositories are not supported yet)

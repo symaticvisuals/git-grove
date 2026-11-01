@@ -93,7 +93,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
   }
 
   try {
-    await requireGitVersion([2, 38]);
+    await requireGitVersion([2, 39]);
     return await command(io);
   } catch (error) {
     const line = describeError(error);
