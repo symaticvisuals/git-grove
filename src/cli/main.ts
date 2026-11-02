@@ -16,6 +16,7 @@ import { describeCliError } from "./describe-cli-error.js";
 import { packageVersion } from "./package-version.js";
 import { realUiDeps } from "./real-ui-deps.js";
 import { runActionCommand } from "./run-action.js";
+import { stableNodePath } from "./stable-node-path.js";
 
 type Parsed = {
   values: {
@@ -172,7 +173,7 @@ function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command
   if (name === "status") return first === undefined ? (io) => statusCommand(io, { json }) : null;
   if (name === "pins") return first === "list" && extra === undefined && !json ? (io) => pinsCommand(io, second) : null;
   if (name === "install-guard") {
-    return first === undefined && !json ? async (io) => installGuardCommand(io, { node: process.execPath, bin: binPath(), home: homedir() }) : null;
+    return first === undefined && !json ? async (io) => installGuardCommand(io, { node: stableNodePath(), bin: binPath(), home: homedir() }) : null;
   }
   if (name === "check") {
     return first === "remove" && second !== undefined && extra === undefined

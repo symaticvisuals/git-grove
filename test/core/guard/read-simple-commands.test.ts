@@ -110,20 +110,65 @@ test("a word with an expansion is dynamic and one with an unquoted glob is a glo
   ]);
 });
 
-test("$(, backticks, eval and bash -c or sh -c with git or rm cannot be evaluated", () => {
+test("eval, bash -c or sh -c, a script on a shell's stdin, a process substitution and an unclosed substitution, with git or rm, cannot be evaluated", () => {
   for (const line of [
-    "git log $(git merge-base main HEAD)..HEAD",
-    "rm -rf `ls -d .worktrees/*`",
-    'git commit -m "$(cat msg.txt)"',
     "eval git reset --hard",
     'bash -c "git reset --hard"',
     "sh -c 'rm -rf .worktrees'",
     "bash -lc 'git worktree remove x'",
     "diff <(git show a:f) <(git show b:f)",
     "echo 'git reset --hard' | sh",
+    "git log $(git merge-base main HEAD",
+    "rm -rf `ls -d .worktrees/*",
+    'git commit -m "$(cat <<EOF\nnever closed',
   ]) {
     expect(readSimpleCommands(line, "/repo", HOME), line).toEqual({ evaluable: false });
   }
+});
+
+test("Claude Code's commit form, a here-document inside $( ), parses, and the commands around it are read", () => {
+  const line = "git commit --allow-empty -m \"$(cat <<'EOF'\nchore: tidy\n\nCo-written; with care (really)\nEOF\n)\" && git worktree remove --force .worktrees/precious";
+  expect(argvs(line)).toEqual([
+    ["cat"],
+    ["git", "commit", "--allow-empty", "-m", "$(cat <<'EOF'\nchore: tidy\n\nCo-written; with care (really)\nEOF\n)"],
+    ["git", "worktree", "remove", "--force", ".worktrees/precious"],
+  ]);
+  expect(commands(line)[1]?.words[4]?.dynamic).toBe(true);
+});
+
+test("the commands inside $( ) and backticks are read too, before the command holding them", () => {
+  expect(argvs('echo "started $(date)" && rm -rf .worktrees/precious')).toEqual([["date"], ["echo", "started $(date)"], ["rm", "-rf", ".worktrees/precious"]]);
+  expect(argvs("X=$(pwd) && rm -rf .worktrees/precious")).toEqual([["pwd"], ["rm", "-rf", ".worktrees/precious"]]);
+  expect(argvs("echo $(rm -rf .worktrees/precious)")).toEqual([["rm", "-rf", ".worktrees/precious"], ["echo", "$(rm -rf .worktrees/precious)"]]);
+  expect(argvs("echo `git status` && ls")).toEqual([["git", "status"], ["echo", "`git status`"], ["ls"]]);
+  expect(argvs('echo "$(echo "$(git log -1)")"')).toEqual([["git", "log", "-1"], ["echo", "$(git log -1)"], ["echo", '$(echo "$(git log -1)")']]);
+});
+
+test("$(( )) is arithmetic, not a command", () => {
+  expect(argvs("echo $((1+(2*3))); git reset --hard")).toEqual([["echo", "$((1+(2*3)))"], ["git", "reset", "--hard"]]);
+});
+
+test("a substitution runs in the same folder, and a cd inside it does not leak out", () => {
+  expect(cwds("cd sub && echo $(git status)")).toEqual(["/repo/sub", "/repo/sub"]);
+  expect(cwds("echo $(cd /tmp; git status) && git log")).toEqual(["/tmp", "/repo", "/repo"]);
+  expect(cwds('cd "$(git rev-parse --show-toplevel)" && git reset --hard')).toEqual(["/repo", null]);
+});
+
+test("a cd to a glob, and GIT_DIR or GIT_WORK_TREE before a command, leave the folder unknown", () => {
+  expect(cwds("cd .worktr* && rm -rf precious")).toEqual([null]);
+  expect(cwds("GIT_DIR=../../.git GIT_WORK_TREE=../dirty git reset --hard && git status")).toEqual([null, "/repo"]);
+  expect(cwds("env GIT_INDEX_FILE=/tmp/index git reset --hard")).toEqual([null]);
+  expect(cwds("GIT_COMMON_DIR=/x git reset --hard")).toEqual([null]);
+  expect(cwds("GIT_EDITOR=true git rebase main")).toEqual(["/repo"]);
+});
+
+test("a word whose braces expand to more than 256 words is dynamic", () => {
+  const [rm] = commands("rm -rf .worktrees/x{1..9}{1..9}{1..9} .worktrees/{a,b} .worktrees/{1..100000}");
+  expect(rm?.words.slice(2).map(({ dynamic, glob }) => ({ dynamic, glob }))).toEqual([
+    { dynamic: true, glob: true },
+    { dynamic: false, glob: true },
+    { dynamic: true, glob: true },
+  ]);
 });
 
 test("substitutions and shells without git or rm are evaluated", () => {

@@ -34,7 +34,6 @@ async function bin(args: string[], cwd: string): Promise<Spawned> {
 }
 
 beforeAll(async () => {
-  await execFileAsync(join(ROOT, "node_modules", ".bin", "tsc"), ["-p", "tsconfig.json"], { cwd: ROOT });
   home = await mkdtemp(join(tmpdir(), "git-grove-home-"));
   repo = await makeRepo();
   await repo.commit("base.txt", "base\n", "base");

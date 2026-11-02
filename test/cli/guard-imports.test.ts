@@ -39,9 +39,9 @@ test("the guard's entry never reaches the server, the dashboard or the CLI's mai
   expect([...graph.builtins].filter((name) => name === "node:sqlite" || name === "node:http")).toEqual([]);
 });
 
-test("bin.ts reaches the guard and main only through dynamic imports", async () => {
+test("bin.ts imports nothing statically: the guard, main and the warning filter are all dynamic imports", async () => {
   const bin = await readFile(join(SRC, "cli", "bin.ts"), "utf8");
   const dynamic = [...bin.matchAll(DYNAMIC)].map((match) => match[1]);
-  expect(dynamic).toEqual(expect.arrayContaining(["./run-guard.js", "./main.js"]));
-  expect((await staticGraph(join(SRC, "cli", "bin.ts"))).files.size).toBe(2);
+  expect(dynamic).toEqual(expect.arrayContaining(["./run-guard.js", "./main.js", "./quiet-sqlite-warning.js"]));
+  expect((await staticGraph(join(SRC, "cli", "bin.ts"))).files.size).toBe(1);
 });

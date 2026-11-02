@@ -27,6 +27,7 @@ export function installGuardCommand(io: CliIo, where: GuardInstallation): number
       JSON.stringify(hooks, null, 2),
       "",
       "git grove changed no file. Claude Code reads hooks when a session starts.",
+      "Run install-guard again after you change Node versions.",
       "To check it works: in a new Claude Code session, ask Claude to run git worktree remove on a worktree that holds a file only it has, such as an ignored .local/seed.sql. The guard refuses and names the file.",
       "",
     ].join("\n"),

@@ -26,4 +26,5 @@ export type GuardCheck =
   | { kind: "worktree-remove"; cwd: string; verb: string; text: string; target: string }
   | { kind: "recursive-rm"; cwd: string; verb: string; text: string; paths: ShellWord[] }
   | { kind: "discard"; cwd: string; verb: string; text: string; side: DiscardSide; scope: DiscardScope; pathspecs: string[]; moveTo: string | null }
+  | { kind: "checkout-operands"; cwd: string; verb: string; text: string; operands: string[] }
   | { kind: "pin"; cwd: string; verb: string; text: string; pins: PinRequest[] };

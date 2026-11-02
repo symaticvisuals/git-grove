@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { describeError } from "../../../src/core/describe-error.js";
 import { GitError } from "../../../src/core/git/git.error.js";
+import { gitSignal } from "../../../src/core/git/git-signal.js";
 import { runGit } from "../../../src/core/git/run-git.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
 
@@ -129,4 +130,21 @@ test("a git killed by a signal rejects with a GitError", async () => {
 test("git runs with GIT_NO_LAZY_FETCH=1, so a partial clone never fetches", async () => {
   const result = await runGit(["-c", "alias.lazy=!printenv GIT_NO_LAZY_FETCH", "lazy"], { cwd: repo.path });
   expect(result.stdout).toBe("1\n");
+});
+
+test("a git call stops when its signal aborts, given directly or held by gitSignal", async () => {
+  await repo.commit("a.txt", "a", "add a");
+  for (const start of [
+    (signal: AbortSignal) => runGit(["cat-file", "--batch"], { cwd: repo.path, signal }),
+    (signal: AbortSignal) => gitSignal.run(signal, () => runGit(["cat-file", "--batch"], { cwd: repo.path })),
+  ]) {
+    const controller = new AbortController();
+    const started = Date.now();
+    const waiting = start(controller.signal).catch((e: unknown) => e);
+    setTimeout(() => controller.abort(), 50);
+    const error = await waiting;
+    expect(error).toBeInstanceOf(GitError);
+    expect(describeError(error)).toBe("git-grove: git cat-file --batch was stopped: its caller gave up");
+    expect(Date.now() - started).toBeLessThan(5000);
+  }
 });

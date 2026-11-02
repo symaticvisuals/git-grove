@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { GitError } from "./git.error.js";
+import { gitSignal } from "./git-signal.js";
 
 export type RunGitOptions = {
   cwd: string;
@@ -8,6 +9,7 @@ export type RunGitOptions = {
   env?: Record<string, string>;
   write?: boolean;
   allowFailure?: boolean;
+  signal?: AbortSignal;
 };
 
 export type RunGitResult = { stdout: string; stderr: string; code: number };
@@ -35,6 +37,7 @@ function killSignal(error: Error): string | null {
 /** Why git did not exit on its own, or null when the failure is not git's (such as no git on PATH). */
 function abortReason(error: Error, cwd: string, limit: number): string | null {
   if (errorCode(error) === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") return `printed more than ${limit} bytes`;
+  if (errorCode(error) === "ABORT_ERR") return "was stopped: its caller gave up";
   const signal = killSignal(error);
   if (signal !== null) return `was killed by ${signal}`;
   if (errorCode(error) === "ENOENT" && !existsSync(cwd)) return `cannot run: the folder ${cwd} does not exist`;
@@ -47,7 +50,8 @@ function abortReason(error: Error, cwd: string, limit: number): string | null {
  * Read calls get `--no-optional-locks` so watching never contends with the user's own git;
  * pass `write: true` for commands that change the repository.
  * Rejects with GitError on a non-zero exit unless `allowFailure` is set, and always when git could not finish:
- * `cwd` does not exist, git was killed, or it printed more than grove reads.
+ * `cwd` does not exist, git was killed, it printed more than grove reads, or `signal` (by default the one
+ * `gitSignal` holds) aborted it.
  */
 export function runGit(args: readonly string[], options: RunGitOptions): Promise<RunGitResult> {
   const fullArgs = options.write ? [...args] : ["--no-optional-locks", ...args];
@@ -61,6 +65,7 @@ export function runGit(args: readonly string[], options: RunGitOptions): Promise
         maxBuffer: limit,
         encoding: "utf8",
         env: { ...process.env, ...options.env, GIT_NO_LAZY_FETCH: "1" },
+        signal: options.signal ?? gitSignal.getStore(),
       },
       (error, stdout, stderr) => {
         if (!error) {

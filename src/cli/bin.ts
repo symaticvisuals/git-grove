@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-import "./quiet-sqlite-warning.js";
-
 const argv = process.argv.slice(2);
 
 function firstLine(error: unknown): string {
@@ -11,6 +9,7 @@ function firstLine(error: unknown): string {
 if (argv[0] === "guard") {
   let code = 0;
   try {
+    await import("./quiet-sqlite-warning.js");
     const { runGuard } = await import("./run-guard.js");
     code = await runGuard(argv.slice(1), {
       out: (s) => process.stdout.write(s),
@@ -24,7 +23,8 @@ if (argv[0] === "guard") {
   process.stderr.write("", () => process.exit(code));
 } else {
   try {
-    // Loaded after the warning hook: main.js reaches node:sqlite, which a static import would load first.
+    // The warning filter loads first: main.js reaches node:sqlite, whose warning it silences.
+    await import("./quiet-sqlite-warning.js");
     const { run } = await import("./main.js");
     process.exitCode = await run(argv, {
       out: (s) => process.stdout.write(s),

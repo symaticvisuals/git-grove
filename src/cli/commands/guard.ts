@@ -42,27 +42,30 @@ async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | typeof
 /**
  * Runs `git grove guard --claude` on a `PreToolUse` hook's stdin: exits 2 with the reason on stderr to block, and 0
  * with nothing on stdout to allow. A tool other than Bash, or no command, is allowed silently. It fails open: stdin
- * that is not the hook's JSON, an error inside grove, or an evaluation past `deadlineMs` allows with one warning line.
- * A line the guard cannot read is allowed with one line saying so. Blocks and new pins are recorded as activity.
+ * that is not the hook's JSON, an error inside grove, or an evaluation past `deadlineMs` allows with one warning line,
+ * and the deadline stops the git calls still running. A line the guard cannot read is allowed with one line saying so.
+ * Blocks and new pins are recorded as activity, after the answer is written.
  */
 export async function guardCommand(io: CliIo, stdin: string, deps: GuardDeps): Promise<number> {
   const input = readHookInput(stdin);
   if (input === null) return allowing(io, "stdin is not a hook's JSON");
   if (input.toolName !== "Bash" || input.command === null || input.command.trim() === "") return ALLOW;
 
+  const stop = new AbortController();
   let decision: GuardDecision | typeof LATE;
   try {
-    decision = await withDeadline(deps.evaluate({ command: input.command, cwd: input.cwd ?? io.cwd, home: deps.home }), deps.deadlineMs);
+    const evaluation = deps.evaluate({ command: input.command, cwd: input.cwd ?? io.cwd, home: deps.home, signal: stop.signal });
+    decision = await withDeadline(evaluation, deps.deadlineMs);
   } catch (error) {
     return allowing(io, reasonOf(error));
   }
-  if (decision === LATE) return allowing(io, `took longer than ${deps.deadlineMs / 1000} s`);
-
-  await deps.record(decision, { sessionId: input.sessionId, command: input.command }).catch(() => undefined);
-  if (decision.verdict === "block") {
-    io.err(`${decision.message}\n`);
-    return BLOCK;
+  if (decision === LATE) {
+    stop.abort();
+    return allowing(io, `took longer than ${deps.deadlineMs / 1000} s`);
   }
-  if (decision.unchecked) io.err("git grove cannot check this command\n");
-  return ALLOW;
+
+  if (decision.verdict === "block") io.err(`${decision.message}\n`);
+  else if (decision.unchecked) io.err("git grove cannot check this command\n");
+  await deps.record(decision, { sessionId: input.sessionId, command: input.command }).catch(() => undefined);
+  return decision.verdict === "block" ? BLOCK : ALLOW;
 }

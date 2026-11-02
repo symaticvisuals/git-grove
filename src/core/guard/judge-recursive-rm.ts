@@ -1,4 +1,4 @@
-import { realpath, stat } from "node:fs/promises";
+import { lstat, realpath, stat } from "node:fs/promises";
 import { dirname, join, matchesGlob, resolve, sep } from "node:path";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
 import { removalVerdict } from "../facts/removal-verdict.js";
@@ -24,6 +24,8 @@ async function targetOf(cwd: string, word: ShellWord): Promise<Target | null> {
   const parts = wanted.split(sep);
   const wild = word.glob ? parts.findIndex((part) => WILDCARD.test(part)) : -1;
   if (wild === -1) {
+    const link = (await lstat(wanted).catch(() => null))?.isSymbolicLink() === true;
+    if (link && !word.text.endsWith("/")) return null;
     const real = await realOrNull(wanted);
     if (real === null || !(await stat(real)).isDirectory()) return null;
     return { shown: real, probe: real, holds: (path) => path === real || path.startsWith(real + sep) };
@@ -44,10 +46,11 @@ async function listWorktrees(cwd: string): Promise<RawWorktree[] | null> {
 }
 
 async function judgeRepo(probe: string, from: string, target: Target, inside: Inside[], main: RawWorktree): Promise<GuardBlock | null> {
+  const view = { from, root: (await realOrNull(main.path)) ?? main.path };
   if (inside.some(({ raw }) => raw === main)) {
     const head = await readWorktreeHead(probe).catch(() => null);
     return {
-      message: removalBlockMessage(from, target.shown, [], main.path),
+      message: removalBlockMessage(view, target.shown, [], main.path),
       verb: "rm -r",
       subject: head === null ? null : { commonDir: head.commonDir, root: head.root, worktree: main.path, branch: main.branch },
     };
@@ -63,7 +66,7 @@ async function judgeRepo(probe: string, from: string, target: Target, inside: In
   const [first] = unsafe;
   if (first === undefined) return null;
   return {
-    message: removalBlockMessage(from, target.shown, unsafe, null),
+    message: removalBlockMessage(view, target.shown, unsafe, null),
     verb: "rm -r",
     subject: { commonDir: facts.commonDir, root: facts.root, worktree: first.path, branch: first.branch },
   };
@@ -71,7 +74,8 @@ async function judgeRepo(probe: string, from: string, target: Target, inside: In
 
 /**
  * Blocks a recursive `rm` of a path that is a linked worktree, or holds one, unless every worktree it would delete is
- * safe to remove; a path holding the main worktree is always blocked. Paths that do not exist or hold no worktree
+ * safe to remove; a path holding the main worktree is always blocked. A symlink named without a trailing slash is the
+ * link itself, which `rm` removes alone. Paths that do not exist or hold no worktree
  * cost one `git worktree list` per repository they could belong to: the one around `cwd` and the one around the path.
  */
 export async function judgeRecursiveRm(check: GuardCheck & { kind: "recursive-rm" }, from: string): Promise<GuardBlock | null> {

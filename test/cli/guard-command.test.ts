@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { type GuardDeps, guardCommand } from "../../src/cli/commands/guard.js";
 import { recordGuardActivity } from "../../src/cli/record-guard-activity.js";
-import { evaluateCommandLine } from "../../src/core/guard/evaluate-command-line.js";
+import { evaluateCommandLine, type GuardInput } from "../../src/core/guard/evaluate-command-line.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
 
@@ -139,8 +139,29 @@ test("an evaluation past its deadline is allowed, with a warning", async () => {
   });
 });
 
+test("the deadline stops the git calls the evaluation still has running", async () => {
+  let signal: AbortSignal | undefined;
+  const evaluate = (input: GuardInput): Promise<never> => {
+    signal = input.signal;
+    return new Promise(() => undefined);
+  };
+  await guard(hookJson("git worktree remove x"), { evaluate, deadlineMs: 50 });
+  expect(signal?.aborted).toBe(true);
+});
+
+test("a block reaches stderr before its activity is recorded", async () => {
+  await preciousWorktree();
+  const order: string[] = [];
+  const record = async (): Promise<void> => {
+    order.push("record");
+  };
+  const code = await guardCommand({ out: () => undefined, err: () => order.push("stderr"), cwd: root }, hookJson("git worktree remove x"), { ...REAL, record });
+  expect(code).toBe(2);
+  expect(order).toEqual(["stderr", "record"]);
+});
+
 test("a line the guard cannot read is allowed, with one line saying so", async () => {
-  expect(await guard(hookJson("git log $(git merge-base main HEAD)..HEAD"))).toEqual({
+  expect(await guard(hookJson("bash -c 'git reset --hard'"))).toEqual({
     code: 0,
     out: "",
     err: "git grove cannot check this command\n",

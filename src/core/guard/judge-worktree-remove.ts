@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { findWorktree } from "../facts/find-worktree.js";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
 import { removalVerdict } from "../facts/removal-verdict.js";
@@ -15,7 +16,7 @@ export async function judgeWorktreeRemove(check: GuardCheck & { kind: "worktree-
   const verdict = await removalVerdict(facts, worktree);
   if (verdict.ok) return null;
   return {
-    message: removalBlockMessage(from, worktree.path, [{ path: worktree.path, verdict }], null),
+    message: removalBlockMessage({ from, root: await realpath(facts.root).catch(() => facts.root) }, worktree.path, [{ path: worktree.path, verdict }], null),
     verb: check.verb,
     subject: { commonDir: facts.commonDir, root: facts.root, worktree: worktree.path, branch: worktree.branch },
   };

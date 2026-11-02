@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { shellWord } from "../actions/shell-word.js";
 import type { DiscardScope, DiscardSide, GuardCheck, PinRequest } from "./guard-check.types.js";
+import { groveArgs } from "./grove-args.js";
 import { type GitCall, parseGitCall } from "./parse-git-call.js";
 import { readOptions } from "./read-options.js";
 import type { ShellWord, SimpleCommand } from "./shell-line.types.js";
@@ -70,6 +71,10 @@ function discard(at: At, { verb, text, side, scope, pathspecs, moveTo }: Discard
   return at((cwd) => ({ kind: "discard", cwd, verb, text, side, scope, pathspecs: texts(pathspecs), moveTo: moveTo?.text ?? null }));
 }
 
+function discardTree(at: At, verb: string, text: string): GuardCheck {
+  return discard(at, { verb, text, side: "all", scope: "tree", pathspecs: [] });
+}
+
 function pin(at: At, verb: string, text: string, names: readonly ShellWord[], pins: PinRequest[]): GuardCheck {
   if (anyDynamic(names)) return UNCHECKED;
   return at((cwd) => ({ kind: "pin", cwd, verb, text, pins }));
@@ -77,7 +82,7 @@ function pin(at: At, verb: string, text: string, names: readonly ShellWord[], pi
 
 function checkout(at: At, args: readonly ShellWord[], text: string): GuardCheck {
   const read = readOptions(args, new Set(["-b", "-B", "--orphan"]));
-  if (hasAny(read.options, [...CONFLICT_TOOLS, "-b", "-B", "--orphan", "--detach", "-p", "--patch"])) return NONE;
+  if (hasAny(read.options, [...CONFLICT_TOOLS, "-b", "-B", "--orphan", "-p", "--patch"])) return NONE;
   const verb = "git checkout";
   const fromFile = read.options.has("--pathspec-from-file");
   if (read.afterDashes !== null || fromFile) {
@@ -85,10 +90,16 @@ function checkout(at: At, args: readonly ShellWord[], text: string): GuardCheck 
     if (pathspecs.length === 0 && !fromFile) return NONE;
     return discard(at, { verb, text, side: read.operands.length > 0 ? "all" : "unstaged", scope: "paths", pathspecs });
   }
-  if (!read.operands.some((word) => word.text === ".")) return NONE;
-  const [first, ...rest] = read.operands;
-  const fromTree = first !== undefined && first.text !== "." && rest.length > 0;
-  return discard(at, { verb, text, side: fromTree ? "all" : "unstaged", scope: "paths", pathspecs: fromTree ? rest : read.operands });
+  if (hasAny(read.options, ["-f", "--force"])) return discardTree(at, verb, text);
+  if (read.options.has("--detach") || read.operands.length === 0) return NONE;
+  if (read.operands.some((word) => word.text === ".")) {
+    const [first, ...rest] = read.operands;
+    const fromTree = first !== undefined && first.text !== "." && rest.length > 0;
+    return discard(at, { verb, text, side: fromTree ? "all" : "unstaged", scope: "paths", pathspecs: fromTree ? rest : read.operands });
+  }
+  if (anyDynamic(read.operands)) return UNCHECKED;
+  const operands = texts(read.operands);
+  return at((cwd) => ({ kind: "checkout-operands", cwd, verb, text, operands }));
 }
 
 function restore(at: At, args: readonly ShellWord[], text: string): GuardCheck {
@@ -160,6 +171,10 @@ function git(call: GitCall, text: string): GuardCheck {
       return checkout(at, args, text);
     case "restore":
       return restore(at, args, text);
+    case "switch": {
+      const forced = hasAny(readOptions(args, new Set(["-c", "-C", "--orphan"])).options, ["-f", "--force", "--discard-changes"]);
+      return forced ? discardTree(at, "git switch", text) : NONE;
+    }
     case "rebase":
       return rebase(at, args, text);
     case "commit":
@@ -175,16 +190,17 @@ function git(call: GitCall, text: string): GuardCheck {
 
 /**
  * Decides what one simple command needs checked before it runs, from its words alone: a worktree removal, a
- * recursive `rm`, a command that discards uncommitted changes, one whose tips should be pinned first, or one of
- * grove's own commands that only a person may run. A guarded command whose folder or arguments the guard cannot
- * know is `unchecked`.
+ * recursive `rm`, a command that discards uncommitted changes, a `checkout` whose operands git must sort into a
+ * commit and paths, one whose tips should be pinned first, or one of grove's own commands that only a person may
+ * run, however git grove is started. A guarded command whose folder or arguments the guard cannot know is `unchecked`.
  */
 export function classifyCommand(command: SimpleCommand): GuardCheck {
   const [name, ...rest] = command.words;
   if (name === undefined) return NONE;
   const program = basename(name.text);
   if (program === "rm") return recursiveRm(rest, command.cwd, shown(command.words));
-  if (program === "git-grove") return grove(rest, command.cwd);
+  const direct = groveArgs(command.words);
+  if (direct !== null) return grove(direct, command.cwd);
   if (program !== "git") return NONE;
   const call = parseGitCall(rest, command.cwd);
   return call === null ? NONE : git(call, shown(command.words));

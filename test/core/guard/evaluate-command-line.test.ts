@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -80,6 +80,21 @@ test("git -C <repo> worktree remove -f <name> from the parent folder is blocked"
   expect(message).toContain(".local/seed.sql");
 });
 
+test("from outside the repository, the rescue hint runs git grove through git -C", async () => {
+  await preciousWorktree();
+  const outside = dirname(root);
+  const hint = `Run: git -C ${basename(root)} grove rm --rescue .worktrees/x`;
+  expect(await expectBlocked(`git -C ${basename(root)} worktree remove -f x`, outside)).toContain(hint);
+  expect(await expectBlocked(`rm -rf ${basename(root)}/.worktrees/x`, outside)).toContain(hint);
+});
+
+test("rm -rf of a symlink to a worktree removes only the link and is allowed; with a trailing slash it is blocked", async () => {
+  await preciousWorktree();
+  await symlink(join(root, ".worktrees", "x"), join(root, "link"));
+  await expectAllowed("rm -rf link");
+  expect(await expectBlocked("rm -rf link/")).toContain("not safe to remove");
+});
+
 test("cd .worktrees && rm -rf x is blocked, with the path as seen from where the agent stands", async () => {
   await preciousWorktree();
   const message = await expectBlocked("cd .worktrees && rm -rf x");
@@ -140,11 +155,11 @@ test("from a folder inside the worktree, the block still names this worktree", a
 test("a git stash earlier in the same line does not let a discard through", async () => {
   await writeFile(join(root, "base.txt"), "edited\n");
   for (const line of ["git stash && git reset --hard", "git stash; git checkout -- .", "git stash push -- base.txt && git reset --hard"]) {
-    expect(await expectBlocked(line), line).toContain("run git stash on its own first, then retry");
+    expect(await expectBlocked(line), line).toContain("on its own first, then retry");
   }
 });
 
-/** Leaves main mid-merge with base.txt conflicted and other.txt changed locally before the merge. */
+/** Leaves main mid-merge with base.txt conflicted. */
 async function conflictedMerge(): Promise<void> {
   await repo.branch("theirs");
   await repo.switch("theirs");
@@ -172,6 +187,66 @@ test("a path-scoped discard does not count unmerged paths; reset --hard does", a
   await conflictedMerge();
   await expectAllowed("git checkout -- base.txt");
   expect(await expectBlocked("git reset --hard")).toContain("has 1 uncommitted change that git reset --hard would discard");
+});
+
+test("a discard mid-operation is blocked with the abort that keeps your own changes", async () => {
+  await conflictedMerge();
+  expect(await expectBlocked("git reset --hard")).toBe(
+    "git grove blocked: this worktree has 1 uncommitted change that git reset --hard would discard. " +
+      "A merge is in progress. To drop it and keep your own uncommitted changes, run: git merge --abort",
+  );
+  await repo.git("merge", "--abort");
+
+  await repo.switch("theirs");
+  await repo.git("rebase", "main").catch(() => undefined);
+  expect(await expectBlocked("git reset --hard")).toContain("A rebase is in progress. To drop it and keep your own uncommitted changes, run: git rebase --abort");
+  await repo.git("rebase", "--abort");
+
+  await repo.switch("main");
+  await repo.git("cherry-pick", "theirs").catch(() => undefined);
+  expect(await expectBlocked("git checkout -f")).toContain("A cherry-pick is in progress. To drop it and keep your own uncommitted changes, run: git cherry-pick --abort");
+  await repo.git("cherry-pick", "--abort");
+
+  await repo.commit("base.txt", "later\n", "later");
+  await repo.git("revert", "--no-edit", "HEAD~1").catch(() => undefined);
+  expect(await expectBlocked("git reset --hard")).toContain("A revert is in progress. To drop it and keep your own uncommitted changes, run: git revert --abort");
+});
+
+test("git checkout <path> without -- is a discard; a lone branch name is a switch", async () => {
+  await repo.branch("feat");
+  await writeFile(join(root, "base.txt"), "edited\n");
+  expect(await expectBlocked("git checkout base.txt")).toContain("has 1 uncommitted change that git checkout base.txt would discard");
+  expect(await expectBlocked("git checkout HEAD base.txt")).toContain("git checkout HEAD base.txt would discard");
+  await expectAllowed("git checkout feat");
+  await expectAllowed("git checkout .gitignore");
+});
+
+test("checkout -f, switch -f and switch --discard-changes are blocked while there are changes", async () => {
+  await writeFile(join(root, "base.txt"), "edited\n");
+  for (const line of ["git checkout -f", "git checkout -f HEAD~1", "git checkout --force --detach", "git switch -f --detach HEAD", "git switch --discard-changes --detach HEAD"]) {
+    expect(await expectBlocked(line), line).toContain("Commit them, or run git stash on its own first, then retry.");
+  }
+});
+
+test("a discard of named paths says how to keep a copy of just those paths", async () => {
+  await writeFile(join(root, "base.txt"), "edited\n");
+  expect(await expectBlocked("git checkout -- base.txt")).toBe(
+    "git grove blocked: this worktree has 1 uncommitted change that git checkout -- base.txt would discard. " +
+      "To keep a copy, run git stash push -- base.txt on its own first, then retry.",
+  );
+});
+
+test("changes inside a submodule do not count against a reset of the superproject", async () => {
+  const library = await makeRepo();
+  try {
+    await library.commit("lib.txt", "lib\n", "lib");
+    await repo.git("-c", "protocol.file.allow=always", "submodule", "add", "-q", library.path, "lib");
+    await repo.git("commit", "-q", "-m", "add lib");
+    await writeFile(join(root, "lib", "lib.txt"), "edited inside the submodule\n");
+    await expectAllowed("git reset --hard");
+  } finally {
+    await library.cleanup();
+  }
 });
 
 test("git reset --hard HEAD~1 on a clean tree is allowed and pins the old tip", async () => {
@@ -264,8 +339,58 @@ test("the first block in a line wins and nothing after it is pinned", async () =
 });
 
 test("a line the guard cannot read is allowed and marked unchecked", async () => {
-  expect(await expectAllowed("git log $(git merge-base main HEAD)..HEAD")).toEqual({ verdict: "allow", unchecked: true, pins: [] });
+  expect(await expectAllowed("eval git reset --hard")).toEqual({ verdict: "allow", unchecked: true, pins: [] });
   expect(await expectAllowed('rm -rf "$TMPDIR/x"')).toEqual({ verdict: "allow", unchecked: true, pins: [] });
+  expect(await expectAllowed('rm -rf "$(git rev-parse --show-toplevel)/.worktrees/x"')).toEqual({ verdict: "allow", unchecked: true, pins: [] });
+});
+
+const COMMIT_FORM = "git commit --allow-empty -m \"$(cat <<'EOF'\nchore: tidy\n\nWith care.\nEOF\n)\"";
+
+test("the commands around and inside a substitution are checked, Claude Code's commit form included", async () => {
+  await preciousWorktree("precious");
+  await writeFile(join(root, "base.txt"), "edited\n");
+  for (const line of [
+    `${COMMIT_FORM} && git worktree remove --force .worktrees/precious`,
+    'echo "started $(date)" && rm -rf .worktrees/precious',
+    "X=$(pwd) && rm -rf .worktrees/precious",
+    "echo $((1+1)); git reset --hard",
+    "echo $(rm -rf .worktrees/precious)",
+    "echo `rm -rf .worktrees/precious`",
+  ]) {
+    expect((await evaluate(line)).verdict, line).toBe("block");
+  }
+});
+
+test("Claude Code's commit form followed by a force push pins the branch", async () => {
+  const remote = await mkdtemp(join(tmpdir(), "git-grove-remote-"));
+  try {
+    await repo.git("init", "--bare", "-b", "main", remote);
+    await repo.git("remote", "add", "origin", remote);
+    await repo.branch("feat");
+    await repo.switch("feat");
+    const pushed = await repo.commit("feat.txt", "feat\n", "feat");
+    await repo.git("push", "-q", "origin", "feat");
+    await repo.git("commit", "--amend", "-q", "-m", "feat, amended");
+    const decision = await expectAllowed(`${COMMIT_FORM} && git push --force origin feat`);
+    expect(decision).toMatchObject({ unchecked: false, pins: [expect.objectContaining({ branch: "feat", verb: "git push --force" })] });
+    expect((await listPins(root, "feat")).map((pin) => pin.sha)).toEqual([pushed]);
+  } finally {
+    await rm(remote, { recursive: true, force: true });
+  }
+});
+
+test("a cd to a glob or a GIT_DIR prefix leaves the command unchecked, not judged in the wrong folder", async () => {
+  await preciousWorktree("precious");
+  expect(await expectAllowed("cd .worktr* && rm -rf precious")).toMatchObject({ unchecked: true });
+  await writeFile(join(root, "base.txt"), "edited\n");
+  expect(await expectAllowed(`GIT_DIR=${root}/.git GIT_WORK_TREE=${root} git reset --hard`, tmpdir())).toMatchObject({ unchecked: true });
+});
+
+test("an rm whose braces expand past 256 words is unchecked, and answers at once", async () => {
+  await preciousWorktree();
+  const started = Date.now();
+  expect(await expectAllowed("rm -rf .worktrees/x{1..9}{1..9}{1..9}{1..9}{1..9}")).toMatchObject({ unchecked: true });
+  expect(Date.now() - started).toBeLessThan(1000);
 });
 
 test("commands that are not guarded run no git at all", async () => {

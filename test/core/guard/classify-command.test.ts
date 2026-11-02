@@ -70,10 +70,25 @@ test("reset --hard, checkout of paths and restore of the worktree discard change
   expect(check("git restore -s HEAD --staged --worktree -- a")).toMatchObject({ kind: "discard", side: "all", pathspecs: ["a"] });
 });
 
-test("restore of the index only, a branch switch and other resets are not discards", () => {
-  expect(kinds(["git restore --staged x", "git restore -S x", "git checkout main", "git checkout -b new main", "git reset HEAD~1", "git reset --soft HEAD~1", "git restore"])).toEqual(
+test("restore of the index only, a new branch and other resets are not discards", () => {
+  expect(kinds(["git restore --staged x", "git restore -S x", "git checkout -b new main", "git reset HEAD~1", "git reset --soft HEAD~1", "git restore", "git switch main"])).toEqual(
     ["none", "none", "none", "none", "none", "none", "none"],
   );
+});
+
+test("checkout or switch with -f, --force or --discard-changes discards every change in the tree", () => {
+  for (const line of ["git checkout -f", "git checkout -f HEAD~1", "git checkout --force --detach", "git switch -f --detach HEAD", "git switch --discard-changes --detach HEAD", "git switch -f main"]) {
+    expect(check(line), line).toMatchObject({ kind: "discard", side: "all", scope: "tree", pathspecs: [], moveTo: null });
+  }
+  expect(check("git checkout -f -- a.txt")).toMatchObject({ kind: "discard", scope: "paths", pathspecs: ["a.txt"] });
+});
+
+test("a checkout of operands without -- is left for git to tell a commit from a path", () => {
+  expect(check("git checkout a.txt")).toMatchObject({ kind: "checkout-operands", cwd: "/repo", operands: ["a.txt"] });
+  expect(check("git checkout main")).toMatchObject({ kind: "checkout-operands", operands: ["main"] });
+  expect(check("git checkout HEAD a.txt b.txt")).toMatchObject({ kind: "checkout-operands", operands: ["HEAD", "a.txt", "b.txt"] });
+  expect(check('git checkout "$BRANCH"').kind).toBe("unchecked");
+  expect(check("git checkout").kind).toBe("none");
 });
 
 test("git stash is not guarded, and earns no credit for a later discard; stash drop and clear are allowed for now", () => {
@@ -155,6 +170,21 @@ test("grove's own ack, pins prune and rm --force are for people", () => {
     "none",
     "none",
   ]);
+});
+
+test("grove's people-only commands are seen through npx, pnpm dlx, bunx and node running its bin", () => {
+  for (const line of [
+    "npx @deepanshugoel/git-grove ack precious",
+    "npx -y @deepanshugoel/git-grove@0.2.0 pins prune",
+    "npx git-grove ack feat",
+    "pnpm dlx @deepanshugoel/git-grove rm --force .worktrees/x",
+    "bunx git-grove ack feat",
+    "node /usr/local/lib/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js ack feat",
+    "node --no-warnings ~/src/git-grove/dist/cli/bin.js pins prune",
+  ]) {
+    expect(check(line).kind, line).toBe("people-only");
+  }
+  expect(kinds(["npx @deepanshugoel/git-grove status", "npx prettier --write .", "node scripts/build.mjs ack", "pnpm dlx git-grove rm --rescue x"])).toEqual(["none", "none", "none", "none"]);
 });
 
 test("anything else is not guarded", () => {

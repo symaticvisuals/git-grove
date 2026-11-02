@@ -1,14 +1,12 @@
-import { execFile, spawn } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
-const execFileAsync = promisify(execFile);
 const ROOT = join(import.meta.dirname, "..", "..");
 const BIN = join(ROOT, "dist", "cli", "bin.js");
 
@@ -37,7 +35,6 @@ function runBin(args: string[], stdin: string, cwd: string): Promise<Spawned> {
 }
 
 beforeAll(async () => {
-  await execFileAsync(join(ROOT, "node_modules", ".bin", "tsc"), ["-p", "tsconfig.json"], { cwd: ROOT });
   home = await mkdtemp(join(tmpdir(), "git-grove-home-"));
   repo = await makeRepo();
   root = await realpath(repo.path);
@@ -73,6 +70,29 @@ test("guard --claude exits 0 with one warning line for stdin it cannot read", as
     stdout: "",
     stderr: "git-grove guard: could not check (stdin is not a hook's JSON); allowing\n",
   });
+});
+
+test("a broken install, bin.js with none of its modules, still allows from the hook with one warning", async () => {
+  const lone = await mkdtemp(join(tmpdir(), "git-grove-lone-bin-"));
+  try {
+    await copyFile(BIN, join(lone, "bin.js"));
+    await writeFile(join(lone, "package.json"), '{"type":"module"}\n');
+    const result = await new Promise<Spawned>((resolve, reject) => {
+      const child = spawn(process.execPath, [join(lone, "bin.js"), "guard", "--claude"], { cwd: root, env: { ...process.env, HOME: home } });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+      child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ code, stdout, stderr }));
+      child.stdin.end(hookJson("git worktree remove --force .worktrees/old-onboarding", root));
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toMatch(/^git-grove guard: could not check \([^\n]+\); allowing\n$/);
+  } finally {
+    await rm(lone, { recursive: true, force: true });
+  }
 });
 
 test("guard without --claude prints its usage and exits 1", async () => {

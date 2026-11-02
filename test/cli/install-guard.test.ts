@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { installGuardCommand } from "../../src/cli/commands/install-guard.js";
@@ -13,6 +13,7 @@ const ROOT = join(import.meta.dirname, "..", "..");
 const BIN = join(ROOT, "dist", "cli", "bin.js");
 
 let home: string;
+let nodes: string;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -35,12 +36,17 @@ function jsonBlock(out: string): unknown {
   return JSON.parse(out.slice(start, end));
 }
 
-async function installGuard(args: string[] = []): Promise<{ code: number; stdout: string; stderr: string }> {
-  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+function hookCommand(out: string): unknown {
+  return at(jsonBlock(out), "hooks", "PreToolUse", 0, "hooks", 0, "command");
+}
+
+/** Runs the built bin's install-guard with a temp HOME and `nodes`, holding a link to this Node, first on PATH. */
+async function installGuard(): Promise<{ code: number; stdout: string; stderr: string }> {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, PATH: `${nodes}${delimiter}${process.env["PATH"] ?? ""}` };
   delete env["GIT_GROVE_HOME"];
   delete env["CLAUDE_CONFIG_DIR"];
   try {
-    const { stdout, stderr } = await execFileAsync(process.execPath, [BIN, "install-guard", ...args], { cwd: home, env, encoding: "utf8" });
+    const { stdout, stderr } = await execFileAsync(process.execPath, [BIN, "install-guard"], { cwd: home, env, encoding: "utf8" });
     return { code: 0, stdout, stderr };
   } catch (error) {
     const code = error instanceof Error && "code" in error && typeof error.code === "number" ? error.code : -1;
@@ -48,13 +54,24 @@ async function installGuard(args: string[] = []): Promise<{ code: number; stdout
   }
 }
 
-beforeAll(async () => {
-  await execFileAsync(join(ROOT, "node_modules", ".bin", "tsc"), ["-p", "tsconfig.json"], { cwd: ROOT });
-  home = await mkdtemp(join(tmpdir(), "git-grove-user-"));
-}, 60_000);
-afterAll(() => rm(home, { recursive: true, force: true }));
+function install(node: string, bin: string): { code: number; out: string; err: string } {
+  const out: string[] = [];
+  const err: string[] = [];
+  const code = installGuardCommand({ out: (s) => out.push(s), err: (s) => err.push(s), cwd: "/" }, { node, bin, home: "/Users/robin" });
+  return { code, out: out.join(""), err: err.join("") };
+}
 
-test("install-guard prints a valid hook block whose command is this Node and this bin, by absolute path", async () => {
+beforeAll(async () => {
+  home = await mkdtemp(join(tmpdir(), "git-grove-user-"));
+  nodes = await mkdtemp(join(tmpdir(), "git-grove-nodes-"));
+  await symlink(process.execPath, join(nodes, "node"));
+});
+afterAll(async () => {
+  await rm(home, { recursive: true, force: true });
+  await rm(nodes, { recursive: true, force: true });
+});
+
+test("install-guard prints a valid hook block that runs the node on PATH and this bin, by absolute path", async () => {
   const result = await installGuard();
   expect(result.code).toBe(0);
   expect(result.stdout).toContain(`Add this to ${join(home, ".claude", "settings.json")}`);
@@ -62,9 +79,8 @@ test("install-guard prints a valid hook block whose command is this Node and thi
   expect(at(block, "hooks", "PreToolUse", 0, "matcher")).toBe("Bash");
   expect(at(block, "hooks", "PreToolUse", 0, "hooks", 0, "type")).toBe("command");
   expect(at(block, "hooks", "PreToolUse", 0, "hooks", 0, "timeout")).toBe(10);
-  const command = at(block, "hooks", "PreToolUse", 0, "hooks", 0, "command");
-  expect(command).toBe(`${process.execPath} ${BIN} guard --claude`);
-  expect(isAbsolute(process.execPath) && isAbsolute(BIN)).toBe(true);
+  expect(hookCommand(result.stdout)).toBe(`${join(nodes, "node")} ${BIN} guard --claude`);
+  expect(result.stdout).toContain("Run install-guard again after you change Node versions.");
   expect(result.stdout).toContain("To check it works");
 });
 
@@ -74,26 +90,25 @@ test("install-guard writes nothing under HOME", async () => {
   expect(await readdir(home, { recursive: true })).toEqual(before);
 });
 
-test("install-guard quotes paths that hold spaces", () => {
-  const out: string[] = [];
-  const code = installGuardCommand(
-    { out: (s) => out.push(s), err: () => undefined, cwd: "/" },
-    { node: "/opt/my node/bin/node", bin: "/Users/Robin Example/lib/git-grove/dist/cli/bin.js", home: "/Users/Robin Example" },
-  );
-  expect(code).toBe(0);
-  expect(at(jsonBlock(out.join("")), "hooks", "PreToolUse", 0, "hooks", 0, "command")).toBe(
+test("install-guard quotes paths that hold spaces or quotes", () => {
+  expect(hookCommand(install("/opt/my node/bin/node", "/Users/Robin Example/lib/git-grove/dist/cli/bin.js").out)).toBe(
     "'/opt/my node/bin/node' '/Users/Robin Example/lib/git-grove/dist/cli/bin.js' guard --claude",
+  );
+  expect(hookCommand(install('/opt/"node"/bin/node', "/Users/robin/it's/dist/cli/bin.js").out)).toBe(
+    `'/opt/"node"/bin/node' '/Users/robin/it'\\''s/dist/cli/bin.js' guard --claude`,
   );
 });
 
-test("install-guard from an npx cache refuses with exit 1 and asks for a global install", () => {
-  const out: string[] = [];
-  const err: string[] = [];
-  const code = installGuardCommand(
-    { out: (s) => out.push(s), err: (s) => err.push(s), cwd: "/" },
-    { node: "/usr/local/bin/node", bin: "/Users/robin/.npm/_npx/4f1e/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js", home: "/Users/robin" },
-  );
-  expect(code).toBe(1);
-  expect(out.join("")).toBe("");
-  expect(err.join("")).toContain("npm i -g @deepanshugoel/git-grove");
+test("install-guard from an npx, pnpm dlx, bunx or yarn dlx cache refuses with exit 1 and asks for a global install", () => {
+  for (const bin of [
+    "/Users/robin/.npm/_npx/4f1e/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js",
+    "/Users/robin/Library/Caches/pnpm/dlx/abc/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js",
+    "/private/tmp/bunx-501-@deepanshugoel/git-grove@latest/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js",
+    "/private/tmp/xfs-1a2b3c4d/dlx-5678/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js",
+  ]) {
+    const result = install("/usr/local/bin/node", bin);
+    expect(result.code, bin).toBe(1);
+    expect(result.out).toBe("");
+    expect(result.err).toContain("npm i -g @deepanshugoel/git-grove");
+  }
 });
