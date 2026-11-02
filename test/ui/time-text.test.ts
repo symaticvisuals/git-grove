@@ -27,3 +27,17 @@ test("a ref breaks only after a slash, never inside a part", () => {
   expect(out.split("<wbr>")).toHaveLength(6);
   expect(slashBreaks("<b>/x").text).toContain("&lt;b&gt;");
 });
+
+test("a clock time carries its moment, so the clock turns 14:02 into 1 Nov 14:02 after midnight", async () => {
+  const { timeLabel } = await import("../../ui/src/time-label.js");
+  const at = new Date(2026, 10, 1, 14, 2).getTime();
+  const out = clockAt(at, new Date(2026, 10, 1, 23, 0).getTime()).text;
+  expect(out).toContain(`data-at="${at}"`);
+  expect(out).toContain("data-clock");
+  expect(out).toContain(">14:02</time>");
+  const data = { at: String(at), clock: "" };
+  expect(timeLabel(data, new Date(2026, 10, 1, 23, 59).getTime())).toBe("14:02");
+  expect(timeLabel(data, new Date(2026, 10, 2, 0, 1).getTime())).toBe("1 Nov 14:02");
+  expect(timeLabel({ at: String(at), ago: "long" }, at + 4 * 60_000)).toBe("4 min ago");
+  expect(timeLabel({ at: "nope" }, at)).toBe("—");
+});

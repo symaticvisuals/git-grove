@@ -1,5 +1,4 @@
 import { adoptToken, type TokenDeps } from "./adopt-token.js";
-import { ago } from "./ago.js";
 import { announcement } from "./announcement.js";
 import { type Api, createApi } from "./api.js";
 import { ApiError } from "./api.error.js";
@@ -16,6 +15,7 @@ import { scanNow } from "./scan-now.js";
 import { SLICE_NAMES, type SliceName } from "./slice-names.js";
 import { sliceRequests } from "./slice-requests.js";
 import { initialState, reduce, type State, type Tab, type UiAction } from "./state.js";
+import { timeLabel } from "./time-label.js";
 import { toast } from "./toast.js";
 
 declare const __GROVE_VERSION__: string;
@@ -164,7 +164,7 @@ function schedule(): void {
 function tick(): void {
   const now = Date.now();
   for (const element of document.querySelectorAll<HTMLElement>("time[data-at]")) {
-    element.textContent = ago(Number(element.dataset["at"]), now, element.dataset["ago"] === "long" ? "long" : "short");
+    element.textContent = timeLabel(element.dataset, now);
   }
   dispatch({ type: "tick", now });
 }
@@ -177,7 +177,7 @@ function scan(element: HTMLElement): void {
   if (client === null) return;
   const repo = Number(element.dataset["repo"]);
   scanNow({ api: client, repo: Number.isSafeInteger(repo) && repo > 0 ? repo : undefined, now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }).then(
-    (message) => toast(message),
+    (result) => toast(result.text, result.ok),
     (error: unknown) => toast(error instanceof ApiError ? error.message : MESSAGES.notRunning, false),
   );
 }

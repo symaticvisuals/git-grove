@@ -32,7 +32,7 @@ export type State = {
   liveProblem: LiveProblem | null;
   /** The live stream dropped since it was last up, so whatever is shown is reloaded when it is back. */
   liveDropped: boolean;
-  /** When the project list was last asked to reload; it is reloaded every 30 s while live, so its scan times stay fresh. */
+  /** When the project list was last asked to reload; it is reloaded every 30 s while live, failed or not, so its scan times stay fresh. */
   projectsCheckedAt: number | null;
   lastEventAt: number | null;
   updateAvailable: boolean;
@@ -145,10 +145,10 @@ function onDigest(state: State, repoId: number, at: number): State {
 }
 
 function onTick(state: State, now: number): State {
-  if (state.live !== "up" || state.projects.status !== "ready") return state;
+  if (state.live !== "up" || state.projects.status === "loading") return state;
   if (state.projectsCheckedAt === null) return { ...state, projectsCheckedAt: now };
   if (now - state.projectsCheckedAt < PROJECTS_EVERY_MS) return state;
-  return { ...update(state, "projects", markStale), projectsCheckedAt: now };
+  return { ...update(state, "projects", invalidate), projectsCheckedAt: now };
 }
 
 function onEvent(state: State, event: ServerEvent, at: number): State {

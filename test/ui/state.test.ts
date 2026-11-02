@@ -160,3 +160,24 @@ test("a 503 from the live stream is remembered as busy until it is back", () => 
   expect(reduce(busy, { type: "live", state: "up" }).liveProblem).toBeNull();
   expect(reduce(state, { type: "live", state: "down" }).liveProblem).toBe("unreachable");
 });
+
+test("a project list that failed is retried every 30 s while live, too", () => {
+  const start = initialState({ view: "projects" }, "1.0.0");
+  const failed = run(
+    start,
+    { type: "live", state: "up" },
+    { type: "failed", slice: "projects", key: keyOf(start, "projects"), status: 503, message: "scan failed" },
+    { type: "tick", now: 1_000 },
+  );
+  expect(failed.projects).toMatchObject({ status: "error" });
+  expect(reduce(failed, { type: "tick", now: 20_000 })).toBe(failed);
+  expect(reduce(failed, { type: "tick", now: 31_000 }).projects).toEqual({ status: "loading" });
+  const withData = run(
+    start,
+    { type: "live", state: "up" },
+    { type: "loaded", key: keyOf(start, "projects"), result: { slice: "projects", data: [project()] } },
+    { type: "failed", slice: "projects", key: keyOf(start, "projects"), status: 0, message: "down" },
+    { type: "tick", now: 1_000 },
+  );
+  expect(reduce(withData, { type: "tick", now: 31_000 }).projects).toEqual({ status: "ready", data: [project()], stale: true });
+});

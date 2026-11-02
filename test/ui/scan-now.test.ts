@@ -27,17 +27,33 @@ test("Scan now waits for a scan that began after the click and says how many wor
     ...time,
   });
   expect(scanned).toEqual([1]);
-  expect(message).toBe("Scanned 6 worktrees in 0.3 s");
+  expect(message).toEqual({ text: "Scanned 6 worktrees in 0.3 s", ok: true });
 });
 
-test("a scan of every repo waits for all of them, counting a repo whose scan failed as done", async () => {
-  const time = clock(0);
-  const message = await scanNow({
-    api: { scan: async () => undefined, projects: async () => [project({ id: 1, worktrees: 1, scannedAt: 5 }), project({ id: 2, worktrees: 2, scannedAt: null, error: "gone" })] },
+test("when some repos scan and one fails, the toast fails, naming the repo and its error", async () => {
+  let polls = 0;
+  const result = await scanNow({
+    api: {
+      scan: async () => undefined,
+      projects: async () => {
+        polls += 1;
+        return [project({ id: 1, name: "web", worktrees: 4, scannedAt: 5 }), project({ id: 2, name: "api", worktrees: 2, scannedAt: null, error: "not a git repository" })];
+      },
+    },
     repo: undefined,
-    ...time,
+    ...clock(0),
   });
-  expect(message).toBe("Scanned 3 worktrees in 0.0 s");
+  expect(result).toEqual({ text: "Scanned 4 worktrees; api: not a git repository", ok: false });
+  expect(polls).toBe(2);
+});
+
+test("a scan where every repo fails is only the errors, never a success with 0 worktrees", async () => {
+  const result = await scanNow({
+    api: { scan: async () => undefined, projects: async () => [project({ id: 1, name: "web", worktrees: 4, scannedAt: 1, error: "disk gone" })] },
+    repo: 1,
+    ...clock(10),
+  });
+  expect(result).toEqual({ text: "web: disk gone", ok: false });
 });
 
 test("a failed scan request throws its one-line error for the toast", async () => {
