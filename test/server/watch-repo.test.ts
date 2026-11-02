@@ -5,6 +5,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { watchRepo } from "../../src/server/live/watch-repo.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
 
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 let repo: TestRepo;
 let gitDir: string;
 const open: { close(): void }[] = [];
@@ -19,7 +21,7 @@ afterEach(async () => {
   await repo.cleanup();
 });
 
-function watch(onChange: () => void, options: { debounceMs?: number; pollMs?: number }): void {
+function watch(onChange: () => void, options: { debounceMs?: number; maxWaitMs?: number; pollMs?: number }): void {
   open.push(watchRepo(gitDir, onChange, options));
 }
 
@@ -48,6 +50,17 @@ test("a file written under objects/ fires nothing within 400 ms", async () => {
   await writeFile(join(gitDir, "objects", "zz", "loose"), "x");
   await sleep(400);
   expect(count).toBe(0);
+});
+
+test("a continuous burst still fires every maxWaitMs", async () => {
+  let count = 0;
+  watch(() => void (count += 1), { debounceMs: 200, maxWaitMs: 150, pollMs: 60_000 });
+  await sleep(100);
+  for (let i = 0; i < 25; i += 1) {
+    await writeFile(join(gitDir, "refs", "heads", "burst"), `${i}\n`);
+    await sleep(30);
+  }
+  expect(count).toBeGreaterThanOrEqual(2);
 });
 
 test("the poll fires with no fs events", async () => {

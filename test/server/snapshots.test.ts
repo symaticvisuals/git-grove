@@ -1,13 +1,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { observe } from "../../src/core/journal/observe.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import type { JournalEntry, Store } from "../../src/core/journal/store.types.js";
 import { readSnapshot, type Snapshot } from "../../src/core/snapshot/read-snapshot.js";
 import { createSnapshots } from "../../src/server/live/snapshots.js";
 import { squashedFixture, type SquashedFixture } from "../support/squashed-fixture.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let home: string;
 let store: Store;

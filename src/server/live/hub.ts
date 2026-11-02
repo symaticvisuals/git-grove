@@ -74,6 +74,10 @@ export function createHub(options: HubOptions): Hub {
     );
   };
 
+  const background = (repoId?: number): void => {
+    scan(repoId).catch(() => undefined);
+  };
+
   const sync = (): void => {
     if (closed) return;
     const repos = snapshots.repos();
@@ -88,7 +92,7 @@ export function createHub(options: HubOptions): Hub {
       const held = watched.get(repo.id);
       if (held?.commonDir === repo.commonDir) continue;
       held?.stop();
-      const watcher = watchRepo(repo.commonDir, () => void scan(repo.id), { debounceMs: options.debounceMs, pollMs: options.pollMs });
+      const watcher = watchRepo(repo.commonDir, () => background(repo.id), { debounceMs: options.debounceMs, pollMs: options.pollMs });
       watched.set(repo.id, { commonDir: repo.commonDir, stop: watcher.close });
     }
   };
@@ -126,7 +130,7 @@ export function createHub(options: HubOptions): Hub {
   });
 
   sync();
-  void scan();
+  background();
   const resync = setInterval(sync, options.pollMs ?? 30_000);
   resync.unref();
 

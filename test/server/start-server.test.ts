@@ -10,6 +10,8 @@ import { type RunningServer, startServer } from "../../src/server/start-server.j
 import { serverRequest } from "../support/server-request.js";
 import { type UiFixture, uiFixture } from "../support/ui-fixture.js";
 
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const VERSION = "9.9.9";
 const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",

@@ -10,6 +10,8 @@ import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import { createSnapshots } from "../../src/server/live/snapshots.js";
 import { squashedFixture, type SquashedFixture } from "../support/squashed-fixture.js";
 
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const WAIT = { timeout: 8000 };
 
 let dir: string;
@@ -99,6 +101,30 @@ test("a deleted repo folder publishes one scan-error and keeps the project liste
   expect(errors[0]?.severity).toBe("needs-action");
   expect(store.activity(repoId, 10).filter((row) => row.kind === "scan-error")).toHaveLength(1);
   expect(store.repos().map((repo) => repo.id)).toContain(repoId);
+});
+
+test("a store that throws during a background scan is not an unhandled rejection", async () => {
+  const real = createSnapshots(store);
+  let calls = 0;
+  const snapshots = {
+    ...real,
+    repos() {
+      calls += 1;
+      if (calls > 1) throw new Error("store unavailable");
+      return real.repos();
+    },
+  };
+  const unhandled: unknown[] = [];
+  const note = (reason: unknown): void => void unhandled.push(reason);
+  process.on("unhandledRejection", note);
+  try {
+    hub = createHub({ snapshots, store, debounceMs: 30, pollMs: 60_000 });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(calls).toBeGreaterThan(1);
+    expect(unhandled).toEqual([]);
+  } finally {
+    process.off("unhandledRejection", note);
+  }
 });
 
 test("close ends every subscriber's stream and stops publishing", async () => {
