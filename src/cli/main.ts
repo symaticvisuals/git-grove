@@ -3,10 +3,8 @@ import { parseArgs } from "node:util";
 import { InvalidInputError } from "../core/actions/invalid-input.error.js";
 import { requireGitVersion } from "../core/git/require-git-version.js";
 import type { CliIo } from "./cli-io.types.js";
-import { ackCommand } from "./commands/ack.js";
 import { checkCommand } from "./commands/check.js";
 import { pinsCommand } from "./commands/pins.js";
-import { restoreCommand } from "./commands/restore.js";
 import { serveCommand } from "./commands/serve.js";
 import { serviceCommand } from "./commands/service.js";
 import { statusCommand } from "./commands/status.js";
@@ -159,9 +157,12 @@ function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command
   }
   if (name === "status") return first === undefined ? (io) => statusCommand(io, { json }) : null;
   if (name === "restore") {
-    return first !== undefined && extra === undefined && !json ? (io) => restoreCommand(io, first, second) : null;
+    const target = second === undefined ? { branch: first } : { branch: first, pinRef: second };
+    return first !== undefined && extra === undefined && !json ? (io) => runActionCommand(io, "restore", { targets: [target] }, options) : null;
   }
-  if (name === "ack") return first !== undefined && second === undefined && !json ? (io) => ackCommand(io, first) : null;
+  if (name === "ack") {
+    return first !== undefined && second === undefined && !json ? (io) => runActionCommand(io, "ack", { branch: first }, options) : null;
+  }
   if (name === "pins") return first === "list" && extra === undefined && !json ? (io) => pinsCommand(io, second) : null;
   if (name === "check") {
     return first === "remove" && second !== undefined && extra === undefined

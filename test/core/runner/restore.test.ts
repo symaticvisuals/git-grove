@@ -1,10 +1,12 @@
 import { realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
+import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { listPins } from "../../../src/core/runner/list-pins.js";
 import { pin } from "../../../src/core/runner/pin.js";
 import { RefusedError } from "../../../src/core/runner/refused.error.js";
-import { restore } from "../../../src/core/runner/restore.js";
+import { restoreHeld, type RestoreResult } from "../../../src/core/runner/restore-held.js";
+import { withRepoLock } from "../../../src/core/runner/with-repo-lock.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
 
 let repo: TestRepo;
@@ -26,6 +28,12 @@ beforeEach(async () => {
   squashed = (await repo.git("rev-parse", "HEAD")).trim();
 });
 afterEach(() => repo.cleanup());
+
+/** Takes the repo lock and runs restoreHeld on facts read under it, as the restore action's run does. */
+async function restore(cwd: string, branch: string, pinRef?: string, beforeMove?: () => Promise<void>): Promise<RestoreResult> {
+  const { commonDir } = await readRepoFacts(cwd);
+  return withRepoLock(commonDir, async () => restoreHeld(await readRepoFacts(cwd), branch, pinRef, beforeMove));
+}
 
 test("restore brings back the commits and pins the squashed tip", async () => {
   expect((await repo.git("rev-list", "--count", "main..feat/x")).trim()).toBe("1");

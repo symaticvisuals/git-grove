@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { run } from "../../src/cli/main.js";
 import { readRepoFacts } from "../../src/core/facts/read-repo-facts.js";
+import { observe } from "../../src/core/journal/observe.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import { withRepoLock } from "../../src/core/runner/with-repo-lock.js";
 import type { JournalEntry } from "../../src/core/journal/store.types.js";
@@ -143,14 +144,47 @@ test("restore brings the commits back and the next status has no rewrite", async
 
   const result = await grove(["restore", "feat"]);
   expect(result).toMatchObject({ code: 0, err: "" });
-  expect(result.out).toMatch(
-    /^restored feat at [0-9a-f]{7} from refs\/grove\/pins\/feat\/\S+ \(3 commits back\)\nprevious tip [0-9a-f]{7} pinned at refs\/grove\/pins\/feat\/\S+\n$/,
-  );
+  expect(result.out).toMatch(/\n✓ Restored 3 commits on feat\n {2}Moved feat from [0-9a-f]{7} to [0-9a-f]{7}\n/);
+  expect(result.out).toMatch(/\n {2}undo: git grove restore feat refs\/grove\/pins\/feat\/\S+\n$/);
   expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("3");
 
   const doc = await statusJson();
   expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
   expect(doc.journal).toEqual([]);
+});
+
+test("restore records its receipt in Activity, and a background read afterwards journals no loss on the branch", async () => {
+  await grove(["status"]);
+  await squash();
+  await grove(["status"]);
+
+  expect((await grove(["restore", "feat"])).code).toBe(0);
+  const { commonDir } = await readRepoFacts(repo.path);
+  const store = openStore();
+  try {
+    const repoId = store.findRepoId(commonDir) ?? 0;
+    expect(store.activity(repoId, 10)[0]).toMatchObject({ kind: "action", branch: "feat", title: "Restored 3 commits on feat" });
+    const added = await observe(repo.path, store);
+    expect(added.filter((entry) => entry.branch === "feat")).toEqual([]);
+    expect(store.entries(repoId, { unresolved: true }).filter((entry) => entry.branch === "feat")).toEqual([]);
+  } finally {
+    store.close();
+  }
+});
+
+test("restore of a branch already at its pin is blocked and exits 3, as in the dashboard", async () => {
+  await grove(["status"]);
+  const tip = (await repo.git("rev-parse", "feat")).trim();
+  await squash();
+  await grove(["status"]);
+  const [action] = await rewrittenActions();
+  const pinRef = action?.split(" ").at(-1) ?? "";
+  await repo.git("reset", "--hard", tip);
+
+  const result = await grove(["restore", "feat", pinRef]);
+  expect(result).toMatchObject({ code: 3, err: "" });
+  expect(result.out).toContain(`\nBlocked\n  ✖ feat is already at ${tip.slice(0, 7)}\n`);
+  expect((await repo.git("rev-parse", "feat")).trim()).toBe(tip);
 });
 
 test("a rewrite whose commits later reach the trunk no longer alerts", async () => {
@@ -316,16 +350,18 @@ test("restore while another grove action holds the repo lock refuses with the re
   const lock = join(commonDir, "grove.lock");
 
   const result = await withRepoLock(commonDir, () => grove(["restore", "feat"]));
-  expect(result).toEqual({
-    code: 1,
-    out: [
-      "✖ Another grove action is running in this repo",
-      `  ${lock} is held. Wait for that action to finish, then try again.`,
-      `  If no grove action is running, remove ${lock} and try again.`,
-      "",
-    ].join("\n"),
-    err: "",
-  });
+  expect(result).toMatchObject({ code: 1, err: "" });
+  expect(result.out).toContain("Bring back 3 commits on feat\n");
+  expect(
+    result.out.endsWith(
+      [
+        "\n✖ Another grove action is running in this repo",
+        `  ${lock} is held. Wait for that action to finish, then try again.`,
+        `  If no grove action is running, remove ${lock} and try again.`,
+        "",
+      ].join("\n"),
+    ),
+  ).toBe(true);
   expect((await repo.git("rev-parse", "feat")).trim()).toBe(squashed);
 });
 
@@ -481,7 +517,7 @@ test("restore recreates a deleted branch at its pin", async () => {
 
   const result = await grove(["restore", "feat"]);
   expect(result).toMatchObject({ code: 0, err: "" });
-  expect(result.out).toMatch(new RegExp(`^restored feat at ${tip.slice(0, 7)} from refs/grove/pins/feat/\\S+ \\(3 commits back\\)\\n$`));
+  expect(result.out).toContain(`\n✓ Restored 3 commits on feat\n  Created feat at ${tip.slice(0, 7)}\n`);
   expect((await repo.git("rev-parse", "feat")).trim()).toBe(tip);
   expect(rulesOf((await statusJson()).findings)).not.toContain("branch-deleted");
 });
@@ -566,7 +602,7 @@ test("restore after a squash and a later amend brings back the original tip and 
 
   const result = await grove(["restore", "feat"]);
   expect(result).toMatchObject({ code: 0, err: "" });
-  expect(result.out).toMatch(new RegExp(`^restored feat at ${original.slice(0, 7)} from refs/grove/pins/feat/\\S+ \\(3 commits back\\)\\n`));
+  expect(result.out).toMatch(new RegExp(`\\n✓ Restored 3 commits on feat\\n {2}Moved feat from [0-9a-f]{7} to ${original.slice(0, 7)}\\n`));
   expect((await repo.git("rev-parse", "feat")).trim()).toBe(original);
   const doc = await statusJson();
   expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
@@ -628,16 +664,23 @@ test("ack dismisses a deliberate squash", async () => {
   const status = await grove(["status"]);
   expect(status.out).toContain("git grove ack feat");
 
-  expect(await grove(["ack", "feat"])).toEqual({ code: 0, out: "acknowledged 1 alert on feat\n", err: "" });
+  const acked = await grove(["ack", "feat"]);
+  expect(acked).toMatchObject({ code: 0, err: "" });
+  expect(acked.out).toContain("\n✓ Kept the squash on feat\n  1 alert cleared\n");
   const doc = await statusJson();
   expect(rulesOf(doc.findings)).not.toContain("history-rewritten");
   expect(doc.journal).toEqual([]);
-  expect(await grove(["ack", "feat"])).toEqual({ code: 0, out: "nothing to acknowledge on feat\n", err: "" });
+  const again = await grove(["ack", "feat"]);
+  expect(again).toMatchObject({ code: 3, err: "" });
+  expect(again.out).toContain("\nBlocked\n  ✖ Nothing to acknowledge on feat\n");
 });
 
 test("ack of a branch with no alerts, or no such branch, has nothing to acknowledge", async () => {
-  expect(await grove(["ack", "feat"])).toEqual({ code: 0, out: "nothing to acknowledge on feat\n", err: "" });
-  expect(await grove(["ack", "nope"])).toEqual({ code: 0, out: "nothing to acknowledge on nope\n", err: "" });
+  for (const branch of ["feat", "nope"]) {
+    const result = await grove(["ack", branch]);
+    expect(result, branch).toMatchObject({ code: 3, err: "" });
+    expect(result.out, branch).toContain(`\nBlocked\n  ✖ Nothing to acknowledge on ${branch}\n`);
+  }
   expect((await grove(["--help"])).out).toContain("ack <branch>");
 });
 
@@ -664,8 +707,8 @@ test("restore refuses while the branch is mid-rebase in a worktree, and adds no 
   const pins = await repo.git("for-each-ref", "refs/grove/pins/a");
 
   const result = await grove(["restore", "a"]);
-  expect(result.code).toBe(1);
-  expect(result.err).toMatch(/^git-grove: a has a rebase in progress in \S+\.worktrees\/a; finish or abort it first\n$/);
+  expect(result).toMatchObject({ code: 3, err: "" });
+  expect(result.out).toContain("\nBlocked\n  ✖ a has a rebase in progress in .worktrees/a. Finish or abort it first.\n");
   expect((await repo.git("rev-parse", "a")).trim()).toBe(squashed);
   expect(await repo.git("for-each-ref", "refs/grove/pins/a")).toBe(pins);
 });
