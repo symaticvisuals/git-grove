@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { groveHome } from "../core/grove-home.js";
 import { openStore } from "../core/journal/open-store.js";
 import type { Store } from "../core/journal/store.types.js";
+import { createPlanCache } from "./actions/plan-cache.js";
+import { createRuns } from "./actions/runs.js";
 import { createHub, type Hub } from "./live/hub.js";
 import { createSnapshots } from "./live/snapshots.js";
 import { registerApi } from "./api/register-api.js";
@@ -53,7 +55,8 @@ async function privateHome(home: string): Promise<void> {
 /**
  * Starts the dashboard server: makes `<home>` private (0700), takes `<home>/server.lock` (`lockServer`), listens on
  * 127.0.0.1 and `[::1]` at `port` (default 47683) or the next of 20 free on both, and records `{ pid, port, version }`
- * in `<home>/server.json`. `close` stops it, giving open connections a second, and removes server.json and the lock.
+ * in `<home>/server.json`. `close` refuses new runs and waits for those in progress, then stops it, giving open
+ * connections a second, and removes server.json and the lock.
  */
 export async function startServer(options: StartServerOptions): Promise<RunningServer> {
   const home = options.home ?? groveHome();
@@ -71,9 +74,11 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     const snapshots = createSnapshots(opened, options.now);
     const liveHub = createHub({ snapshots, store: opened, ...options.watch });
     hub = liveHub;
+    const runs = createRuns(liveHub, opened);
     const close = (): Promise<void> => {
       closing ??= (async () => {
         try {
+          await runs.close();
           liveHub.close();
           await Promise.all(servers.map(stopListening));
           clearServerFile(home, process.pid);
@@ -88,6 +93,8 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
       store: opened,
       snapshots,
       hub: liveHub,
+      plans: createPlanCache(),
+      runs,
       token,
       port: 0,
       version: options.version,

@@ -16,14 +16,14 @@ function argvOf(parsed: object, key: string): string[] | null {
 }
 
 /**
- * Reads `config.json` in grove's folder. `editor` and `terminal` may each be a string, which is one program and is
+ * Reads `config.json` in `home`, grove's folder by default. `editor` and `terminal` may each be a string, which is one program and is
  * never split (its path may contain spaces), or an array of the program followed by its arguments.
  * A missing, unreadable or malformed file, and any key of the wrong shape, give null for it.
  */
-export async function readConfig(): Promise<GroveConfig> {
+export async function readConfig(home: string = groveHome()): Promise<GroveConfig> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(join(groveHome(), "config.json"), "utf8"));
+    parsed = JSON.parse(await readFile(join(home, "config.json"), "utf8"));
   } catch {
     return { editor: null, terminal: null };
   }
