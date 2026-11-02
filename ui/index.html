@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="grove-version" content="%GROVE_VERSION%">
+<meta name="color-scheme" content="dark">
+<title>git grove</title>
+<link rel="preload" href="/fonts/atkinson-hyperlegible-next.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/martian-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side" aria-label="Repos and views"></aside>
+  <main class="main wide" id="main">
+    <div class="view" id="view"></div>
+    <section class="detail" id="detail" aria-live="polite" aria-label="Details"></section>
+  </main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<div class="scrim" id="scrim"></div>
+</body>
+</html>
