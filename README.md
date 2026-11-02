@@ -6,7 +6,8 @@ from 16 commits to 1 in a rebase nobody meant to run; an agent's cleanup of merg
 that existed only there; and a stacking tool came one command away from force-pushing other features' branches.
 While designing this I reproduced a fourth: a plain `git worktree remove` of one level deletes a nested level's
 uncommitted file with it. git-grove watches every worktree and stack, pins each branch tip it sees replaced, tells a
-rebase from a squash, and refuses to remove a worktree that holds the only copy of something.
+rebase from a squash, and refuses to remove a worktree that holds the only copy of something. As a Claude Code hook,
+it stops an agent's command that would lose work before it runs.
 
 ![The dashboard after an agent squashed a stack level: the level reads History rewritten, its three commits are pinned, and a merged worktree is flagged as not safe to remove](docs/screenshots/dashboard-rewrite.png)
 
@@ -18,8 +19,8 @@ pnpm install && pnpm build && pnpm demo
 
 `scripts/demo.sh` builds a throwaway repository with a three-level stack in a temp folder. It squashes one level the
 way an agent might, and leaves a merged worktree holding the only copy of an ignored `.local/seed.sql`. Then
-`git grove status` reports both, `git grove check remove` refuses the worktree with exit 3, and `restore` and
-`rm --rescue` put things right. The demo uses its own temp `GIT_GROVE_HOME`, `HOME` and git config, installs nothing
+`git grove status` reports both, `git grove check remove` refuses the worktree with exit 3, the agent guard blocks a
+`git worktree remove --force` of it with exit 2, and `restore` and `rm --rescue` put things right. The demo uses its own temp `GIT_GROVE_HOME`, `HOME` and git config, installs nothing
 and needs no network. At the end it prints how to open the dashboard on the same repository.
 
 ## Install
@@ -41,6 +42,61 @@ From a clone of this repository instead:
 pnpm install && pnpm build && npm link
 ```
 
+## Agents
+
+AI coding agents run git in many worktrees at once, and the commands that lose work succeed quietly. The agent guard
+is a Claude Code `PreToolUse` hook that reads each Bash command before it runs, through `&&`, `;`, `|`, quotes, `cd`
+and `git -C`:
+
+- `git worktree remove [--force]`, and `rm -r` of a worktree or of a folder holding one, are blocked unless every
+  worktree they would delete is safe to remove. That is the verdict `git grove check remove` prints. A folder that
+  holds the main worktree is always blocked.
+- `git reset --hard`, `git checkout -- <paths>`, `git checkout .` and `git restore <paths>` are blocked while there
+  are uncommitted changes they would discard. A `git stash` earlier in the same command lets them through.
+- `git grove ack`, `git grove pins prune` and `git grove rm --force` are blocked, because those decisions are for
+  people. `git grove rm --rescue` runs.
+- `git rebase`, `git commit --amend`, `git branch -D`, `git push --force` and a `git reset --hard <rev>` that moves
+  the branch run after grove pins the tips they could lose. For a force push, that is the remote tip it replaces.
+- Everything else runs untouched.
+
+A blocked command exits 2. Claude reads the reason and the safe alternative:
+
+```
+git grove blocked: .worktrees/old-onboarding is not safe to remove: it holds 1 ignored file that exists only here (.local/seed.sql).
+Run: git grove rm --rescue .worktrees/old-onboarding
+```
+
+To set it up, install git grove globally, then print the hook:
+
+```sh
+npm i -g @deepanshugoel/git-grove
+git grove install-guard
+```
+
+`install-guard` prints the JSON block to add to `~/.claude/settings.json` and changes no file. Add the block yourself,
+then start a new Claude Code session. The hook runs `<node> <git-grove>/dist/cli/bin.js guard --claude` by absolute
+path, so it does not depend on `PATH`, with a 10 s timeout. `install-guard` refuses to run from an `npx` cache, which
+npm may clear.
+
+The guard fails open. When grove cannot check a command (input it cannot read, a git error, a repository it does not
+support, or a check that takes more than 3 s), it allows the command and prints one line saying why. A command that
+hides what it runs, with `$(…)`, backticks, `eval` or `bash -c` around `git` or `rm`, is allowed with
+`git grove cannot check this command`. Blocks and the pins the guard takes appear in the dashboard's activity, for
+repositories grove already knows.
+
+So that agents know what the guard expects, add this to your `CLAUDE.md`:
+
+```md
+## git grove
+This machine runs git grove's agent guard. Before removing a worktree, run `git grove check remove <path>`. To remove
+one that holds ignored files, use `git grove rm --rescue <path>`. If the guard blocks a command, do not work around
+it: tell me what it said. Never run `git grove ack`, `git grove pins prune` or `git grove rm --force`.
+```
+
+Known limit: the guard sees only the commands Claude Code runs through its Bash tool. A command inside a script that
+Claude runs, a git alias, another agent's tool and your own terminal are not checked. For those, the watcher still
+pins every branch tip it sees replaced.
+
 ## How it works
 
 ```mermaid
@@ -48,7 +104,7 @@ flowchart LR
   watcher["Watcher<br/>fs.watch + 30 s poll"]
   cli["CLI<br/>git grove ..."]
   dash["Dashboard<br/>local server + SSE"]
-  guard["Agent guard<br/>(next)"]
+  guard["Agent guard<br/>Claude Code hook"]
   subgraph core["Shared core: src/core"]
     facts["Facts<br/>read-only git"] --> classifier["Classifier<br/>journal of tip changes"] --> rules["Rules<br/>findings"]
     actions["Actions<br/>plan, check, pin, run, receipt"]
@@ -56,15 +112,13 @@ flowchart LR
   watcher --> core
   cli --> core
   dash --> core
-  guard -.-> core
+  guard --> core
   core --> pins[("Pins<br/>refs/grove/pins/...")]
   core --> db[("SQLite<br/>journal, acks, activity")]
-  classDef planned stroke-dasharray: 5 5
-  class guard planned
 ```
 
-There are four ways in, and three are built: the watcher inside the dashboard server, the CLI and the dashboard.
-The agent guard is next. All of them call the same core, so the CLI and the dashboard cannot disagree.
+There are four ways in: the watcher inside the dashboard server, the CLI, the dashboard and the agent guard. All of
+them call the same core, so the CLI, the dashboard and the guard cannot disagree.
 
 - Facts are what git says, read with `--no-optional-locks`: worktrees, branch tips, gh-stack's stack config,
   stashes, pins and each worktree's status.
@@ -74,6 +128,9 @@ The agent guard is next. All of them call the same core, so the CLI and the dash
 - Rules turn facts and the journal into findings, worst first. That is "Needs you" in `status` and the dashboard.
 - Actions show a plan first. Running one re-checks what the plan read, pins every tip it will move, and returns a
   receipt with an undo where one exists.
+- The guard splits a command line into simple commands, decides what each needs checked, and asks the same facts
+  and the same removal verdict. `bin.js` loads it on its own, without the server or the dashboard, so a check of
+  `ls` costs little more than starting Node, and a worktree removal check on the demo repository about 0.1 to 0.2 s.
 
 Pins are git refs (`refs/grove/pins/<branch>/<UTC time>`), so they outlive grove's database. The journal,
 acknowledgements and activity are in SQLite at `~/.git-grove/grove.db`. Previewed plans live in the server's memory
@@ -152,6 +209,8 @@ git grove add-level <feature> <branch>       # add the next level on the deepest
 git grove restack <feature> [--stash]        # move each level of a stack onto its parent, pinning every tip first
 git grove stack plan <feature> [--json]      # show what restack would do, changing nothing
 git grove rm <worktree> [--rescue]           # remove a worktree's folder when nothing would be lost, keeping its branch
+git grove install-guard                      # print the Claude Code hook that runs the agent guard; writes nothing
+git grove guard --claude                     # the agent guard itself: reads the hook's JSON, exits 2 to block
 ```
 
 `new` and `add-level` copy the main worktree's env files into the new level (`--skip-env` to skip), and take
@@ -175,9 +234,16 @@ branch is. Errors print one line on stderr and exit 1; an action blocked by what
 
 ## Not yet
 
-- The agent guard: a Claude Code `PreToolUse` hook that would stop `git worktree remove --force` and similar
-  commands before they run. The verdict it would ask for is built and runs as `git grove check remove`; the hook and
-  its command parser are not. It was planned for the slice after the dashboard, and the dashboard took the time.
+- Parts of the agent guard:
+  - comparing a force push with the remote. A force push runs after grove pins the remote tip it replaces; it is
+    never blocked for dropping commits, and `forcePush: "never"` does not exist yet;
+  - `git clean -fdx`, which runs unchecked;
+  - `git stash drop` and `git stash clear`, which run unchecked;
+  - logging every command the guard sees. Only blocks and new pins are recorded;
+  - saying which agent session made a change in the journal;
+  - recording branch tips on each guard call. The watcher and `status` still journal them;
+  - writing settings files. `install-guard` prints the hook, and you add it;
+  - other agents' hook formats. Only Claude Code's `PreToolUse` hook is read.
 - Reflog catch-up. A change made while grove was not running is found at the next scan as one move, from the last tip
   grove saved to the current one, and is pinned and classified like any other. The steps in between are not read
   from the reflog, a branch grove never saw has nothing to compare, and an old tip git has already pruned is

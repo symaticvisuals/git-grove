@@ -1,6 +1,6 @@
 {
   "name": "@deepanshugoel/git-grove",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Watches git worktrees and stacked branches, pins every tip it sees replaced, and stops a worktree removal that would lose work",
   "keywords": [
     "git",

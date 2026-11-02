@@ -36,7 +36,7 @@ cd "$repo"
 
 actual="$(git grove --version)"
 echo "$actual"
-[ "$actual" = "git-grove 0.1.0" ] || { echo "expected: git-grove 0.1.0" >&2; exit 1; }
+[ "$actual" = "git-grove 0.2.0" ] || { echo "expected: git-grove 0.2.0" >&2; exit 1; }
 
 git config stack.trunk main
 echo base > base.txt && git add base.txt && git commit --quiet -m base
