@@ -29,6 +29,8 @@ export type StartServerOptions = {
   now?: () => number;
   /** How long the watcher waits after a change, and how often it polls; 300 ms and 30 s by default. */
   watch?: { debounceMs?: number | undefined; pollMs?: number | undefined };
+  /** How long `close` waits for runs in progress; 60 s by default. */
+  closeWaitMs?: number;
 };
 
 export type RunningServer = { port: number; url: string; token: string; context: ServerContext; close(): Promise<void> };
@@ -51,7 +53,8 @@ function stopListening(http: Server): Promise<void> {
  * Starts the dashboard server: makes sure `<home>` exists (`privateHome`), takes `<home>/server.lock` (`lockServer`), listens on
  * 127.0.0.1 and `[::1]` at `port` (default 47683) or the next of 20 free on both, and records `{ pid, port, version }`
  * in `<home>/server.json`. `close` refuses new runs and waits up to 60 s for those in progress, then stops it, giving
- * open connections a second, and removes server.json and the lock.
+ * open connections a second, and removes server.json and the lock. A run still going after the wait keeps the store
+ * open, so its journal and receipt can still be written.
  */
 export async function startServer(options: StartServerOptions): Promise<RunningServer> {
   const home = options.home ?? groveHome();
@@ -73,11 +76,11 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     const close = (): Promise<void> => {
       closing ??= (async () => {
         try {
-          await runs.close();
+          const drained = await runs.close(options.closeWaitMs === undefined ? {} : { timeoutMs: options.closeWaitMs });
           liveHub.close();
           await Promise.all(servers.map(stopListening));
           clearServerFile(home, process.pid);
-          opened.close();
+          if (drained) opened.close();
         } finally {
           await release();
         }

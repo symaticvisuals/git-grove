@@ -50,7 +50,10 @@ export type WireRepoView = {
   detached: WireSandbox[];
   orphans: WireOrphan[];
   findings: Finding[];
+  /** Worktrees clean up would remove with nothing to keep. */
   cleanupCount: number;
+  /** Worktrees clean up would remove only after copying their precious ignored files into main. */
+  rescueCount: number;
 };
 
 export type WireRewrite = {

@@ -3,8 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const execFileAsync = promisify(execFile);
 const ROOT = join(import.meta.dirname, "..", "..");

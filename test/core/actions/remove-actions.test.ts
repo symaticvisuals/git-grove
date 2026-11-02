@@ -12,6 +12,8 @@ import { openStore } from "../../../src/core/journal/open-store.js";
 import type { Store } from "../../../src/core/journal/store.types.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
 
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 type Copy = (from: string, to: string) => Promise<void>;
 
 const seam = vi.hoisted((): { copy: Copy | null } => ({ copy: null }));

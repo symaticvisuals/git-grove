@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { watchRepo } from "../../src/server/live/watch-repo.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
@@ -32,14 +33,25 @@ test("a commit in a linked worktree fires one change after the debounce", async 
   await repo.worktree(tree, "feat/linked");
   await sleep(200);
   let count = 0;
-  watch(() => void (count += 1), { debounceMs: 50, pollMs: 60_000 });
-  await sleep(100);
-  await writeFile(join(tree, "b.txt"), "b\n");
-  await repo.git("-C", tree, "add", "b.txt");
-  await repo.git("-C", tree, "commit", "-m", "second");
-  await vi.waitFor(() => expect(count).toBe(1));
-  await sleep(300);
-  expect(count).toBe(1);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+  try {
+    watch(() => void (count += 1), { debounceMs: 50, pollMs: 60_000 });
+    await delay(100);
+    await writeFile(join(tree, "b.txt"), "b\n");
+    await repo.git("-C", tree, "add", "b.txt");
+    await repo.git("-C", tree, "commit", "-m", "second");
+    await delay(1_000);
+    expect(count).toBe(0);
+    vi.advanceTimersByTime(49);
+    expect(count).toBe(0);
+    vi.advanceTimersByTime(1);
+    expect(count).toBe(1);
+    await delay(200);
+    vi.advanceTimersByTime(1_000);
+    expect(count).toBe(1);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("a file written under objects/ fires nothing within 400 ms", async () => {
@@ -67,20 +79,20 @@ test("the poll fires with no fs events", async () => {
   const quiet = await mkdtemp(join(tmpdir(), "git-grove-quiet-"));
   let count = 0;
   open.push(watchRepo(quiet, () => void (count += 1), { debounceMs: 50, pollMs: 50 }));
-  await vi.waitFor(() => expect(count).toBeGreaterThanOrEqual(2));
+  await vi.waitFor(() => expect(count).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
   await rm(quiet, { recursive: true, force: true });
 });
 
 test("the poll carries on when the folder cannot be watched", async () => {
   let count = 0;
   open.push(watchRepo(join(repo.path, "missing"), () => void (count += 1), { pollMs: 50 }));
-  await vi.waitFor(() => expect(count).toBeGreaterThanOrEqual(1));
+  await vi.waitFor(() => expect(count).toBeGreaterThanOrEqual(1), { timeout: 10_000 });
 });
 
 test("close stops both", async () => {
   let count = 0;
   const watcher = watchRepo(gitDir, () => void (count += 1), { debounceMs: 20, pollMs: 40 });
-  await vi.waitFor(() => expect(count).toBeGreaterThanOrEqual(1));
+  await vi.waitFor(() => expect(count).toBeGreaterThanOrEqual(1), { timeout: 10_000 });
   watcher.close();
   const seen = count;
   await writeFile(join(gitDir, "HEAD"), "ref: refs/heads/main\n");

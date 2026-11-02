@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "vitest";
@@ -13,14 +13,22 @@ import { appCommand } from "../../../src/core/open/app-command.js";
 import { launchDetached } from "../../../src/core/open/launch-detached.js";
 
 const savedHome = process.env["GIT_GROVE_HOME"];
+const folders: string[] = [];
 let dir: string;
 
+async function tempFolder(prefix: string): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), `git-grove-${prefix}-`));
+  folders.push(folder);
+  return folder;
+}
+
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "git-grove-level-"));
+  dir = await tempFolder("level");
 });
-afterAll(() => {
+afterAll(async () => {
   if (savedHome === undefined) delete process.env["GIT_GROVE_HOME"];
   else process.env["GIT_GROVE_HOME"] = savedHome;
+  await Promise.all(folders.map((folder) => rm(folder, { recursive: true, force: true })));
 });
 
 test("levelFolder puts a level under its feature's slug, numbered, with / as -", () => {
@@ -41,7 +49,7 @@ test("appCommand defaults, and appends the path to a configured command", () => 
 });
 
 test("detectInstall maps each lockfile, in order, and gives null with none", async () => {
-  const folder = await mkdtemp(join(tmpdir(), "git-grove-lock-"));
+  const folder = await tempFolder("lock");
   expect(detectInstall(folder)).toBeNull();
   const cases: [string, string[]][] = [
     ["package-lock.json", ["npm", "install"]],
@@ -57,7 +65,7 @@ test("detectInstall maps each lockfile, in order, and gives null with none", asy
 });
 
 test("groveHome and readConfig follow GIT_GROVE_HOME; a missing or bad file gives nulls", async () => {
-  const home = await mkdtemp(join(tmpdir(), "git-grove-cfg-"));
+  const home = await tempFolder("cfg");
   process.env["GIT_GROVE_HOME"] = home;
   expect(groveHome()).toBe(home);
   expect(await readConfig()).toEqual({ editor: null, terminal: null });
@@ -74,8 +82,8 @@ test("launchDetached rejects with a hint when the command does not exist", async
 });
 
 test("copyFiles and copyEnvFiles create folders and never overwrite", async () => {
-  const main = await mkdtemp(join(tmpdir(), "git-grove-main-"));
-  const target = await mkdtemp(join(tmpdir(), "git-grove-target-"));
+  const main = await tempFolder("main");
+  const target = await tempFolder("target");
   await mkdir(join(main, "apps/web"), { recursive: true });
   await writeFile(join(main, ".env"), "main\n");
   await writeFile(join(main, "apps/web/.env.local"), "web\n");

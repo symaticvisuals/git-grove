@@ -288,6 +288,21 @@ test("invalid input is 400 with the reason; an unknown repo is 404; an unknown a
   expect(await get("/api/runs/nope")).toEqual({ status: 404, body: { error: "unknown run" } });
 });
 
+test("an error a person can act on while preparing is 409 with its one line, not a bare 500", async () => {
+  const outside = await mkdtemp(join(tmpdir(), "git-grove-not-a-repo-"));
+  const snapshot = await server.context.snapshots.get(repoId);
+  const get = vi.spyOn(server.context.snapshots, "get").mockResolvedValue({ ...snapshot, facts: { ...snapshot.facts, root: outside } });
+  try {
+    expect(await post("/api/plans", { repo: repoId, action: "restore", input: RESTORE })).toEqual({
+      status: 409,
+      body: { error: `not inside a git repository (${outside})` },
+    });
+  } finally {
+    get.mockRestore();
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
 test("the action routes need the token, a same-origin request and a JSON body", async () => {
   const body = JSON.stringify({ repo: repoId, action: "restore", input: RESTORE });
   const send = (headers: Record<string, string>): Promise<number> =>
@@ -447,6 +462,39 @@ test("close stops waiting after its timeout when a git hook holds a run, and say
     await writeFile(marker, "");
     stderr.mockRestore();
     await rm(hook, { force: true });
+  }
+});
+
+test("a run still going when close stops waiting keeps the store open and records its receipt", async () => {
+  await server.close();
+  server = await startServer({ port: 0, home, uiDir: ui.dir, version: "9.9.9", watch: { debounceMs: 30, pollMs: 60_000 }, closeWaitMs: 300 });
+  await server.context.snapshots.refresh(repoId, { force: true });
+  const marker = join(home, "hook-may-finish");
+  const hook = join(fixture.repo.path, ".git", "hooks", "reference-transaction");
+  await mkdir(join(hook, ".."), { recursive: true });
+  await writeFile(hook, `#!/bin/sh\ni=0\nwhile [ ! -e '${marker}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i + 1)); done\n`);
+  await chmod(hook, 0o755);
+  const stderr = vi.spyOn(process.stderr, "write");
+  const { store, runs } = server.context;
+  try {
+    const runId = await run((await preview()).planId);
+    await vi.waitFor(() => expect(runs.get(runId)?.events).toContainEqual(expect.objectContaining({ index: 1, state: "running" })), WAIT);
+    await server.close();
+    expect(() => store.repos()).not.toThrow();
+    await writeFile(marker, "");
+    const receipt = await vi.waitFor(() => {
+      const done = runs.get(runId)?.receipt;
+      if (done === null || done === undefined) throw new Error("still running");
+      return done;
+    }, WAIT);
+    expect(receipt).toMatchObject({ ok: true });
+    expect(receipt.lines).not.toContain("This action was not recorded in Activity");
+    expect(store.activity(repoId, 1)[0]).toMatchObject({ kind: "action", title: receipt.title });
+  } finally {
+    await writeFile(marker, "");
+    stderr.mockRestore();
+    await rm(hook, { force: true });
+    store.close();
   }
 });
 

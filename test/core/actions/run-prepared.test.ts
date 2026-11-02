@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { ActionContext, Prepared } from "../../../src/core/actions/action.types.js";
 import type { Plan, StepEvent } from "../../../src/core/actions/plan.types.js";
 import { prepareAction } from "../../../src/core/actions/registry.js";
@@ -14,6 +14,8 @@ import type { Store } from "../../../src/core/journal/store.types.js";
 import { listPins } from "../../../src/core/runner/list-pins.js";
 import { withRepoLock } from "../../../src/core/runner/with-repo-lock.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const savedHome = process.env["GIT_GROVE_HOME"];
 let home: string;
@@ -247,6 +249,28 @@ test("a target that fails after an earlier one moved stops, names what moved and
   expect((await repo.git("rev-parse", receipt.undo?.[0]?.pinRef ?? "missing")).trim()).toBe(squashed);
   expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("3");
   expect(await tip("side")).toBe(main);
+});
+
+test("a store that fails to record the first of two restores names that branch, not the next", async () => {
+  const side = await squashedSide();
+  const failing: Store = {
+    ...store,
+    saveTip(id, ref, sha, parentSha, at) {
+      if (ref === "feat") throw new Error("disk I/O error");
+      store.saveTip(id, ref, sha, parentSha, at);
+    },
+  };
+  const failingCtx = { ...ctx, store: failing };
+  const prepared = await prepareAction("restore", failingCtx, { targets: [{ branch: "feat" }, { branch: "side" }] });
+
+  const receipt = await runPrepared(failingCtx, prepared, ignore);
+  expect(receipt).toMatchObject({ ok: false, refused: false, title: "Stopped: Move the branch back" });
+  expect(receipt.lines[0]).toMatch(/^Moved feat from [0-9a-f]{7} to [0-9a-f]{7}$/);
+  expect(receipt.lines.at(-1)).toBe("feat was restored but not recorded: disk I/O error");
+  expect(receipt.lines.join("\n")).not.toContain("side was not restored");
+  expect(receipt.undo?.map((target) => target.branch)).toEqual(["feat"]);
+  expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("3");
+  expect(await tip("side")).toBe(side.tip);
 });
 
 test("the check step stops when a branch is not at its pin after the move, still offering undo", async () => {

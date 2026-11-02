@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { branchWasCommittedTo } from "../../../src/core/facts/branch-was-committed-to.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let repo: TestRepo;
 

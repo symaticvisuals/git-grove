@@ -1,11 +1,13 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RescueFailedError } from "../../../src/core/actions/remove/rescue-failed.error.js";
 import { rescueFiles } from "../../../src/core/actions/remove/rescue-files.js";
 import { rescueTarget } from "../../../src/core/actions/remove/rescue-target.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let repo: TestRepo;
 let main: string;

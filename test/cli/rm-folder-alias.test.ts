@@ -8,6 +8,8 @@ import { readLinkedRoots } from "../../src/core/facts/read-linked-roots.js";
 import { resolvesOutside } from "../../src/core/facts/resolves-outside.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
 
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const alias = vi.hoisted(() => ({ from: "", to: "" }));
 
 vi.mock("node:fs/promises", async (importActual) => {

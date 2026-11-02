@@ -57,11 +57,18 @@ async function handOver(io: CliIo, deps: UiDeps, home: string, info: ServerInfo)
     return info;
   }
   if (!(await askServerToExit(info.port, await readOrCreateToken(home)))) return info;
-  io.out(`Restarting git grove ${info.version} as ${version}\n`);
+  const restarting = `Restarting git grove ${info.version} as ${version}\n`;
   const waitMs = deps.restartWaitMs ?? RESTART_WAIT_MS;
-  if (service !== null) return findServer(home, { waitMs, except: info });
-  await waitForExit(home, info, waitMs);
-  return null;
+  if (service !== null) {
+    io.out(restarting);
+    return findServer(home, { waitMs, except: info });
+  }
+  if (await waitForExit(home, info, waitMs)) {
+    io.out(restarting);
+    return null;
+  }
+  io.out(`git grove ${info.version} is still finishing a run; opening it\n`);
+  return info;
 }
 
 async function alignService(io: CliIo, deps: UiDeps, home: string): Promise<boolean> {
@@ -122,7 +129,8 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
  * opens it at the current worktree's feature. An installed login service that runs another copy of git grove, another
  * grove folder, or a Node that is gone, is rewritten to run this one. A server older than this CLI is asked to exit
  * only when no service is installed or the service runs this copy: the service then has 15 s to start this version
- * before it is started, and with no service this one starts as soon as the old one has stopped. A service that runs
+ * before it is started, and with no service this one starts as soon as the old one has stopped; an old one still
+ * finishing a run after those 15 s is opened instead, saying so. A service that runs
  * another copy keeps its server, and `ui` says how to update it. With no server, the login service is installed
  * (and says how to remove it) or started; on a
  * machine without launchd or systemd, or from an npx cache, the server runs in this process instead, until Ctrl-C.

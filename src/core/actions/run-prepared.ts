@@ -10,7 +10,7 @@ import type { ActionContext, ExecuteResult, Prepared } from "./action.types.js";
 import { checkExpectations } from "./check-expectations.js";
 import { errorLine } from "./error-line.js";
 import { lockedRefusal } from "./locked-refusal.js";
-import type { Plan, Receipt, StepEvent } from "./plan.types.js";
+import type { Plan, Receipt, ReceiptPin, StepEvent } from "./plan.types.js";
 import { StalePlanError } from "./stale-plan.error.js";
 
 type Outcome = ExecuteResult & { refused: boolean };
@@ -44,6 +44,7 @@ export async function runPrepared(
   const { plan } = prepared;
   const reported = new Set<number>();
   const pins = new Map<string, string>();
+  const taken: ReceiptPin[] = [];
   let failedAt: number | null = null;
 
   const send = (event: StepEvent): void => {
@@ -86,9 +87,12 @@ export async function runPrepared(
       await step(1, async () => {
         for (const branch of plan.moves) {
           const tip = facts.branches.find((candidate) => candidate.name === branch)?.tip;
-          if (tip !== undefined) pins.set(branch, await pin(facts.root, branch, tip, new Date(ctx.now())));
+          if (tip === undefined) continue;
+          const pinned = await pin(facts.root, branch, tip, new Date(ctx.now()));
+          pins.set(branch, pinned.ref);
+          taken.push(pinned);
         }
-        return [...pins.values()].join(", ") || "Nothing to pin";
+        return taken.map(({ ref, reused }) => (reused ? `already pinned at ${ref}` : ref)).join(", ") || "Nothing to pin";
       });
     }
     const firstStep = plan.moves.length > 0 ? 2 : 1;
@@ -130,7 +134,7 @@ export async function runPrepared(
     refused: outcome.refused,
     title: outcome.title,
     lines: outcome.lines,
-    pins: [...pins.values()],
+    pins: taken,
     undo: outcome.undo,
     at: ctx.now(),
   };

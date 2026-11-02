@@ -1,5 +1,6 @@
 import type { Health } from "../../../src/server/wire/health-of.js";
 import type { ActivityItem, WireRepoView } from "../../../src/server/wire/wire.types.js";
+import { cleanupLabel } from "../cleanup-label.js";
 import { html, type SafeHtml } from "../html.js";
 import { ICONS } from "../icons.js";
 import { type RowRef, routeHash } from "../parse-route.js";
@@ -85,10 +86,9 @@ function summary(view: WireRepoView): string {
 }
 
 function filters(view: WireRepoView, needsOnly: boolean): SafeHtml {
+  const label = cleanupLabel(view);
   const cleanup =
-    view.cleanupCount > 0
-      ? html`<button class="fchip on clean" data-action="cleanup" data-key="filter:cleanup">${ICONS.cleanChip}${plural(view.cleanupCount, "worktree")} safe to clean up</button>`
-      : "";
+    label !== null ? html`<button class="fchip on clean" data-action="cleanup" data-key="filter:cleanup">${ICONS.cleanChip}${label}</button>` : "";
   return html`<div class="filters"><button class="fchip${needsOnly ? " on" : ""}" data-ui="needs-only" data-key="filter:needs-only" aria-pressed="${needsOnly ? "true" : "false"}">${ICONS.needsChip}Needs you</button>${cleanup}<span class="sum">${summary(view)}</span></div>`;
 }
 

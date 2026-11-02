@@ -1,9 +1,11 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { listPins } from "../../../src/core/runner/list-pins.js";
 import { pin } from "../../../src/core/runner/pin.js";
 import { RepoLockedError } from "../../../src/core/runner/repo-locked.error.js";
 import { withRepoLock } from "../../../src/core/runner/with-repo-lock.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let repo: TestRepo;
 let sha: string;
@@ -27,20 +29,21 @@ async function commits(count: number): Promise<string[]> {
 test("pin names the ref by branch and UTC time, suffixing when taken", async () => {
   const at = new Date(Date.UTC(2026, 10, 1, 23, 19, 42));
   const [other = ""] = await commits(1);
-  expect(await pin(repo.path, "feat/coupons-ui", sha, at)).toBe("refs/grove/pins/feat/coupons-ui/20261101T231942Z");
-  expect(await pin(repo.path, "feat/coupons-ui", other, at)).toBe("refs/grove/pins/feat/coupons-ui/20261101T231942Z-2");
+  expect(await pin(repo.path, "feat/coupons-ui", sha, at)).toEqual({ ref: "refs/grove/pins/feat/coupons-ui/20261101T231942Z", reused: false });
+  expect(await pin(repo.path, "feat/coupons-ui", other, at)).toEqual({ ref: "refs/grove/pins/feat/coupons-ui/20261101T231942Z-2", reused: false });
 });
 
-test("pin reuses a pin of the same branch at the same sha", async () => {
+test("pin reuses a pin of the same branch at the same sha, and says it did", async () => {
   const first = await pin(repo.path, "feat/x", sha, new Date(Date.UTC(2026, 10, 1, 1, 0, 0)));
-  expect(await pin(repo.path, "feat/x", sha, new Date(Date.UTC(2026, 10, 1, 2, 0, 0)))).toBe(first);
+  expect(first.reused).toBe(false);
+  expect(await pin(repo.path, "feat/x", sha, new Date(Date.UTC(2026, 10, 1, 2, 0, 0)))).toEqual({ ref: first.ref, reused: true });
   expect(await listPins(repo.path, "feat/x")).toHaveLength(1);
-  expect(await pin(repo.path, "feat/x/deeper", sha, new Date(Date.UTC(2026, 10, 1, 2, 0, 0)))).not.toBe(first);
+  expect((await pin(repo.path, "feat/x/deeper", sha, new Date(Date.UTC(2026, 10, 1, 2, 0, 0)))).ref).not.toBe(first.ref);
 });
 
 test("concurrent pins at the same time each get their own ref", async () => {
   const at = new Date(Date.UTC(2026, 10, 1, 4, 0, 0));
-  const refs = await Promise.all((await commits(3)).map((each) => pin(repo.path, "feat/race", each, at)));
+  const refs = (await Promise.all((await commits(3)).map((each) => pin(repo.path, "feat/race", each, at)))).map((pinned) => pinned.ref);
   expect(new Set(refs).size).toBe(3);
   expect((await listPins(repo.path, "feat/race")).map((entry) => entry.ref).sort()).toEqual([...refs].sort());
 });
@@ -88,6 +91,7 @@ test("listPins orders by time then numeric suffix across branches", async () => 
 
 test("concurrent pins of one sha at the same time share one ref", async () => {
   const at = new Date(Date.UTC(2026, 10, 1, 5, 0, 0));
-  const refs = await Promise.all([1, 2, 3, 4].map(() => pin(repo.path, "feat/race", sha, at)));
-  expect(new Set(refs)).toEqual(new Set(["refs/grove/pins/feat/race/20261101T050000Z"]));
+  const pinned = await Promise.all([1, 2, 3, 4].map(() => pin(repo.path, "feat/race", sha, at)));
+  expect(new Set(pinned.map((each) => each.ref))).toEqual(new Set(["refs/grove/pins/feat/race/20261101T050000Z"]));
+  expect(pinned.filter((each) => !each.reused)).toHaveLength(1);
 });

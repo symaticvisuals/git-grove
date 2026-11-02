@@ -98,6 +98,14 @@ test("a 400 shows its message in the note", async () => {
   expect(page.state.dialog).toMatchObject({ error: "checkout coupons is not a stack", planning: false });
 });
 
+test("a 409 from a preview shows the server's one line in the note", async () => {
+  const line = "not inside a git repository (/src/acme-shop)";
+  const page = store(api({ plan: async () => Promise.reject(new ApiError(409, line)) }));
+  page.dispatch({ type: "dialog-open", action: "restack", ctx });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(page.state.dialog).toMatchObject({ error: line, planning: false });
+});
+
 test("a run reads its state once right after it starts, so steps sent before it subscribed still show", async () => {
   const fake = api();
   const page = store(fake);

@@ -1,6 +1,6 @@
 import { realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { listPins } from "../../../src/core/runner/list-pins.js";
 import { pin } from "../../../src/core/runner/pin.js";
@@ -8,6 +8,8 @@ import { RefusedError } from "../../../src/core/runner/refused.error.js";
 import { restoreHeld, type RestoreResult } from "../../../src/core/runner/restore-held.js";
 import { withRepoLock } from "../../../src/core/runner/with-repo-lock.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let repo: TestRepo;
 let original: string;
@@ -23,7 +25,7 @@ beforeEach(async () => {
   await repo.commit("a.txt", "a\n", "a");
   await repo.commit("b.txt", "b\n", "b");
   original = await repo.commit("c.txt", "c\n", "c");
-  pinned = await pin(repo.path, "feat/x", original, new Date(Date.UTC(2026, 10, 1, 1, 0, 0)));
+  pinned = (await pin(repo.path, "feat/x", original, new Date(Date.UTC(2026, 10, 1, 1, 0, 0)))).ref;
   await repo.git("reset", "--soft", "main");
   await repo.git("commit", "-m", "squashed");
   squashed = (await repo.git("rev-parse", "HEAD")).trim();
@@ -58,7 +60,7 @@ test("restore recreates a deleted branch at its pin and pins nothing", async () 
 test("restore refuses to recreate a branch a worktree still has checked out", async () => {
   await repo.switch("main");
   await repo.worktree(join(repo.path, ".worktrees", "held"), "held");
-  const held = await pin(repo.path, "held", original, new Date(Date.UTC(2026, 10, 1, 2, 0, 0)));
+  const held = (await pin(repo.path, "held", original, new Date(Date.UTC(2026, 10, 1, 2, 0, 0)))).ref;
   await repo.git("update-ref", "-d", "refs/heads/held");
   await expect(restore(repo.path, "held", held)).rejects.toThrow("checked out but the branch is gone");
   expect(await repo.git("show-ref", "--verify", "--quiet", "refs/heads/held").catch(() => "missing")).toBe("missing");

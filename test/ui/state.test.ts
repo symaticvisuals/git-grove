@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import type { Route } from "../../ui/src/parse-route.js";
+import { loadable } from "../../ui/src/loadable.js";
 import { sliceRequests } from "../../ui/src/slice-requests.js";
 import { initialState, reduce, type State, type UiAction } from "../../ui/src/state.js";
 import { activityItem, feature, featureDetail, level, project, repoView } from "./wire-fixtures.js";
@@ -49,6 +50,21 @@ test("every digest marks the project list stale", () => {
   const loaded = reduce(start, { type: "loaded", key: keyOf(start, "projects"), result: { slice: "projects", data: [project()] } });
   const after = reduce(loaded, { type: "event", at: 1, event: { type: "digest", repoId: 9, digest: "x", at: 1 } });
   expect(after.projects).toMatchObject({ status: "ready", stale: true });
+});
+
+test("a digest reloads an activity list that shows its repository, so a CLI receipt appears without a reload", () => {
+  const digest = (repoId: number): UiAction => ({ type: "event", at: 5, event: { type: "digest", repoId, digest: "d", at: 5 } });
+  const tab = reduce(shownRepo(), { type: "tab", tab: "activity" });
+  const repoActivity = reduce(tab, { type: "loaded", key: keyOf(tab, "activity"), result: { slice: "activity", data: [] } });
+  expect(reduce(repoActivity, digest(1)).activity).toMatchObject({ status: "ready", stale: true });
+  expect(loadable(reduce(repoActivity, digest(1)), "activity")).toBe(true);
+  expect(reduce(repoActivity, digest(2)).activity).toMatchObject({ status: "ready", stale: false });
+
+  const start = initialState({ view: "activity" }, "1.0.0");
+  const everywhere = reduce(start, { type: "loaded", key: keyOf(start, "activity"), result: { slice: "activity", data: [] } });
+  expect(reduce(everywhere, digest(9)).activity).toMatchObject({ status: "ready", stale: true });
+  expect(loadable(everywhere, "activity")).toBe(false);
+  expect(loadable(reduce(everywhere, digest(9)), "activity")).toBe(true);
 });
 
 test("a failed reload keeps the last data with the error", () => {

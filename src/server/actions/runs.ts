@@ -19,10 +19,10 @@ export type Runs = {
   /** True once `close` was called. */
   readonly stopping: boolean;
   /**
-   * Refuses new runs and resolves once every run in progress has finished, or after `timeoutMs` (60 s), logging how
-   * many are still going.
+   * Refuses new runs and resolves to true once every run in progress has finished, or to false after `timeoutMs`
+   * (60 s), logging how many are still going.
    */
-  close(options?: { timeoutMs?: number }): Promise<void>;
+  close(options?: { timeoutMs?: number }): Promise<boolean>;
 };
 
 /** `home` is grove's folder, whose config.json the runs read. */
@@ -110,6 +110,7 @@ export function createRuns({ hub, store, snapshots, home }: RunsDeps): Runs {
       const gaveUp = await Promise.race([drained().then(() => false), timedOut]);
       clearTimeout(timer);
       if (gaveUp) process.stderr.write(`git-grove: stopping with ${inFlight.size} run(s) still in progress\n`);
+      return !gaveUp;
     },
   };
 }

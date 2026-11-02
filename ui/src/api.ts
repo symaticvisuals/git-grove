@@ -66,7 +66,8 @@ function isRepoView(value: unknown): value is WireRepoView {
     Array.isArray(value["detached"]) &&
     Array.isArray(value["orphans"]) &&
     Array.isArray(value["findings"]) &&
-    typeof value["cleanupCount"] === "number"
+    typeof value["cleanupCount"] === "number" &&
+    typeof value["rescueCount"] === "number"
   );
 }
 

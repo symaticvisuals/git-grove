@@ -99,3 +99,20 @@ test("close waits for runs, and stopping turns true at once", async () => {
   await closing;
   expect(runs.get(runId)?.receipt).toMatchObject({ ok: true });
 });
+
+test("close resolves true once the runs drained, and false when one is still going after the wait", async () => {
+  let finish = (): void => undefined;
+  const gate = new Promise<void>((resolve) => (finish = resolve));
+  const held: Prepared = { ...checkOnly(), execute: async () => (await gate, { ok: true, title: "Checked", lines: [], undo: null }) };
+  const runs = createRuns({ hub: fakeHub(), store, snapshots: createSnapshots(store), home });
+  const runId = runs.start(repoId, repo.path, held);
+  const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    expect(await runs.close({ timeoutMs: 200 })).toBe(false);
+  } finally {
+    stderr.mockRestore();
+  }
+  finish();
+  await vi.waitFor(() => expect(runs.get(runId)?.receipt).toMatchObject({ ok: true }), { timeout: 10_000 });
+  expect(await runs.close({ timeoutMs: 200 })).toBe(true);
+});

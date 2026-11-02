@@ -1,3 +1,4 @@
+import type { Finding } from "../../../src/core/rules/rule.types.js";
 import type { Health } from "../../../src/server/wire/health-of.js";
 import type { NeedsYouItem } from "../../../src/server/wire/wire.types.js";
 import { html, type SafeHtml } from "../html.js";
@@ -9,6 +10,11 @@ import { empty } from "./empty.js";
 import { loadView } from "./load-view.js";
 import { viewBar } from "./view-bar.js";
 
+function namesIn(finding: Finding): string[] {
+  const [parent = ""] = finding.detail.split(" ", 1);
+  return finding.subject.kind === "level" ? [parent, finding.subject.id] : [finding.subject.id];
+}
+
 function routeOf(item: NeedsYouItem): Route {
   if (item.orphan !== null) return { view: "repo", repo: item.repoId, pick: { kind: "deleted", branch: item.orphan } };
   if (item.featureId === null) return { view: "repo", repo: item.repoId, pick: null };
@@ -16,7 +22,10 @@ function routeOf(item: NeedsYouItem): Route {
   return { view: "repo", repo: item.repoId, pick: { kind: "feature", feature: item.featureId, branch } };
 }
 
-/** Every finding across repos that needs the user, worst first; each opens its detail. */
+/**
+ * Every finding across repos that needs the user, worst first; each opens its detail. Each detail reads as a sentence,
+ * except that a branch or path it starts with keeps its case.
+ */
 export function needsYouView(needs: Load<NeedsYouItem[]> | null): SafeHtml {
   const list = loadView(needs, "needs", (items) => {
     if (items.length === 0) return empty("Nothing needs you");
@@ -27,7 +36,7 @@ export function needsYouView(needs: Load<NeedsYouItem[]> | null): SafeHtml {
       const count = (seen.get(base) ?? 0) + 1;
       seen.set(base, count);
       const health: Health = item.finding.severity === "loses-work" ? "loses" : "action";
-      return html`<div class="row nrow h-${health}" role="button" tabindex="0" data-href="${routeHash(routeOf(item))}" data-key="${base}:${count}"><span class="tcell">${ICONS.health(health)}</span><span class="br"><b>${item.finding.title}</b><span class="mono subject">${item.finding.subject.id}</span><span class="why">${sentence(item.finding.detail)}</span></span><span class="when">${item.repoName}</span></div>`;
+      return html`<div class="row nrow h-${health}" role="button" tabindex="0" data-href="${routeHash(routeOf(item))}" data-key="${base}:${count}"><span class="tcell">${ICONS.health(health)}</span><span class="br"><b>${item.finding.title}</b><span class="mono subject">${item.finding.subject.id}</span><span class="why">${sentence(item.finding.detail, namesIn(item.finding))}</span></span><span class="when">${item.repoName}</span></div>`;
     })}`;
   });
   return html`${viewBar(html`<b>Needs you</b>`)}<div class="list">${list}</div>`;

@@ -45,7 +45,7 @@ function findingSections(input: LevelDetailInput): SafeHtml {
       const plan = preview?.status === "ready" ? preview.data : null;
       const top = moved
         ? banner("warn", "Built on an old version of its parent", `${level.parent} changed under it, so this level's PR would show the parent's old commits again.`)
-        : banner("warn", worst.title, `${sentence(worst.detail)} Restacking moves this level onto ${view.trunk}.`);
+        : banner("warn", worst.title, `${sentence(worst.detail, [level.parent])} Restacking moves this level onto ${view.trunk}.`);
       const text = plan !== null && plan.summary !== "" ? plan.summary : "Moves each level onto the latest version of the level below it.";
       return html`<div class="d-sec">${top}<div class="opts">${optionCard("Restack the whole stack", text, restackButton)}</div></div>${previewChecks("Before you restack", preview, now)}`;
     }

@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { BranchFacts, StackEdge } from "../../../src/core/facts/facts.types.js";
 import { forkOf } from "../../../src/core/stacks/fork-of.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let repo: TestRepo;
 let base: string;

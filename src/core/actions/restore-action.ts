@@ -273,6 +273,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
     plan,
     async execute(run) {
       const results: Moved[] = [];
+      const recorded = new Set<Read>();
       const several = reads.length > 1;
       const stop = (index: number, error: unknown, prefix: string): ExecuteResult => ({
         ok: false,
@@ -288,11 +289,14 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
             const result = await restoreHeld(run.facts, read.branch, read.pinRef, () => stillAt(run.facts.root, read));
             results.push({ read, result });
             await settleRestoredTip(ctx.store, run.facts, read.branch, result.to);
+            recorded.add(read);
           }
           return results.map(({ result }) => describeMove(result)).join("; ");
         });
       } catch (error) {
         if (results.length === 0) throw error;
+        const unrecorded = results.find(({ read }) => !recorded.has(read))?.read;
+        if (unrecorded !== undefined) return stop(run.firstStep, error, `${unrecorded.branch} was restored but not recorded: `);
         const failed = reads[results.length];
         return stop(run.firstStep, error, failed ? `${failed.branch} was not restored: ` : "");
       }

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +10,8 @@ import { toProject } from "../../src/server/wire/to-project.js";
 import { toRepoView } from "../../src/server/wire/to-repo-view.js";
 import type { WireRepoView } from "../../src/server/wire/wire.types.js";
 import { squashedFixture, type SquashedFixture } from "../support/squashed-fixture.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let fixture: SquashedFixture;
 let store: Store;

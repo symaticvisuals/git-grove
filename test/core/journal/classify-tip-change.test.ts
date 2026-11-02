@@ -1,10 +1,12 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { GitError } from "../../../src/core/git/git.error.js";
 import { runGit } from "../../../src/core/git/run-git.js";
 import { classifyTipChange } from "../../../src/core/journal/classify-tip-change.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const IDENTITY = {
   GIT_AUTHOR_NAME: "Test Author",

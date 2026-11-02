@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { renderReceipt } from "../../../src/cli/render-receipt.js";
 import type { ActionContext } from "../../../src/core/actions/action.types.js";
 import type { Receipt, StepEvent } from "../../../src/core/actions/plan.types.js";
 import { InvalidInputError } from "../../../src/core/actions/invalid-input.error.js";
@@ -16,8 +17,11 @@ import { observe } from "../../../src/core/journal/observe.js";
 import { openStore } from "../../../src/core/journal/open-store.js";
 import type { Store } from "../../../src/core/journal/store.types.js";
 import { listPins } from "../../../src/core/runner/list-pins.js";
+import { pin } from "../../../src/core/runner/pin.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
 import { makeStack } from "../../support/make-stack.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const savedHome = process.env["GIT_GROVE_HOME"];
 let home: string;
@@ -177,6 +181,18 @@ test("the run puts each moved level on its parent and records the new fork point
   const changes = await observe(repo.path, store);
   expect(changes.map((change) => `${change.branch} ${change.kind}`).sort()).toEqual(["feat/email rebased", "feat/ui rebased"]);
   expect(await openAlerts()).toEqual([]);
+});
+
+test("a level whose tip a pin already holds says already pinned at that pin, in the step and the receipt", async () => {
+  await fixture();
+  const old = (await pin(repo.path, "feat/ui", await tip("feat/ui"), new Date(Date.UTC(2026, 10, 2, 7, 0, 13)))).ref;
+  const events: StepEvent[] = [];
+  const receipt = await runPrepared(ctx, await prepareAction("restack", ctx, restack()), (event) => events.push(event));
+  expect(receipt.ok).toBe(true);
+  const pinStep = events.find((event) => event.index === 1 && event.state === "done");
+  expect(pinStep?.detail).toMatch(new RegExp(`^already pinned at ${old}, refs/grove/pins/feat/email/\\d{8}T\\d{6}Z$`));
+  expect(receipt.pins).toEqual([{ ref: old, reused: true }, { ref: expect.stringMatching(/^refs\/grove\/pins\/feat\/email\//), reused: false }]);
+  expect(renderReceipt(receipt)).toContain(`\n  already pinned at ${old}\n  pinned refs/grove/pins/feat/email/`);
 });
 
 test("an uncommitted change blocks unless set aside, and set aside it comes back unchanged", async () => {

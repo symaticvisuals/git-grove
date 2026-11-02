@@ -96,7 +96,7 @@ async function journalMove(move: Move): Promise<TipSwap> {
     await throwUnlessGone(root, args, ancestry, [last.sha]);
     return swap(null);
   }
-  const pinRef = await pin(root, branch.name, last.sha, new Date(now));
+  const pinRef = (await pin(root, branch.name, last.sha, new Date(now))).ref;
   const change = await classifyTipChange({ cwd: root, ...tips, ...(await basesOf(move)) });
   const undone = move.undoesRewrite(last.sha, branch.tip);
   return swap({ ...entryOf(change, pinRef, now), acked: undone.length > 0 }, undone);
@@ -112,7 +112,7 @@ async function journalDeletion(root: string, branch: string, oldTip: Sha, now: n
   }
   const lost = unique.stdout.split("\n").filter((line) => line !== "");
   if (lost.length === 0) return swap(null);
-  const pinRef = await pin(root, branch, oldTip, new Date(now));
+  const pinRef = (await pin(root, branch, oldTip, new Date(now))).ref;
   return swap(
     entryOf({ branch, oldTip, newTip: null, kind: "deleted", lost, matchedByPatch: 0, matchedByMeta: 0 }, pinRef, now),
   );

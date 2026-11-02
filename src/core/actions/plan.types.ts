@@ -57,13 +57,16 @@ export type StepEvent = { index: number; state: "running" | "done" | "failed" | 
 
 export type RestoreTarget = { branch: string; pinRef: string };
 
+/** A pin a run took before moving a branch; `reused` when that pin already pointed at the tip before the run. */
+export type ReceiptPin = { ref: string; reused: boolean };
+
 export type Receipt = {
   action: ActionName;
   ok: boolean;
   refused: boolean;
   title: string;
   lines: string[];
-  pins: string[];
+  pins: ReceiptPin[];
   undo: RestoreTarget[] | null;
   at: number;
 };

@@ -4,6 +4,7 @@ import { InvalidInputError } from "../../core/actions/invalid-input.error.js";
 import type { ActionName } from "../../core/actions/plan.types.js";
 import { ACTIONS, prepareAction } from "../../core/actions/registry.js";
 import { readConfig } from "../../core/config/read-config.js";
+import { describeError } from "../../core/describe-error.js";
 import { NotAWorktreeError } from "../../core/facts/not-a-worktree.error.js";
 import { appCommand } from "../../core/open/app-command.js";
 import { launchDetached } from "../../core/open/launch-detached.js";
@@ -44,6 +45,13 @@ function isOpenRequest(value: unknown): value is OpenRequest {
   return isRepoId(value["repo"]) && typeof value["path"] === "string" && (app === "editor" || app === "terminal");
 }
 
+function refusalOf(error: unknown): unknown {
+  if (error instanceof InvalidInputError) return error;
+  if (error instanceof NotAWorktreeError) return new InvalidInputError(errorLine(error));
+  const line = describeError(error);
+  return line === null ? error : new HttpError(409, line.replace(/^git-grove: /, ""));
+}
+
 function planGone(state: "expired" | "taken"): never {
   if (state === "expired") throw new HttpError(410, "This preview expired; preview it again");
   throw new HttpError(409, "This plan already ran");
@@ -54,8 +62,9 @@ async function isFolder(path: string): Promise<boolean> {
 }
 
 /**
- * Adds the action routes. `POST /api/plans` `{ repo, action, input }` previews an action: 200 `{ planId, plan }`, or
- * 400 for input the action refuses, including a path that is not a worktree.
+ * Adds the action routes. `POST /api/plans` `{ repo, action, input }` previews an action: 200 `{ planId, plan }`,
+ * 400 for input the action refuses, including a path that is not a worktree, and 409 with the one-line reason for
+ * any other error a person can act on (`describeError`), such as a repository git can no longer read.
  * `POST /api/actions` `{ planId }` runs that plan once in the background: 202 `{ runId }`, 409 when it already ran,
  * 410 when it expired, and 503 while the server stops, which leaves the plan to run later. `GET /api/runs/:id` is the run's plan, step events and receipt. `POST /api/scan` `{ repo? }`
  * starts a scan: 202. `POST /api/open` `{ repo, path, app }` starts the editor or terminal, without a shell, in `path`,
@@ -71,7 +80,7 @@ export function registerActionRoutes(router: Router): void {
     const snapshot = await readSnapshotOrFail(ctx, repo.id);
     const prepared = await prepareAction(action, { root: snapshot.facts.root, store: ctx.store, now: Date.now }, body.input).catch(
       (error: unknown) => {
-        throw error instanceof NotAWorktreeError ? new InvalidInputError(errorLine(error)) : error;
+        throw refusalOf(error);
       },
     );
     return { status: 200, body: { planId: ctx.plans.put(repo.id, prepared), plan: prepared.plan } };

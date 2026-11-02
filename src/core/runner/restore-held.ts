@@ -53,7 +53,7 @@ export async function restoreHeld(
     throw new RefusedError(`git-grove: ${holder.path} has uncommitted changes`);
   }
 
-  const pinnedCurrent = await pin(facts.root, branch, from, new Date());
+  const pinnedCurrent = (await pin(facts.root, branch, from, new Date())).ref;
   await beforeMove?.();
   if ((await resolveCommit(facts.root, `refs/heads/${branch}`)) !== from) {
     throw new RefusedError(`git-grove: ${branch} moved while restoring; run again`);

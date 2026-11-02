@@ -36,29 +36,26 @@ function orphansOf(snapshot: Snapshot): WireOrphan[] {
   return [...newest.values()];
 }
 
-function cleanupCountOf(snapshot: Snapshot, detached: number): number {
-  let merged = 0;
-  for (const verdict of snapshot.removals.values()) {
-    const rescuable = verdict.reasons.length > 0 && verdict.reasons.every((reason) => reason.code === "precious-ignored");
-    if (verdict.ok || rescuable) merged += 1;
-  }
-  return merged + detached;
+function cleanupOf(snapshot: Snapshot): Pick<WireRepoView, "cleanupCount" | "rescueCount"> {
+  const verdicts = [...snapshot.removals.values(), ...snapshot.sandboxRemovals.values()];
+  const rescuable = verdicts.filter(({ ok, reasons }) => !ok && reasons.length > 0 && reasons.every((reason) => reason.code === "precious-ignored"));
+  return { cleanupCount: verdicts.filter((verdict) => verdict.ok).length, rescueCount: rescuable.length };
 }
 
 /**
  * The dashboard's view of one repository: its features (stacks and singles) with their levels, the detached
- * sandboxes, the deleted branches still unresolved, every finding, and how many worktrees clean up would offer. `project` and `pins` pass through unchanged.
+ * sandboxes, the deleted branches still unresolved, every finding, and how many worktrees clean up would offer: those
+ * whose removal verdict is safe, and those it would remove only after a rescue. `project` and `pins` pass through unchanged.
  */
 export function toRepoView(project: WireProject, snapshot: Snapshot, pins: number): WireRepoView {
-  const detached = sandboxes(snapshot);
   return {
     project: { ...project, pins },
     trunk: snapshot.facts.trunk.name,
     lastFetchAt: snapshot.facts.lastFetchAt,
     features: snapshot.features.filter((feature) => feature.kind !== "detached").map((feature) => toWireFeature(snapshot, feature)),
-    detached,
+    detached: sandboxes(snapshot),
     orphans: orphansOf(snapshot),
     findings: snapshot.findings,
-    cleanupCount: cleanupCountOf(snapshot, detached.length),
+    ...cleanupOf(snapshot),
   };
 }

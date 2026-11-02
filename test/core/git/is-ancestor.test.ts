@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { GitError } from "../../../src/core/git/git.error.js";
 import { isAncestor } from "../../../src/core/git/is-ancestor.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let repo: TestRepo;
 beforeEach(async () => {

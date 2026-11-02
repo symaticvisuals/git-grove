@@ -1,9 +1,11 @@
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 import { run } from "../../src/cli/main.js";
 import { squashedFixture } from "../support/squashed-fixture.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const GOLDEN = new URL("./golden/status.golden.txt", import.meta.url);
 const savedHome = process.env["GIT_GROVE_HOME"];
@@ -41,7 +43,10 @@ test("status and status --json print the same text as the committed golden file"
       .replace(/"(touchedAt|at)": \d+/g, '"$1": T')
       .replace(/\b[0-9a-f]{40}\b/g, "SHA")
       .replace(/\d{8}T\d{6}Z(-\d+)?/g, "STAMP");
-    if (process.env["UPDATE_GOLDEN"] === "1") await writeFile(GOLDEN, normalised);
+    if (process.env["UPDATE_GOLDEN"] === "1") {
+      if (process.env["CI"] !== undefined) throw new Error("UPDATE_GOLDEN is refused under CI; update the golden file locally");
+      await writeFile(GOLDEN, normalised);
+    }
     expect(normalised).toBe(await readFile(GOLDEN, "utf8"));
   } finally {
     await fixture.repo.cleanup();

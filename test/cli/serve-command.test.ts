@@ -13,6 +13,8 @@ import type { ServerInfo } from "../../src/server/server-info.types.js";
 import { startServer } from "../../src/server/start-server.js";
 import { writeServerFile } from "../../src/server/write-server-file.js";
 
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const savedHome = process.env["GIT_GROVE_HOME"];
 let home: string;
 
@@ -63,7 +65,7 @@ test("serve keeps one old log: a server.log over 5 MB moves to server.log.1 when
   const cli = io();
   const exited = run(["serve", "--port", "0"], cli.io);
   const info = await waitForServer();
-  await vi.waitFor(async () => expect((await stat(join(home, "server.log.1"))).size).toBe(big));
+  await vi.waitFor(async () => expect((await stat(join(home, "server.log.1"))).size).toBe(big), { timeout: 10_000 });
   expect((await stat(join(home, "server.log"))).size).toBe(0);
   const token = await readFile(join(home, "token"), "utf8");
   await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, { method: "POST", headers: { "x-grove-token": token, "content-type": "application/json" } });

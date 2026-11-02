@@ -57,7 +57,8 @@ function actions(repo: WireRepoView): PaletteItem[] {
     if (needsRestack(feature)) items.push(action(repo, `Restack ${feature.name}`, "S", "restack", { feature: feature.id }));
     items.push(action(repo, `Add a level to ${feature.name}`, null, "add-level", { feature: feature.id }));
   }
-  if (repo.cleanupCount > 0) items.push(action(repo, "Clean up worktrees", `${repo.cleanupCount} safe`, "cleanup"));
+  const offered = repo.cleanupCount + repo.rescueCount;
+  if (offered > 0) items.push(action(repo, "Clean up worktrees", repo.rescueCount === 0 ? `${repo.cleanupCount} safe` : `${offered}, ${repo.rescueCount} to rescue`, "cleanup"));
   items.push({ kind: "Actions", text: "Scan now", hint: null, run: { scan: repo.project.id } });
   return items;
 }

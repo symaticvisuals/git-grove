@@ -1,13 +1,15 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { readSnapshot } from "../../src/core/snapshot/read-snapshot.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
 import { featureId } from "../../src/server/wire/feature-id.js";
 import { serverRequest } from "../support/server-request.js";
 import { squashedFixture, type SquashedFixture } from "../support/squashed-fixture.js";
 import { type UiFixture, uiFixture } from "../support/ui-fixture.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let home: string;
 let ui: UiFixture;

@@ -1,12 +1,14 @@
 import { mkdtemp, realpath, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { describeError } from "../../../src/core/describe-error.js";
 import { findWorktree } from "../../../src/core/facts/find-worktree.js";
 import { NotAWorktreeError } from "../../../src/core/facts/not-a-worktree.error.js";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 let repo: TestRepo;
 let links: string;

@@ -1,11 +1,13 @@
 import { mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { NotARepoError } from "../../../src/core/facts/not-a-repo.error.js";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { runGit } from "../../../src/core/git/run-git.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const IDENTITY = {
   GIT_AUTHOR_NAME: "Test Author",

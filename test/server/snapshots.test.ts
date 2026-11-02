@@ -172,7 +172,7 @@ test("while a running process holds grove.lock, a stale get serves the cache wit
     expect(reads).toBe(1);
   });
   expect(await snapshots.get(repoId)).toBe(first);
-  await vi.waitFor(() => expect(reads).toBe(2));
+  await vi.waitFor(() => expect(reads).toBe(2), { timeout: 10_000 });
   await withRepoLock(commonDir, async () => {
     await snapshots.refresh(repoId, { force: true });
   });

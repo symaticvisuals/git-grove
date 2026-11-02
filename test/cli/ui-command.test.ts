@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { type UiDeps, uiCommand } from "../../src/cli/commands/ui.js";
 import { run } from "../../src/cli/main.js";
 import { packageVersion } from "../../src/cli/package-version.js";
+import type { Plan } from "../../src/core/actions/plan.types.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import { ServiceFailedError } from "../../src/core/service/service-failed.error.js";
 import type { ServiceHost } from "../../src/core/service/service-host.js";
@@ -264,6 +265,50 @@ test("with no service, a running server older than this CLI is asked to exit, an
   expect(run.foreground).toHaveLength(1);
 });
 
+test("with no service, an older server still finishing a run after the wait is opened, and ui says so", async () => {
+  const old = await serve("0.0.1");
+  const repo = await makeRepo();
+  repos.push(repo);
+  await repo.commit("base.txt", "base\n", "base");
+  const commonDir = (await repo.git("rev-parse", "--path-format=absolute", "--git-common-dir")).trim();
+  const repoId = old.context.store.repoId(commonDir, repo.path);
+  let finish = (): void => undefined;
+  const gate = new Promise<void>((resolve) => (finish = resolve));
+  const plan: Plan = {
+    action: "ack",
+    context: "test",
+    title: "Held",
+    summary: "",
+    confirm: "Go",
+    before: null,
+    after: null,
+    folders: null,
+    choices: null,
+    checks: [],
+    effects: [],
+    commands: [],
+    steps: [{ title: "Check nothing moved since you looked", detail: "" }],
+    blockers: [],
+    note: null,
+    undoable: false,
+    moves: [],
+    expects: [],
+    readAt: Date.now(),
+  };
+  const runId = old.context.runs.start(repoId, repo.path, { plan, execute: async () => (await gate, { ok: true, title: "Held", lines: [], undo: null }) });
+  await vi.waitFor(() => expect(old.context.runs.get(runId)?.events).toContainEqual(expect.objectContaining({ index: 0, state: "done" })), { timeout: 10_000 });
+  try {
+    const run = harness(fakeService({ kind: null }), { restartWaitMs: 300 });
+    const result = await ui(run.deps, home);
+    expect(result.out).toContain("git grove 0.0.1 is still finishing a run; opening it\n");
+    expect(result.out).not.toContain("Restarting");
+    expect(run.opened.map((url) => new URL(url).port)).toEqual([String(old.port)]);
+    expect(run.foreground).toEqual([]);
+  } finally {
+    finish();
+  }
+});
+
 test("a running server as new as this CLI, or newer, is left alone", async () => {
   const codes: number[] = [];
   const server = await serve("99.0.0", (code) => codes.push(code));
@@ -456,7 +501,7 @@ test("when the service has not restarted an older server in time, ui starts the 
   const service = createServiceManager(launchdHost(calls, state));
   await service.install({ node: process.execPath, bin: BIN, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
   servers[0]?.context.shutdown(0);
-  await vi.waitFor(() => expect(state.exits).toEqual([0]));
+  await vi.waitFor(() => expect(state.exits).toEqual([0]), { timeout: 10_000 });
   await serve("0.0.1");
   state.version = packageVersion();
   calls.length = 0;

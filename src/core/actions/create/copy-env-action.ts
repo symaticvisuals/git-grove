@@ -9,6 +9,7 @@ import { displayPath } from "../display-path.js";
 import { InvalidInputError } from "../invalid-input.error.js";
 import { listPaths } from "../list-paths.js";
 import type { Plan } from "../plan.types.js";
+import { shellWord } from "../shell-word.js";
 import { copyEnvFiles } from "./copy-env-files.js";
 
 const SHAPE = "copy-env takes { worktree }";
@@ -44,7 +45,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
       ...(present > 0 ? [{ ok: true, text: `${plural(present, "file")} already there`, why: "Left as they are" }] : []),
     ],
     effects: [],
-    commands: missing.map((file) => `cp ${file} ${shown}/${file}`),
+    commands: missing.map((file) => `cp -n ${shellWord(file)} ${shellWord(`${shown}/${file}`)}`),
     steps: [
       { title: "Check nothing moved since you looked", detail: `${plural(missing.length, "file")} still missing` },
       { title: `Copy ${plural(missing.length, "env file")}`, detail: "Never overwriting" },

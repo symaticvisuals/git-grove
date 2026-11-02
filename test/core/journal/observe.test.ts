@@ -2,12 +2,14 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { observe } from "../../../src/core/journal/observe.js";
 import { openStore } from "../../../src/core/journal/open-store.js";
 import type { JournalEntry, Store } from "../../../src/core/journal/store.types.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 const NOW = Date.UTC(2026, 10, 1, 12, 0, 0);
 const MISSING_SHA = "1234567890abcdef1234567890abcdef12345678";

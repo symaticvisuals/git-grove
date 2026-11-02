@@ -277,7 +277,6 @@ function openIn(app: "editor" | "terminal", path: string | undefined): void {
   );
 }
 
-/** A git action (restore, ack, restack, remove, copy-env, cleanup, new, add-level) opens its dialog; editor and terminal open; the palette opens. */
 function openAction(name: string, data: ActionData): void {
   if (name === "palette") {
     dispatch({ type: "palette-open" });

@@ -64,11 +64,17 @@ test("a receipt renders its title, lines, pins and undo command", () => {
     refused: false,
     title: "Restored 3 commits on feat",
     lines: ["3 of 3 commits are back"],
-    pins: [PIN],
+    pins: [{ ref: PIN, reused: false }],
     undo: [{ branch: "feat", pinRef: PIN }],
     at: 0,
   };
   expect(renderReceipt(receipt)).toBe(
     `✓ Restored 3 commits on feat\n  3 of 3 commits are back\n  pinned ${PIN}\n  undo: git grove restore feat ${PIN}\n`,
   );
+});
+
+test("a pin that already pointed at the tip reads already pinned, not pinned", () => {
+  const old = "refs/grove/pins/feat/coupon-ui/20261102T070013Z";
+  const receipt: Receipt = { action: "restack", ok: true, refused: false, title: "Restacked 1 level", lines: [], pins: [{ ref: old, reused: true }], undo: null, at: 0 };
+  expect(renderReceipt(receipt)).toBe(`✓ Restacked 1 level\n  already pinned at ${old}\n`);
 });

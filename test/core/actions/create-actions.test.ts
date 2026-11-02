@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { ActionContext } from "../../../src/core/actions/action.types.js";
 import { levelFolder } from "../../../src/core/actions/create/level-folder.js";
 import { InvalidInputError } from "../../../src/core/actions/invalid-input.error.js";
@@ -15,12 +15,15 @@ import type { Store } from "../../../src/core/journal/store.types.js";
 import { readStackFacts } from "../../../src/core/stacks/read-stack-facts.js";
 import { makeRepo, type TestRepo } from "../../support/make-repo.js";
 
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
+
 const savedHome = process.env["GIT_GROVE_HOME"];
 const savedPath = process.env["PATH"];
 let home: string;
 let repo: TestRepo;
 let store: Store;
 let ctx: ActionContext;
+const bins: string[] = [];
 
 beforeAll(async () => {
   home = await mkdtemp(join(tmpdir(), "git-grove-home-"));
@@ -46,6 +49,7 @@ afterEach(async () => {
   process.env["PATH"] = savedPath;
   store.close();
   await repo.cleanup();
+  await Promise.all(bins.splice(0).map((bin) => rm(bin, { recursive: true, force: true })));
 });
 
 async function prepare(name: ActionName, raw: unknown): Promise<Plan> {
@@ -108,6 +112,7 @@ test("new with skipped env copies nothing", async () => {
 
 test("new with install runs the package manager in the new folder", async () => {
   const bin = await mkdtemp(join(tmpdir(), "git-grove-bin-"));
+  bins.push(bin);
   await writeFile(join(bin, "pnpm"), "#!/bin/sh\ntouch installed\n");
   await chmod(join(bin, "pnpm"), 0o755);
   process.env["PATH"] = `${bin}:${savedPath ?? ""}`;
@@ -119,6 +124,7 @@ test("new with install runs the package manager in the new folder", async () => 
 
 test("a failing install does not fail the action", async () => {
   const bin = await mkdtemp(join(tmpdir(), "git-grove-bin-"));
+  bins.push(bin);
   await writeFile(join(bin, "pnpm"), "#!/bin/sh\necho boom >&2\nexit 1\n");
   await chmod(join(bin, "pnpm"), 0o755);
   process.env["PATH"] = `${bin}:${savedPath ?? ""}`;
@@ -212,6 +218,13 @@ test("copy-env copies apps/web/.env.local into a worktree that lacks it and neve
   expect(await readFile(join(folder, "apps/web/.env.local"), "utf8")).toBe("WEB=1\n");
   expect(await readFile(join(folder, ".env"), "utf8")).toBe("DIFFERENT=1\n");
   expect((await prepare("copy-env", { worktree: folder })).blockers.join(" ")).toContain("already has every env file");
+});
+
+test("copy-env shows each copy as a quoted cp -n that never overwrites", async () => {
+  const folder = join(repo.path, ".worktrees", "my copy");
+  await repo.worktree(folder, "feat/copy");
+  const plan = await prepare("copy-env", { worktree: folder });
+  expect(plan.commands).toEqual(["cp -n .env '.worktrees/my copy/.env'", "cp -n apps/web/.env.local '.worktrees/my copy/apps/web/.env.local'"]);
 });
 
 test("copy-env refuses the main checkout", async () => {

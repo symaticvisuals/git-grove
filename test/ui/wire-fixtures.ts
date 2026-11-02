@@ -42,7 +42,7 @@ export function feature(overrides: Partial<WireFeature> = {}): WireFeature {
 }
 
 export function repoView(overrides: Partial<WireRepoView> = {}): WireRepoView {
-  return { project: project(), trunk: "main", lastFetchAt: null, features: [feature()], detached: [], orphans: [], findings: [], cleanupCount: 0, ...overrides };
+  return { project: project(), trunk: "main", lastFetchAt: null, features: [feature()], detached: [], orphans: [], findings: [], cleanupCount: 0, rescueCount: 0, ...overrides };
 }
 
 export function featureDetail(overrides: Partial<WireFeatureDetail> = {}): WireFeatureDetail {

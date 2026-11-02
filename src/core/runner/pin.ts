@@ -14,25 +14,28 @@ async function target(cwd: string, ref: string): Promise<string | null> {
   return result.code === 0 ? result.stdout.trim() : null;
 }
 
+/** The pin's ref; `reused` when the ref already pointed at the sha, so this call created nothing. */
+export type Pinned = { ref: string; reused: boolean };
+
 /**
- * Pins `sha` for `branch` and returns the ref. A pin of the branch already at `sha` is reused; otherwise it creates
+ * Pins `sha` for `branch`. A pin of the branch already at `sha` is reused; otherwise it creates
  * `refs/grove/pins/<branch>/<UTC timestamp>`, appending `-2`, `-3`… when the ref holds another sha,
  * including when another process creates it first.
  */
-export async function pin(cwd: string, branch: string, sha: Sha, at: Date): Promise<string> {
+export async function pin(cwd: string, branch: string, sha: Sha, at: Date): Promise<Pinned> {
   const existing = (await listPins(cwd, branch)).find((entry) => entry.sha === sha);
-  if (existing) return existing.ref;
+  if (existing) return { ref: existing.ref, reused: true };
   const base = `${PINS_PREFIX}${branch}/${stamp(at)}`;
   for (let attempt = 1; ; attempt++) {
     const ref = attempt === 1 ? base : `${base}-${attempt}`;
     const before = await target(cwd, ref);
-    if (before === sha) return ref;
+    if (before === sha) return { ref, reused: true };
     if (before !== null) continue;
     const args = ["update-ref", ref, sha, ""];
     const created = await runGit(args, { cwd, write: true, allowFailure: true });
-    if (created.code === 0) return ref;
+    if (created.code === 0) return { ref, reused: false };
     const after = await target(cwd, ref);
-    if (after === sha) return ref;
+    if (after === sha) return { ref, reused: true };
     if (after === null) throw new GitError(args, created.code, created.stderr);
   }
 }

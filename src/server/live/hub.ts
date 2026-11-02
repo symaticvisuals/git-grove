@@ -12,7 +12,11 @@ import type { Snapshots } from "./snapshots.js";
 import { watchRepo } from "./watch-repo.js";
 
 export type Hub = {
-  /** Reads `repoId` (every repository when omitted) while a running process holds `grove.lock` (a dead pid does not count), which the lock's removal retries. Failures become one `scan-error` activity per distinct message. */
+  /**
+   * Reads `repoId` (every repository when omitted), skipping a repository while a running process holds its `grove.lock`
+   * (a dead pid does not count); removing the lock is a change the watcher sees, which scans it then. Failures become
+   * one `scan-error` activity per distinct message.
+   */
   scan(repoId?: number): Promise<void>;
   /** Calls `listener` for every event; `onClose` runs when the hub closes. Returns the unsubscribe function. */
   subscribe(listener: (event: ServerEvent) => void, onClose?: () => void): () => void;

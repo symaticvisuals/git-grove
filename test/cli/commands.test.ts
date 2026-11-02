@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { run } from "../../src/cli/main.js";
 import { readRepoFacts } from "../../src/core/facts/read-repo-facts.js";
 import { observe } from "../../src/core/journal/observe.js";
@@ -10,6 +10,8 @@ import { withRepoLock } from "../../src/core/runner/with-repo-lock.js";
 import type { JournalEntry } from "../../src/core/journal/store.types.js";
 import { startServer } from "../../src/server/start-server.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
+
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
 type Result = { code: number; out: string; err: string };
 

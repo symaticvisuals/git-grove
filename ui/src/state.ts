@@ -154,7 +154,9 @@ function onActivity(state: State, item: ActivityItem): State {
 
 function onDigest(state: State, repoId: number, at: number): State {
   const shown = state.route.view === "repo" && state.route.repo === repoId;
+  const listed = activityQuery(state);
   const slices: SliceName[] = shown ? ["projects", "needs", "pins", "repo", "feature", "preview"] : ["projects", "needs", "pins"];
+  if (listed !== null && (listed.repo === undefined || listed.repo === repoId)) slices.push("activity");
   const checked: State = { ...state, projectsCheckedAt: at };
   return slices.reduce((next, slice) => update(next, slice, invalidate), checked);
 }
@@ -268,7 +270,8 @@ export function initialState(route: Route, pageVersion: string): State {
 
 /**
  * The next state; pure. A reply is kept only for the slice and key the state still asks for. A digest reloads the
- * slices it concerns, failed ones included; an activity event joins the lists it belongs to; while live, the project
+ * slices it concerns, failed ones included, among them an activity list that shows its repository, so activity another
+ * process recorded, such as a CLI receipt, appears; an activity event joins the lists it belongs to; while live, the project
  * list reloads every 30 s; and once the live stream is back after dropping, every slice is reloaded. A slice the
  * route no longer needs is cleared; one it newly needs starts loading. A route to a row in a folded group unfolds it. Dialog, run and palette actions, and the
  * step and receipt events, go to `reduceDialog`; a stream that is back after dropping reads the current run again.

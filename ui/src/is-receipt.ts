@@ -5,6 +5,10 @@ function isStrings(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function isPin(value: unknown): boolean {
+  return isRecord(value) && typeof value["ref"] === "string" && typeof value["reused"] === "boolean";
+}
+
 function isTarget(value: unknown): boolean {
   return isRecord(value) && typeof value["branch"] === "string" && typeof value["pinRef"] === "string";
 }
@@ -18,7 +22,8 @@ export function isReceipt(value: unknown): value is Receipt {
     typeof value["refused"] === "boolean" &&
     typeof value["title"] === "string" &&
     isStrings(value["lines"]) &&
-    isStrings(value["pins"]) &&
+    Array.isArray(value["pins"]) &&
+    value["pins"].every(isPin) &&
     (value["undo"] === null || (Array.isArray(value["undo"]) && value["undo"].every(isTarget))) &&
     typeof value["at"] === "number"
   );

@@ -14,7 +14,7 @@ const ctx: DialogContext = { repo: repoView({ features: [stack] }), feature: sta
 const ARMED = { planId: "p1", armed: true, missing: null };
 
 function receipt(overrides: Partial<Receipt> = {}): Receipt {
-  return { action: "restore", ok: true, refused: false, title: "Restored 3 commits on feat/x", lines: ["Moved feat/x from f01aa41 to d598a02"], pins: ["refs/grove/pins/feat/x/1"], undo: null, at: 1_000, ...overrides };
+  return { action: "restore", ok: true, refused: false, title: "Restored 3 commits on feat/x", lines: ["Moved feat/x from f01aa41 to d598a02"], pins: [{ ref: "refs/grove/pins/feat/x/1", reused: false }], undo: null, at: 1_000, ...overrides };
 }
 
 function tagOf(text: string, marker: string): string {

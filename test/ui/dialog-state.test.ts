@@ -42,7 +42,7 @@ function step(index: number, state: StepEvent["state"], ms: number | null = null
 }
 
 function receipt(overrides: Partial<Receipt> = {}): Receipt {
-  return { action: "restack", ok: true, refused: false, title: "Restacked 1 level", lines: [], pins: ["refs/grove/pins/feat/coupons-ui/1"], undo: [{ branch: "feat/coupons-ui", pinRef: "refs/grove/pins/feat/coupons-ui/1" }], at: 9, ...overrides };
+  return { action: "restack", ok: true, refused: false, title: "Restacked 1 level", lines: [], pins: [{ ref: "refs/grove/pins/feat/coupons-ui/1", reused: false }], undo: [{ branch: "feat/coupons-ui", pinRef: "refs/grove/pins/feat/coupons-ui/1" }], at: 9, ...overrides };
 }
 
 function running(): State {
