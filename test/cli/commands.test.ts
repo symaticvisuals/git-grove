@@ -277,6 +277,16 @@ test("check remove refuses a merged worktree holding .local/seed.sql", async () 
   expect(verdict).toMatchObject({ ok: false, reasons: [{ code: "precious-ignored", paths: [".local/seed.sql"] }] });
 });
 
+test("check remove takes a worktree's bare name, as git worktree remove does", async () => {
+  await repo.switch("main");
+  await repo.worktree(join(repo.path, ".worktrees", "old"), "old");
+  await write(join(repo.path, ".worktrees", "old", ".local", "seed.sql"), "insert;\n");
+
+  const result = await grove(["check", "remove", "old"]);
+  expect(result).toMatchObject({ code: 3, err: "" });
+  expect(result.out).toContain(".local/seed.sql");
+});
+
 test("check remove refuses a worktree holding an ignored git repository whose files all match main", async () => {
   await repo.switch("main");
   const clone = join(repo.path, ".worktrees", "old", ".local", "clone");

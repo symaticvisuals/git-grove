@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { GuardDecision } from "../../../src/core/guard/guard-decision.types.js";
 import { evaluateCommandLine } from "../../../src/core/guard/evaluate-command-line.js";
@@ -61,6 +61,25 @@ test("git worktree remove --force of a merged worktree holding a precious ignore
   );
 });
 
+test("git worktree remove of a worktree by its bare name, as git resolves it, is blocked from the root", async () => {
+  await preciousWorktree();
+  expect(await expectBlocked("git worktree remove --force x")).toContain(".worktrees/x is not safe to remove");
+  expect(await expectBlocked("git worktree remove x")).toContain(".worktrees/x is not safe to remove");
+});
+
+test("git worktree remove by bare name is blocked from a sibling worktree", async () => {
+  await preciousWorktree();
+  const sibling = join(root, ".worktrees", "sibling");
+  await repo.worktree(sibling, "sibling");
+  expect(await expectBlocked("git worktree remove --force x", sibling)).toContain("../x is not safe to remove");
+});
+
+test("git -C <repo> worktree remove -f <name> from the parent folder is blocked", async () => {
+  await preciousWorktree();
+  const message = await expectBlocked(`git -C ${basename(root)} worktree remove -f x`, dirname(root));
+  expect(message).toContain(".local/seed.sql");
+});
+
 test("cd .worktrees && rm -rf x is blocked, with the path as seen from where the agent stands", async () => {
   await preciousWorktree();
   const message = await expectBlocked("cd .worktrees && rm -rf x");
@@ -108,7 +127,7 @@ test("git reset --hard with uncommitted changes is blocked", async () => {
   await repo.git("add", "staged.txt");
   expect(await expectBlocked("git reset --hard")).toBe(
     "git grove blocked: this worktree has 2 uncommitted changes that git reset --hard would discard. " +
-      "Commit them, or set them aside with git stash first.",
+      "Commit them, or run git stash on its own first, then retry.",
   );
 });
 
@@ -118,9 +137,41 @@ test("from a folder inside the worktree, the block still names this worktree", a
   expect(await expectBlocked("git reset --hard", join(root, "src"))).toMatch(/^git grove blocked: this worktree has 1 uncommitted change/);
 });
 
-test("git stash before git reset --hard in the same line lets it through", async () => {
+test("a git stash earlier in the same line does not let a discard through", async () => {
   await writeFile(join(root, "base.txt"), "edited\n");
-  await expectAllowed("git stash && git reset --hard");
+  for (const line of ["git stash && git reset --hard", "git stash; git checkout -- .", "git stash push -- base.txt && git reset --hard"]) {
+    expect(await expectBlocked(line), line).toContain("run git stash on its own first, then retry");
+  }
+});
+
+/** Leaves main mid-merge with base.txt conflicted and other.txt changed locally before the merge. */
+async function conflictedMerge(): Promise<void> {
+  await repo.branch("theirs");
+  await repo.switch("theirs");
+  await repo.commit("base.txt", "theirs\n", "theirs");
+  await repo.switch("main");
+  await repo.commit("base.txt", "ours\n", "ours");
+  await repo.git("merge", "theirs").catch(() => undefined);
+}
+
+test("git's conflict tools are allowed mid-merge: --ours, --theirs, -m and --conflict", async () => {
+  await conflictedMerge();
+  for (const line of [
+    "git checkout --theirs -- base.txt",
+    "git checkout --ours .",
+    "git restore --theirs base.txt",
+    "git checkout -m -- base.txt",
+    "git checkout --merge base.txt",
+    "git restore --conflict=diff3 base.txt",
+  ]) {
+    expect((await evaluate(line)).verdict, line).toBe("allow");
+  }
+});
+
+test("a path-scoped discard does not count unmerged paths; reset --hard does", async () => {
+  await conflictedMerge();
+  await expectAllowed("git checkout -- base.txt");
+  expect(await expectBlocked("git reset --hard")).toContain("has 1 uncommitted change that git reset --hard would discard");
 });
 
 test("git reset --hard HEAD~1 on a clean tree is allowed and pins the old tip", async () => {

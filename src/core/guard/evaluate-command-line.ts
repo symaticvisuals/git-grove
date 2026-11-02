@@ -48,7 +48,6 @@ export async function evaluateCommandLine(input: GuardInput, now: () => Date = (
 
   let unchecked = false;
   const pending: PendingPin[] = [];
-  const setAside = new Set<string>();
   for (const command of line.commands) {
     const check = classifyCommand(command);
     if (check.kind === "unchecked") unchecked = true;
@@ -59,11 +58,8 @@ export async function evaluateCommandLine(input: GuardInput, now: () => Date = (
     } else if (check.kind === "recursive-rm") {
       const block = await judgeRecursiveRm(check, from);
       if (block !== null) return blocked(block);
-    } else if (check.kind === "set-aside") {
-      const head = await readWorktreeHead(check.cwd).catch(() => null);
-      if (head !== null) setAside.add(head.top);
     } else if (check.kind === "discard") {
-      const judged = await judgeDiscard(check, from, setAside);
+      const judged = await judgeDiscard(check, from);
       if (judged.block !== null) return blocked(judged.block);
       pending.push(...judged.pins);
     } else if (check.kind === "pin") {

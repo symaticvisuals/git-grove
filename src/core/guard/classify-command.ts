@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { shellWord } from "../actions/shell-word.js";
-import type { DiscardSide, GuardCheck, PinRequest } from "./guard-check.types.js";
+import type { DiscardScope, DiscardSide, GuardCheck, PinRequest } from "./guard-check.types.js";
 import { type GitCall, parseGitCall } from "./parse-git-call.js";
 import { readOptions } from "./read-options.js";
 import type { ShellWord, SimpleCommand } from "./shell-line.types.js";
@@ -12,6 +12,7 @@ const UNCHECKED: GuardCheck = { kind: "unchecked" };
 const HEAD: PinRequest = { kind: "head" };
 const SHOWN_LENGTH = 120;
 const REBASE_CONTROLS = ["--continue", "--abort", "--skip", "--quit", "--edit-todo", "--show-current-patch"];
+const CONFLICT_TOOLS = ["--ours", "--theirs", "-m", "--merge", "--conflict"];
 
 const ACK = "git grove ack marks a rewrite or a deleted branch as intended, and that is for a person to decide. Tell the user what you found instead.";
 const PRUNE = "git grove pins prune deletes pins, which may hold the only copy of some commits, and that is for a person to decide. Ask the user to run it.";
@@ -62,9 +63,11 @@ function recursiveRm(args: readonly ShellWord[], cwd: string | null, text: strin
   return { kind: "recursive-rm", cwd, verb: "rm -r", text, paths };
 }
 
-function discard(at: At, verb: string, text: string, side: DiscardSide, pathspecs: readonly ShellWord[], moveTo: ShellWord | undefined): GuardCheck {
+type Discard = { verb: string; text: string; side: DiscardSide; scope: DiscardScope; pathspecs: readonly ShellWord[]; moveTo?: ShellWord };
+
+function discard(at: At, { verb, text, side, scope, pathspecs, moveTo }: Discard): GuardCheck {
   if (anyDynamic(pathspecs) || moveTo?.dynamic) return UNCHECKED;
-  return at((cwd) => ({ kind: "discard", cwd, verb, text, side, pathspecs: texts(pathspecs), moveTo: moveTo?.text ?? null }));
+  return at((cwd) => ({ kind: "discard", cwd, verb, text, side, scope, pathspecs: texts(pathspecs), moveTo: moveTo?.text ?? null }));
 }
 
 function pin(at: At, verb: string, text: string, names: readonly ShellWord[], pins: PinRequest[]): GuardCheck {
@@ -74,27 +77,28 @@ function pin(at: At, verb: string, text: string, names: readonly ShellWord[], pi
 
 function checkout(at: At, args: readonly ShellWord[], text: string): GuardCheck {
   const read = readOptions(args, new Set(["-b", "-B", "--orphan"]));
-  if (hasAny(read.options, ["-b", "-B", "--orphan", "--detach", "-p", "--patch"])) return NONE;
+  if (hasAny(read.options, [...CONFLICT_TOOLS, "-b", "-B", "--orphan", "--detach", "-p", "--patch"])) return NONE;
+  const verb = "git checkout";
   const fromFile = read.options.has("--pathspec-from-file");
   if (read.afterDashes !== null || fromFile) {
     const pathspecs = read.afterDashes ?? [];
     if (pathspecs.length === 0 && !fromFile) return NONE;
-    return discard(at, "git checkout", text, read.operands.length > 0 ? "all" : "unstaged", pathspecs, undefined);
+    return discard(at, { verb, text, side: read.operands.length > 0 ? "all" : "unstaged", scope: "paths", pathspecs });
   }
   if (!read.operands.some((word) => word.text === ".")) return NONE;
   const [first, ...rest] = read.operands;
   const fromTree = first !== undefined && first.text !== "." && rest.length > 0;
-  return discard(at, "git checkout", text, fromTree ? "all" : "unstaged", fromTree ? rest : read.operands, undefined);
+  return discard(at, { verb, text, side: fromTree ? "all" : "unstaged", scope: "paths", pathspecs: fromTree ? rest : read.operands });
 }
 
 function restore(at: At, args: readonly ShellWord[], text: string): GuardCheck {
   const read = readOptions(args, new Set(["-s", "--source"]));
-  if (hasAny(read.options, ["-p", "--patch"])) return NONE;
+  if (hasAny(read.options, [...CONFLICT_TOOLS, "-p", "--patch"])) return NONE;
   const staged = hasAny(read.options, ["-S", "--staged"]);
   if (staged && !hasAny(read.options, ["-W", "--worktree"])) return NONE;
   const pathspecs = [...read.operands, ...(read.afterDashes ?? [])];
   if (pathspecs.length === 0 && !read.options.has("--pathspec-from-file")) return NONE;
-  return discard(at, "git restore", text, staged ? "all" : "unstaged", pathspecs, undefined);
+  return discard(at, { verb: "git restore", text, side: staged ? "all" : "unstaged", scope: "paths", pathspecs });
 }
 
 function rebase(at: At, args: readonly ShellWord[], text: string): GuardCheck {
@@ -149,17 +153,13 @@ function git(call: GitCall, text: string): GuardCheck {
     }
     case "reset": {
       const read = readOptions(args);
-      return read.options.has("--hard") ? discard(at, "git reset --hard", text, "all", [], read.operands[0]) : NONE;
+      const moveTo = read.operands[0];
+      return read.options.has("--hard") ? discard(at, { verb: "git reset --hard", text, side: "all", scope: "tree", pathspecs: [], ...(moveTo === undefined ? {} : { moveTo }) }) : NONE;
     }
     case "checkout":
       return checkout(at, args, text);
     case "restore":
       return restore(at, args, text);
-    case "stash": {
-      const sub = args[0]?.text;
-      const setsAside = sub === undefined || sub.startsWith("-") || sub === "push" || sub === "save";
-      return setsAside && call.cwd !== null ? { kind: "set-aside", cwd: call.cwd } : NONE;
-    }
     case "rebase":
       return rebase(at, args, text);
     case "commit":

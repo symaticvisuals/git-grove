@@ -76,9 +76,31 @@ test("restore of the index only, a branch switch and other resets are not discar
   );
 });
 
-test("git stash sets changes aside; stash drop and clear are allowed for now", () => {
-  expect(kinds(["git stash", "git stash push -m wip", "git stash -u", "git stash save wip"])).toEqual(["set-aside", "set-aside", "set-aside", "set-aside"]);
+test("git stash is not guarded, and earns no credit for a later discard; stash drop and clear are allowed for now", () => {
+  expect(kinds(["git stash", "git stash push -m wip", "git stash -u", "git stash save wip"])).toEqual(["none", "none", "none", "none"]);
   expect(kinds(["git stash drop", "git stash clear", "git stash pop", "git stash list"])).toEqual(["none", "none", "none", "none"]);
+});
+
+test("checkout and restore with --ours, --theirs, -m, --merge or --conflict resolve conflicts and are not discards", () => {
+  expect(
+    kinds([
+      "git checkout --theirs -- a.txt",
+      "git checkout --ours .",
+      "git checkout -m -- a.txt",
+      "git checkout --merge a.txt",
+      "git checkout --conflict=diff3 -- a.txt",
+      "git restore --theirs a.txt",
+      "git restore --ours -- a.txt",
+      "git restore -m a.txt",
+      "git restore --conflict=merge a.txt",
+    ]),
+  ).toEqual(["none", "none", "none", "none", "none", "none", "none", "none", "none"]);
+});
+
+test("path discards are scoped to their paths, and reset --hard to the whole tree", () => {
+  expect(check("git checkout -- a.txt")).toMatchObject({ kind: "discard", scope: "paths" });
+  expect(check("git restore a.txt")).toMatchObject({ kind: "discard", scope: "paths" });
+  expect(check("git reset --hard")).toMatchObject({ kind: "discard", scope: "tree" });
 });
 
 test("rebase and amend pin the current tip, or the branch rebase names", () => {
