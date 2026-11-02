@@ -195,11 +195,15 @@ is slow to start.
 Installing it is a review like any dashboard change. While the guard is missing from Claude Code's user settings
 (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`), or points at an old Node or grove path, the
 projects page offers it in a card, and the sidebar and ⌘K reach the same dialog. `src/core/guard-install/` parses the
-file strictly, refuses one that is not a JSON object or whose `hooks.PreToolUse` is not a list, and plans the new text:
-any grove hook is taken out and one group of grove's own is appended, never merged into a user's `Bash` group. The
-dialog shows the file, its backup and the exact JSON. Confirming re-reads the file and refuses if its SHA-256 changed
-since the review, copies it to `settings.json.grove-backup`, and renames a temp file with the old mode over it. Undo is
-an uninstall planned against the file as it is then, so later edits survive. These routes change no repository, so
+file strictly, and refuses one that is not a JSON object, whose `hooks.PreToolUse` is not a list, that is read-only,
+starts with a byte-order mark, is a link to a missing file, or holds a number it cannot write back exactly. It then
+plans the new text: any grove hook is taken out and one group of grove's own is appended, never merged into a user's
+`Bash` group. The dialog shows the file, its backup and the exact JSON. Confirming writes the new text to a temp file,
+checks that the file's SHA-256 is still the one the review saw, copies the old bytes to `settings.json.grove-backup`
+(and, the first time, to `settings.json.grove-original`, never overwritten), and renames the temp file into place, so
+a failure before the rename leaves every earlier copy as it was. Undo is an uninstall planned against the file as it
+is then, so later edits survive. The login service carries `CLAUDE_CONFIG_DIR`, so the server edits the file Claude
+Code reads. These routes change no repository, so
 they take no repo lock and pin nothing (`src/server/api/guard-routes.ts`). Tests in
 `test/core/guard-install/plan-guard-install.test.ts` and `test/server/guard-api.test.ts`, among them "installing
 keeps every other setting and every other group, the user's own Bash group included, in order, and never merges into
@@ -352,7 +356,7 @@ What it does not handle yet:
 
 ## 5. What's built and what's next
 
-Built, with 1081 tests in 119 files (vitest against real temporary git repositories):
+Built, with 1108 tests in 119 files (vitest against real temporary git repositories):
 
 - the CLI: `status`, `restore`, `ack`, `pins list`, `check remove`, `new`, `add-level`, `restack`, `stack plan`,
   `rm [--rescue]`, `ui`, `serve`, `service install|uninstall|status`, `install-guard` and `guard --claude`;

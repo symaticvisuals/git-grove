@@ -20,8 +20,10 @@ pnpm install && pnpm build && pnpm demo
 `scripts/demo.sh` builds a throwaway repository with a three-level stack in a temp folder. It squashes one level the
 way an agent might, and leaves a merged worktree holding the only copy of an ignored `.local/seed.sql`. Then
 `git grove status` reports both, `git grove check remove` refuses the worktree with exit 3, the agent guard blocks a
-`git worktree remove --force` of it with exit 2, and `restore` and `rm --rescue` put things right. The demo uses its own temp `GIT_GROVE_HOME`, `HOME` and git config, installs nothing
-and needs no network. At the end it prints how to open the dashboard on the same repository.
+`git worktree remove --force` of it with exit 2, and `restore` and `rm --rescue` put things right. The demo uses its
+own temp `GIT_GROVE_HOME`, `HOME`, `CLAUDE_CONFIG_DIR` and git config, installs nothing and needs no network. At the
+end it prints how to open the dashboard on the same repository, with the same temp folders, so an agent guard
+installed there goes into the demo's own Claude Code settings.
 
 ## Install
 
@@ -82,28 +84,39 @@ git grove ui
 ```
 
 While the guard is not installed, or points at an old Node or grove path, the projects page shows a card, "Protect
-worktrees from Claude Code", with Install… and Not now (remembered in the browser). Install… opens the same kind of
-review as every other dashboard change: the settings file it writes, the backup it keeps, the exact JSON group it adds
-to `hooks.PreToolUse`, and that your other settings and hooks are kept. The sidebar says "Agent guard on" or "Agent
-guard off" and opens the same dialog, and ⌘K offers "Install agent guard" and "Uninstall agent guard".
+worktrees from Claude Code", with Install… and Not now. Not now is remembered in the browser for that state, so a
+guard that later goes out of date shows the card once more. Install… opens the same kind of review as every other
+dashboard change: the settings file it writes, the backup it keeps, the exact JSON group it adds to
+`hooks.PreToolUse`, and that your other settings and hooks are kept. The sidebar says "Agent guard on" or "Agent guard
+off" and opens the same dialog, and ⌘K offers "Install agent guard" and "Uninstall agent guard".
 
 grove writes Claude Code's settings only when you confirm a review that shows exactly what changes. It keeps a backup,
 and Undo or Uninstall removes only grove's entry:
 
-- It writes your user settings, `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when the server sees
-  that variable, so one install covers every repository. The dialog always shows the full path.
+- It writes your user settings, `~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json` when that variable
+  is set, so one install covers every repository. The login service carries `CLAUDE_CONFIG_DIR` from the shell that
+  ran `git grove ui`, and `ui` says so when the running server and your shell would use different files. The dialog
+  always shows the full path.
 - It adds one group of its own, `{ "matcher": "Bash", "hooks": [{ "type": "command", "command": …, "timeout": 10 }] }`,
-  and never merges into a `Bash` group of yours. A stale grove entry is replaced; two become one.
-- It reads the file again when you confirm and refuses if it changed since the review. It copies the old file to
-  `settings.json.grove-backup`, writes the new one to a temp file in the same folder with the old file's mode (0600
-  for a new file), and renames it into place. A symbolic link stays a link.
+  and never merges into a `Bash` group of yours. grove's entry is a hook whose command ends in
+  `/dist/cli/bin.js guard --claude` or names `git-grove` or `git grove` before `guard --claude`, under any matcher
+  that matches Bash (`Bash`, `*`, none, or a list naming it). A stale one is replaced; two become one. Other hooks,
+  in the same group or not, are kept.
+- It reads the file again when you confirm and refuses if it changed since the review. It writes the new text to a
+  temp file in the same folder with the old file's mode (0600 for a new file), checks the file once more, copies the
+  old bytes to `settings.json.grove-backup`, and renames the new file into place. The first time grove changes an
+  existing file it also keeps it as `settings.json.grove-original`, which it never overwrites. A failure before the
+  rename leaves the file and the earlier copies as they were. A symbolic link stays a link.
 - The receipt carries Undo, an uninstall planned against the file as it is then, so edits you made since survive.
-  Uninstall removes grove's hook, and a group, `PreToolUse` list or `hooks` object only when that left it empty.
-- Settings files are strict JSON. One that does not parse, is not an object, or has a `hooks` or `hooks.PreToolUse`
-  of the wrong type is never rewritten: the card and the dialog say grove will not edit it. When it does parse but
-  is not laid out as 2-space JSON, the review says grove rewrites it with 2-space indentation.
+  After an update the receipt offers Uninstall instead, since the old hook is not worth putting back. Uninstall
+  removes grove's hook, and a group, `PreToolUse` list or `hooks` object only when that left it empty.
+- Settings files are strict JSON. grove never rewrites one that does not parse, is not an object, or has a `hooks` or
+  `hooks.PreToolUse` of the wrong type, nor one that is read-only, starts with a byte-order mark, is a link to a
+  missing file, or holds a number it cannot write back exactly: the card and the dialog say grove will not edit it.
+  When it does parse but is not laid out as 2-space JSON, the review says grove rewrites it with 2-space indentation.
 - Claude Code watches its settings files, so running sessions normally pick the hook up and new sessions always do.
-  When your settings set `"disableAllHooks": true`, Claude Code runs no hooks, and the card and the dialog say so.
+  When your settings set `"disableAllHooks": true`, the hook will not run unless a project turns hooks back on, and
+  the card and the dialog say so.
 
 ![The projects page with the agent guard card: Protect worktrees from Claude Code, Not now and Install…](docs/screenshots/guard-card.png)
 
