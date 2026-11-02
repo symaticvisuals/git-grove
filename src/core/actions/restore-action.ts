@@ -2,6 +2,8 @@ import { basename } from "node:path";
 import type { RepoFacts, Sha, WorktreeFacts } from "../facts/facts.types.js";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
 import { runGit } from "../git/run-git.js";
+import { countCommits } from "../git/count-commits.js";
+import { resolveCommit } from "../git/resolve-commit.js";
 import { alertPin } from "../journal/alert-pin.js";
 import { settleRestoredTip } from "../journal/settle-restored-tip.js";
 import { plural } from "../rules/plural.js";
@@ -9,10 +11,10 @@ import { listPins } from "../runner/list-pins.js";
 import { restoreHeld, type RestoreResult } from "../runner/restore-held.js";
 import type { ActionContext, ActionDef, ExecuteResult, Prepared } from "./action.types.js";
 import { branchContext } from "./branch-context.js";
-import { busyIn } from "./busy-in.js";
+import { busyIn } from "../facts/busy-in.js";
 import { displayPath } from "./display-path.js";
 import { errorLine } from "./error-line.js";
-import { holderIn } from "./holder-in.js";
+import { holderIn } from "../facts/holder-in.js";
 import { InvalidInputError } from "./invalid-input.error.js";
 import { listPaths } from "./list-paths.js";
 import { parseRestoreTargets, type RestoreTargetInput } from "./parse-restore-targets.js";
@@ -41,15 +43,6 @@ function short(sha: Sha): string {
   return sha.slice(0, 7);
 }
 
-async function revParse(cwd: string, rev: string): Promise<Sha | null> {
-  const result = await runGit(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], { cwd, allowFailure: true });
-  return result.code === 0 ? result.stdout.trim() : null;
-}
-
-async function countCommits(cwd: string, args: string[]): Promise<number> {
-  return Number((await runGit(["rev-list", "--count", ...args], { cwd })).stdout.trim());
-}
-
 async function mergeBase(cwd: string, one: Sha, other: Sha): Promise<Sha> {
   const result = await runGit(["merge-base", one, other], { cwd, allowFailure: true });
   return result.code === 0 ? result.stdout.trim() : other;
@@ -58,7 +51,7 @@ async function mergeBase(cwd: string, one: Sha, other: Sha): Promise<Sha> {
 async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef }: RestoreTargetInput): Promise<Read> {
   const pin = pinRef ?? alertPin(ctx.store, facts, branch) ?? (await listPins(facts.root, branch))[0]?.ref;
   if (pin === undefined) throw new InvalidInputError(`no pin found for ${branch}`);
-  const to = await revParse(facts.root, pin);
+  const to = await resolveCommit(facts.root, pin);
   if (to === null) throw new InvalidInputError(`cannot resolve ${pin}`);
   const from = facts.branches.find((candidate) => candidate.name === branch)?.tip ?? null;
   const parent = facts.edges.find((edge) => edge.branch === branch)?.parent ?? facts.trunk.name;
@@ -227,7 +220,7 @@ function holderChange(facts: RepoFacts, read: Read, now: WorktreeFacts | undefin
 async function recheck(facts: RepoFacts, reads: Read[]): Promise<string[]> {
   const lines: string[] = [];
   for (const read of reads) {
-    if ((await revParse(facts.root, read.pinRef)) !== read.to) lines.push(`${read.pinRef} no longer points at ${short(read.to)}`);
+    if ((await resolveCommit(facts.root, read.pinRef)) !== read.to) lines.push(`${read.pinRef} no longer points at ${short(read.to)}`);
     const moved = holderChange(facts, read, holderIn(facts, read.branch));
     if (moved !== null) lines.push(moved);
     const busy = busyIn(facts, read.branch);
@@ -237,7 +230,7 @@ async function recheck(facts: RepoFacts, reads: Read[]): Promise<string[]> {
 }
 
 async function stillAt(root: string, read: Read): Promise<void> {
-  const now = await revParse(root, `refs/heads/${read.branch}`);
+  const now = await resolveCommit(root, `refs/heads/${read.branch}`);
   if (now === read.from) return;
   const was = read.from === null ? "nothing" : short(read.from);
   throw new StalePlanError([`${read.branch} moved: was ${was}, now ${now === null ? "deleted" : short(now)}`]);
@@ -245,7 +238,7 @@ async function stillAt(root: string, read: Read): Promise<void> {
 
 async function verify(root: string, results: Moved[], total: number): Promise<string> {
   for (const { read, result } of results) {
-    const at = await revParse(root, `refs/heads/${read.branch}`);
+    const at = await resolveCommit(root, `refs/heads/${read.branch}`);
     if (at !== result.to) throw new Error(`${read.branch} is at ${at === null ? "nothing" : short(at)}, not ${short(result.to)}`);
   }
   const back = results.reduce((sum, { result }) => sum + result.commitsBack, 0);

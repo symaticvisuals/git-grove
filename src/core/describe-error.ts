@@ -10,19 +10,15 @@ import { RefusedError } from "./runner/refused.error.js";
 import { RepoLockedError } from "./runner/repo-locked.error.js";
 import { ServiceFailedError } from "./service/service-failed.error.js";
 import { ServiceUnsupportedError } from "./service/service-unsupported.error.js";
-import { PortsInUseError } from "../server/http/ports-in-use.error.js";
-import { ServerUnresponsiveError } from "../server/server-unresponsive.error.js";
 
 const ONE_LINE_ERRORS = [
   BareRepoError,
   NotARepoError,
   NotAWorktreeError,
   GitVersionError,
-  PortsInUseError,
   InvalidInputError,
   RefusedError,
   RepoLockedError,
-  ServerUnresponsiveError,
   ServiceFailedError,
   ServiceUnsupportedError,
   StoreCorruptError,

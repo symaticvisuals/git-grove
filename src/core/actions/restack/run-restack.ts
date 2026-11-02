@@ -1,5 +1,7 @@
 import type { Sha } from "../../facts/facts.types.js";
 import { readRepoFacts } from "../../facts/read-repo-facts.js";
+import { countCommits } from "../../git/count-commits.js";
+import { resolveCommit } from "../../git/resolve-commit.js";
 import { runGit } from "../../git/run-git.js";
 import { classifyTipChange } from "../../journal/classify-tip-change.js";
 import { plural } from "../../rules/plural.js";
@@ -16,15 +18,6 @@ import type { RestackLevel, RestackRead } from "./restack.types.js";
 type Done = { level: RestackLevel; onto: Sha; tip: Sha; replayed: number | null; putBack: PutBack };
 
 type Stop = { reason: string; lines: string[] };
-
-async function revParse(cwd: string, rev: string): Promise<Sha | null> {
-  const result = await runGit(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], { cwd, allowFailure: true });
-  return result.code === 0 ? result.stdout.trim() : null;
-}
-
-async function countCommits(cwd: string, range: string): Promise<number> {
-  return Number((await runGit(["rev-list", "--count", range], { cwd })).stdout.trim());
-}
 
 function putBackLines(putBack: PutBack, folder: string, message: string): string[] {
   if (putBack.state === "none") return [];
@@ -64,7 +57,7 @@ async function lostChanges(root: string, done: Done[], pins: Map<string, string>
   for (const { level, onto, tip } of done) {
     const { branch } = level.move;
     const pinRef = pins.get(branch);
-    const oldTip = pinRef === undefined ? null : await revParse(root, pinRef);
+    const oldTip = pinRef === undefined ? null : await resolveCommit(root, pinRef);
     if (pinRef === undefined || oldTip === null) throw new Error(`${branch} has no pin to compare with`);
     const change = await classifyTipChange({ cwd: root, branch, oldTip, newTip: tip, oldBase: level.fork, newBase: onto });
     if (change.kind !== "rebased" && change.kind !== "advanced") {
@@ -142,7 +135,7 @@ export async function runRestack(ctx: ActionContext, read: RestackRead, run: Run
         if (result.unrecorded !== null) {
           return halt({ reason: `its new fork point was not recorded: ${result.unrecorded}`, lines: [] });
         }
-        entry.replayed = await countCommits(root, `${onto}..${result.tip}`).catch(() => null);
+        entry.replayed = await countCommits(root, [`${onto}..${result.tip}`]).catch(() => null);
         const replayed = entry.replayed === null ? "moved" : `${entry.replayed} of ${level.own} commits replayed`;
         return `${replayed}${result.putBack.state === "back" ? ", your change is back" : ""}`;
       });

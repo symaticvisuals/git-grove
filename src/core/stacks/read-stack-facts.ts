@@ -1,4 +1,5 @@
 import type { RepoFacts } from "../facts/facts.types.js";
+import { countCommits } from "../git/count-commits.js";
 import { runGit } from "../git/run-git.js";
 import { unlessGitFails } from "../git/unless-git-fails.js";
 import { branchLanded } from "./branch-landed.js";
@@ -7,10 +8,6 @@ import { groupFeatures } from "./group-features.js";
 import type { Feature, Level } from "./stacks.types.js";
 
 const CONCURRENCY = 8;
-
-async function count(cwd: string, range: string): Promise<number> {
-  return Number((await runGit(["rev-list", "--count", range], { cwd })).stdout.trim());
-}
 
 async function rootRanks(cwd: string, facts: RepoFacts): Promise<Map<string, number>> {
   const edges = new Map(facts.edges.map((edge) => [edge.branch, edge]));
@@ -22,7 +19,7 @@ async function rootRanks(cwd: string, facts: RepoFacts): Promise<Map<string, num
     for (const name of roots) {
       const branch = facts.branches.find((candidate) => candidate.name === name);
       if (branch === undefined) continue;
-      const behind = forkOf(cwd, edges.get(name), branch, trunk).then((fork) => count(cwd, `${fork}..${facts.trunk.ref}`));
+      const behind = forkOf(cwd, edges.get(name), branch, trunk).then((fork) => countCommits(cwd, [`${fork}..${facts.trunk.ref}`]));
       ranks.set(name, -(await unlessGitFails(behind, 0)));
     }
   }
@@ -59,12 +56,12 @@ export async function readStackFacts(cwd: string, facts: RepoFacts): Promise<Fea
     const parentBranch = parentName === trunkName ? undefined : branches.get(parentName);
     const worktree = facts.worktrees.find((candidate) => candidate.branch === name) ?? null;
 
-    const behindTrunk = await count(cwd, `${branch.tip}..${facts.trunk.ref}`);
+    const behindTrunk = await countCommits(cwd, [`${branch.tip}..${facts.trunk.ref}`]);
     let parentCommitsSinceFork = 0;
     let parentMerged = false;
     if (parentBranch) {
       const fork = await forkOf(cwd, edge, branch, parentBranch);
-      parentCommitsSinceFork = await count(cwd, `${fork}..${parentBranch.tip}`);
+      parentCommitsSinceFork = await countCommits(cwd, [`${fork}..${parentBranch.tip}`]);
       parentMerged = await branchLanded(cwd, parentBranch, facts.trunk.ref);
     }
     const parentMissing = parentName !== trunkName && parentBranch === undefined;

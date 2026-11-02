@@ -1,6 +1,6 @@
 import type { Sha } from "../facts/facts.types.js";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
-import { runGit } from "../git/run-git.js";
+import { countCommits } from "../git/count-commits.js";
 import { ackAlerts } from "../journal/ack-alerts.js";
 import type { Store } from "../journal/store.types.js";
 import { plural } from "../rules/plural.js";
@@ -26,10 +26,6 @@ function openIds(store: Store, repoId: number, branch: string): number[] {
     .flatMap((entry) => (entry.branch === branch && entry.id !== undefined ? [entry.id] : []));
 }
 
-async function ownCount(cwd: string, parentTip: Sha, tip: Sha): Promise<number> {
-  return Number((await runGit(["rev-list", "--count", `${parentTip}..${tip}`], { cwd })).stdout.trim());
-}
-
 async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const branch = parseBranch(raw);
   const facts = await readRepoFacts(ctx.root);
@@ -38,7 +34,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const tip = facts.branches.find((candidate) => candidate.name === branch)?.tip ?? null;
   const parent = facts.edges.find((edge) => edge.branch === branch)?.parent;
   const parentTip = facts.branches.find((candidate) => candidate.name === parent)?.tip ?? facts.trunk.sha;
-  const own = tip === null ? 0 : await ownCount(facts.root, parentTip, tip);
+  const own = tip === null ? 0 : await countCommits(facts.root, [`${parentTip}..${tip}`]);
   const lost = new Set(open.flatMap((entry) => entry.lost)).size;
   const shown = new Set(open.flatMap((entry) => (entry.id === undefined ? [] : [entry.id])));
 

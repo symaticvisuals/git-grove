@@ -1,20 +1,17 @@
 import type { RepoFacts, Sha } from "../../facts/facts.types.js";
+import { countCommits } from "../../git/count-commits.js";
 import { runGit } from "../../git/run-git.js";
 import type { LastTip } from "../../journal/store.types.js";
 import { forkOf } from "../../stacks/fork-of.js";
 import type { Feature } from "../../stacks/stacks.types.js";
 import type { ActionContext } from "../action.types.js";
-import { busyIn } from "../busy-in.js";
-import { holderIn } from "../holder-in.js";
+import { busyIn } from "../../facts/busy-in.js";
+import { holderIn } from "../../facts/holder-in.js";
 import { readDirtyPaths } from "../read-dirty-paths.js";
 import { orderRestack } from "./order-restack.js";
 import { predictConflicts } from "./predict-conflicts.js";
 import type { RestackLevel, RestackRead } from "./restack.types.js";
 import { rewrittenLevels } from "./rewritten-levels.js";
-
-async function countCommits(cwd: string, range: string): Promise<number> {
-  return Number((await runGit(["rev-list", "--count", range], { cwd })).stdout.trim());
-}
 
 /**
  * Reads what restacking `feature` would do: each level that moves with its fork point, its new base and its worktree,
@@ -52,7 +49,7 @@ export async function readRestack(ctx: ActionContext, facts: RepoFacts, feature:
       parent: parentName,
       tip: branch.tip,
       fork,
-      own: await countCommits(root, `${fork}..${branch.tip}`),
+      own: await countCommits(root, [`${fork}..${branch.tip}`]),
       edge,
       holder,
       dirty: holder === undefined ? [] : await readDirtyPaths(holder.path),

@@ -11,7 +11,7 @@ import { serveCommand } from "./commands/serve.js";
 import { serviceCommand } from "./commands/service.js";
 import { statusCommand } from "./commands/status.js";
 import { type UiDeps, uiCommand } from "./commands/ui.js";
-import { describeError } from "../core/describe-error.js";
+import { describeCliError } from "./describe-cli-error.js";
 import { packageVersion } from "./package-version.js";
 import { realUiDeps } from "./real-ui-deps.js";
 import { runActionCommand } from "./run-action.js";
@@ -219,7 +219,7 @@ export async function run(argv: string[], io: CliIo, deps: () => UiDeps = realUi
     await requireGitVersion([2, 39]);
     return await command(io);
   } catch (error) {
-    const line = describeError(error);
+    const line = describeCliError(error);
     if (line === null) throw error;
     io.err(`${line}\n`);
     return 1;

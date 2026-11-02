@@ -1,17 +1,12 @@
 import { existsSync } from "node:fs";
 import type { RepoFacts, Sha } from "../facts/facts.types.js";
-import { runGit } from "../git/run-git.js";
+import { resolveCommit } from "../git/resolve-commit.js";
 import { displayPath } from "./display-path.js";
 import type { Expectation } from "./plan.types.js";
 import { readDirtyPaths } from "./read-dirty-paths.js";
 
 function short(sha: Sha | null): string {
   return sha === null ? "nothing" : sha.slice(0, 7);
-}
-
-async function commitOf(root: string, ref: string): Promise<Sha | null> {
-  const result = await runGit(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, allowFailure: true });
-  return result.code === 0 ? result.stdout.trim() : null;
 }
 
 /**
@@ -40,7 +35,7 @@ export async function checkExpectations(facts: RepoFacts, expects: Expectation[]
     }
 
     if (expect.kind === "ref") {
-      if ((await commitOf(facts.root, expect.ref)) !== expect.sha) lines.push(`${expect.ref} no longer points at ${short(expect.sha)}`);
+      if ((await resolveCommit(facts.root, expect.ref)) !== expect.sha) lines.push(`${expect.ref} no longer points at ${short(expect.sha)}`);
       continue;
     }
 

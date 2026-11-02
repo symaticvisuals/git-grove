@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { link, open, readFile, rename, rm } from "node:fs/promises";
 import { LockHeldError } from "./lock-held.error.js";
+import { pidRuns } from "./pid-runs.js";
 import { predatesBoot } from "./predates-boot.js";
 
 function hasCode(error: unknown, code: string): boolean {
@@ -28,15 +29,6 @@ async function readPid(path: string): Promise<number | null> {
   const text = (await readFile(path, "utf8").catch(() => "")).trim();
   const pid = /^\d+$/.test(text) ? Number(text) : 0;
   return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
-}
-
-function isGone(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return hasCode(error, "ESRCH");
-  }
 }
 
 async function takeOver(path: string, stillStale: (aside: string) => Promise<boolean>): Promise<boolean> {
@@ -82,7 +74,7 @@ export async function acquirePidLock(
   if (await create(path)) return release;
   const pid = await readPid(path);
   const stale = async (file: string): Promise<boolean> =>
-    (pid !== null && isGone(pid)) || (options.staleBeforeBoot === true && (await predatesBoot(file)));
+    (pid !== null && !pidRuns(pid)) || (options.staleBeforeBoot === true && (await predatesBoot(file)));
   if (!(await stale(path))) throw new LockHeldError(path, pid);
   if (await takeOver(path, async (aside) => (await readPid(aside)) === pid && (await stale(aside)))) return release;
   throw new LockHeldError(path, await readPid(path));

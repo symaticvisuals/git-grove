@@ -1,18 +1,10 @@
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { pidRuns } from "../core/runner/pid-runs.js";
 import { readLockPid } from "../server/read-lock-pid.js";
 import type { ServerInfo } from "../server/server-info.types.js";
 
 const POLL_MS = 100;
-
-function runs(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error instanceof Error && "code" in error && error.code === "EPERM";
-  }
-}
 
 /**
  * Waits, checking every 100 ms for up to `waitMs`, until `server` has stopped: its process is gone, or
@@ -21,7 +13,7 @@ function runs(pid: number): boolean {
 export async function waitForExit(home: string, server: ServerInfo, waitMs: number): Promise<boolean> {
   const deadline = Date.now() + waitMs;
   for (;;) {
-    if (!runs(server.pid) || readLockPid(join(home, "server.lock")) !== server.pid) return true;
+    if (!pidRuns(server.pid) || readLockPid(join(home, "server.lock")) !== server.pid) return true;
     if (Date.now() >= deadline) return false;
     await sleep(POLL_MS);
   }

@@ -1,5 +1,6 @@
 import { access } from "node:fs/promises";
 import { join, sep } from "node:path";
+import { countCommits } from "../git/count-commits.js";
 import { runGit } from "../git/run-git.js";
 import { isMerged } from "../stacks/is-merged.js";
 import type { RemovalFacts } from "../rules/verdict.types.js";
@@ -12,11 +13,6 @@ import { NotAWorktreeError } from "./not-a-worktree.error.js";
 import { sameFileInBoth } from "./same-file-in-both.js";
 
 type Read<T> = { value: T; failed: string | null };
-
-async function countCommits(cwd: string, args: string[]): Promise<number> {
-  const { stdout } = await runGit(["rev-list", "--count", ...args], { cwd });
-  return Number.parseInt(stdout.trim(), 10);
-}
 
 async function readUnpushed(cwd: string, worktree: WorktreeFacts, facts: RepoFacts): Promise<Read<number>> {
   const branch = facts.branches.find((candidate) => candidate.name === worktree.branch);

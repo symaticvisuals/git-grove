@@ -1,17 +1,9 @@
 import { readFile, stat } from "node:fs/promises";
+import { pidRuns } from "../../core/runner/pid-runs.js";
 import { predatesBoot } from "../../core/runner/predates-boot.js";
 
 const UNREADABLE_GRACE_MS = 2000;
 const HONOURED_MS = 15 * 60_000;
-
-function running(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error instanceof Error && "code" in error && error.code === "EPERM";
-  }
-}
 
 /**
  * Whether the `grove.lock` at `path` should hold a scan back: it names a running process, or it is empty or unparsable
@@ -25,6 +17,6 @@ export async function lockBlocksScan(path: string): Promise<boolean> {
   if (text === null) return false;
   const trimmed = text.trim();
   const pid = /^\d+$/.test(trimmed) ? Number(trimmed) : 0;
-  if (Number.isSafeInteger(pid) && pid > 0) return running(pid);
+  if (Number.isSafeInteger(pid) && pid > 0) return pidRuns(pid);
   return Date.now() - info.mtimeMs <= UNREADABLE_GRACE_MS;
 }

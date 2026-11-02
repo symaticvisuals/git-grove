@@ -1,11 +1,12 @@
 import type { RepoFacts, Sha } from "../../facts/facts.types.js";
+import { resolveCommit } from "../../git/resolve-commit.js";
 import { runGit } from "../../git/run-git.js";
 import { findFeature } from "../../stacks/find-feature.js";
 import { readStackFacts } from "../../stacks/read-stack-facts.js";
 import type { ActionContext } from "../action.types.js";
-import { busyIn } from "../busy-in.js";
+import { busyIn } from "../../facts/busy-in.js";
 import { displayPath } from "../display-path.js";
-import { holderIn } from "../holder-in.js";
+import { holderIn } from "../../facts/holder-in.js";
 import { orderRestack, type RestackMove } from "./order-restack.js";
 import type { RestackLevel, RestackRead } from "./restack.types.js";
 import { rewrittenLevels } from "./rewritten-levels.js";
@@ -21,11 +22,6 @@ export type RecheckInput = {
 
 function short(sha: Sha | null): string {
   return sha === null ? "nothing" : sha.slice(0, 7);
-}
-
-async function revParse(cwd: string, rev: string): Promise<Sha | null> {
-  const result = await runGit(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], { cwd, allowFailure: true });
-  return result.code === 0 ? result.stdout.trim() : null;
 }
 
 function tipIn(facts: RepoFacts, branch: string): Sha | null {
@@ -52,7 +48,7 @@ async function movesNow(read: RestackRead, fresh: RepoFacts): Promise<string[]> 
 async function recheckRun(ctx: ActionContext, read: RestackRead, fresh: RepoFacts, pins: Map<string, string>): Promise<string[]> {
   const lines: string[] = [];
   if (fresh.trunk.ref !== read.trunk.ref) lines.push(`The trunk is now ${fresh.trunk.ref}, not ${read.trunk.ref}`);
-  lines.push(...moved(read.trunk.name, read.trunk.sha, await revParse(fresh.root, read.trunk.ref)));
+  lines.push(...moved(read.trunk.name, read.trunk.sha, await resolveCommit(fresh.root, read.trunk.ref)));
   for (const [branch, sha] of read.tips) lines.push(...moved(branch, sha, tipIn(fresh, branch)));
   for (const level of read.levels) {
     const { branch } = level.move;
@@ -63,7 +59,7 @@ async function recheckRun(ctx: ActionContext, read: RestackRead, fresh: RepoFact
       lines.push(`${branch}'s recorded fork point changed`);
     }
     const pinRef = pins.get(branch);
-    const pinned = pinRef === undefined ? null : await revParse(fresh.root, pinRef);
+    const pinned = pinRef === undefined ? null : await resolveCommit(fresh.root, pinRef);
     if (pinned !== level.tip) lines.push(`${branch} is not pinned at ${short(level.tip)}`);
   }
   for (const branch of rewrittenLevels(ctx.store, fresh.commonDir, [...read.tips.keys()])) {
@@ -95,7 +91,7 @@ async function recheckLevel(read: RestackRead, { level, fresh, movedTips }: Rech
     }
   }
   if (ontoTrunk) {
-    lines.push(...moved(read.trunk.name, read.trunk.sha, await revParse(fresh.root, read.trunk.ref)));
+    lines.push(...moved(read.trunk.name, read.trunk.sha, await resolveCommit(fresh.root, read.trunk.ref)));
   } else {
     lines.push(...moved(onto, movedTips.get(onto) ?? read.tips.get(onto) ?? null, tipIn(fresh, onto)));
   }
