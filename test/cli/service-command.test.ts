@@ -66,7 +66,7 @@ test("service install from an npx cache refuses and touches nothing", async () =
   const fake = host("darwin");
   const result = await service("install", fake, "/Users/me/.npm/_npx/abc/node_modules/git-grove/dist/cli/bin.js");
   expect(result.code).toBe(1);
-  expect(result.err).toContain("npm i -g git-grove");
+  expect(result.err).toContain("npm i -g @deepanshugoel/git-grove");
   expect(fake.calls).toEqual([]);
   expect(await readdir(userHome)).toEqual([]);
 });
