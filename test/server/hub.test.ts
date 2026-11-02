@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -53,9 +53,9 @@ test("a squash publishes a digest and a \"History rewritten on feat/coupons-mode
 });
 
 test("a scan waits while grove.lock exists and runs once it is removed", async () => {
-  start();
   const lock = join(fixture.repo.path, ".git", "grove.lock");
-  await writeFile(lock, "1\n");
+  await writeFile(lock, `${process.pid}\n`);
+  start();
   await hub.scan(repoId);
   expect(events).toEqual([]);
   await rm(lock);
@@ -72,6 +72,21 @@ test("a worktree added outside grove becomes worktree-added activity", async () 
   await fixture.repo.git("worktree", "remove", join(fixture.repo.path, ".worktrees", "extra"));
   await hub.scan(repoId);
   expect(store.activity(repoId, 10).map((row) => row.kind)).toContain("worktree-removed");
+});
+
+test("a lock holding a dead pid does not block scans", async () => {
+  const lock = join(fixture.repo.path, ".git", "grove.lock");
+  await writeFile(lock, "2147483646\n");
+  start();
+  await vi.waitFor(() => expect(events.some((event) => event.type === "digest")).toBe(true), WAIT);
+  expect(await readFile(lock, "utf8")).toBe("2147483646\n");
+});
+
+test("after startup, a worktree added outside grove is reported without any client reading first", async () => {
+  start();
+  await vi.waitFor(() => expect(events.some((event) => event.type === "digest")).toBe(true), WAIT);
+  await fixture.repo.worktree(join(fixture.repo.path, ".worktrees", "late"), "fix/late");
+  await vi.waitFor(() => expect(activityTitles()).toContain("Worktree added at .worktrees/late"), WAIT);
 });
 
 test("a deleted repo folder publishes one scan-error and keeps the project listed", async () => {

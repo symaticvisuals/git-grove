@@ -69,6 +69,22 @@ async function occupyFreePort(host = "127.0.0.1"): Promise<number> {
   return address.port;
 }
 
+function canBind(port: number, host: string): Promise<boolean> {
+  const probe = createServer();
+  return new Promise((resolve) => {
+    probe.once("error", () => resolve(false));
+    probe.listen(port, host, () => probe.close(() => resolve(true)));
+  });
+}
+
+async function occupyPortWithFreeNext(host = "127.0.0.1"): Promise<number> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const port = await occupyFreePort(host);
+    if ((await canBind(port + 1, "127.0.0.1")) && (!ipv6 || (await canBind(port + 1, "::1")))) return port;
+  }
+  throw new Error("no port with a free neighbour");
+}
+
 function tokenOf(server: RunningServer): Record<string, string> {
   return { "x-grove-token": server.token };
 }
@@ -121,7 +137,7 @@ test("a second server with the same home refuses while the first runs", async ()
 });
 
 test("takes the next port when the asked one is busy", async () => {
-  const busy = await occupyFreePort();
+  const busy = await occupyPortWithFreeNext();
   const server = await start({ port: busy });
   expect(server.port).toBe(busy + 1);
 });
@@ -145,7 +161,7 @@ test.skipIf(!ipv6)("answers a Host of [::1] at its own port, and refuses [::1] a
 });
 
 test.skipIf(!ipv6)("takes the next port when [::1] at the asked one is busy", async () => {
-  const busy = await occupyFreePort("::1");
+  const busy = await occupyPortWithFreeNext("::1");
   const server = await start({ port: busy });
   expect(server.port).toBe(busy + 1);
   await expect(fetch(`http://127.0.0.1:${busy}/api/health`)).rejects.toThrow();

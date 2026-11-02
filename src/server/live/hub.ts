@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describeError } from "../../core/describe-error.js";
 import type { ActivityItem as StoredItem, Store, StoredRepo } from "../../core/journal/store.types.js";
@@ -6,13 +5,14 @@ import type { Snapshot } from "../../core/snapshot/read-snapshot.js";
 import { toActivityItem } from "../wire/to-activity-item.js";
 import { toProject } from "../wire/to-project.js";
 import { toRepoView } from "../wire/to-repo-view.js";
+import { lockBlocksScan } from "./lock-blocks-scan.js";
 import { digestOf } from "./digest-of.js";
 import type { ServerEvent } from "./server-event.types.js";
 import type { Snapshots } from "./snapshots.js";
 import { watchRepo } from "./watch-repo.js";
 
 export type Hub = {
-  /** Reads `repoId` (every repository when omitted) unless a `grove.lock` is held, which a later change retries. Failures become one `scan-error` activity per distinct message. */
+  /** Reads `repoId` (every repository when omitted) while a running process holds `grove.lock` (a dead pid does not count), which the lock's removal retries. Failures become one `scan-error` activity per distinct message. */
   scan(repoId?: number): Promise<void>;
   /** Calls `listener` for every event; `onClose` runs when the hub closes. Returns the unsubscribe function. */
   subscribe(listener: (event: ServerEvent) => void, onClose?: () => void): () => void;
@@ -27,7 +27,7 @@ export type HubOptions = { snapshots: Snapshots; store: Store; debounceMs?: numb
 type Watched = { commonDir: string; stop(): void };
 
 /**
- * Watches every repository the store knows (and re-reads the list each poll) and turns each refresh into events:
+ * Scans every repository once at creation, to set the baselines, then watches every repository the store knows (and re-reads the list each poll) and turns each refresh into events:
  * a `digest` when the repository's view changed, an `activity` for each journal entry delivered, and
  * `worktree-added` / `worktree-removed` activity for worktrees that came or went since the previous refresh.
  */
@@ -60,7 +60,7 @@ export function createHub(options: HubOptions): Hub {
     const repos = snapshots.repos().filter((repo) => repoId === undefined || repo.id === repoId);
     await Promise.all(
       repos.map(async (repo) => {
-        if (existsSync(join(repo.commonDir, "grove.lock"))) return;
+        if (await lockBlocksScan(join(repo.commonDir, "grove.lock"))) return;
         try {
           await snapshots.refresh(repo.id, { force: true });
           scanErrors.delete(repo.id);
@@ -126,6 +126,7 @@ export function createHub(options: HubOptions): Hub {
   });
 
   sync();
+  void scan();
   const resync = setInterval(sync, options.pollMs ?? 30_000);
   resync.unref();
 
