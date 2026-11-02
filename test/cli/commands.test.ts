@@ -202,6 +202,30 @@ test("restore with no pin named and no open alert is blocked and lists the pins,
   expect((await repo.git("rev-parse", "feat")).trim()).toBe(original);
 });
 
+test("restore and ack take --dry-run, which changes nothing, and --json, which prints one document", async () => {
+  await grove(["status"]);
+  await squash();
+  await grove(["status"]);
+  const squashed = (await repo.git("rev-parse", "feat")).trim();
+
+  const dry = await grove(["restore", "feat", "--dry-run"]);
+  expect(dry).toMatchObject({ code: 0, err: "" });
+  expect(dry.out).toContain("Bring back 3 commits on feat\n");
+  expect(dry.out).not.toContain("Restored");
+  const ackPlan = await grove(["ack", "feat", "--dry-run", "--json"]);
+  expect(ackPlan).toMatchObject({ code: 0, err: "" });
+  expect(JSON.parse(ackPlan.out)).toMatchObject({ action: "ack", title: "Keep the squash on feat", commands: ["git grove ack feat"] });
+  expect((await repo.git("rev-parse", "feat")).trim()).toBe(squashed);
+  expect(rulesOf((await statusJson()).findings)).toContain("history-rewritten");
+
+  const restored = await grove(["restore", "feat", "--json"]);
+  expect(restored).toMatchObject({ code: 0, err: "" });
+  expect(JSON.parse(restored.out)).toMatchObject({ action: "restore", ok: true, title: "Restored 3 commits on feat" });
+  const nothing = await grove(["ack", "feat", "--json"]);
+  expect(nothing).toMatchObject({ code: 3, err: "" });
+  expect(JSON.parse(nothing.out)).toMatchObject({ action: "ack", blockers: ["Nothing to acknowledge on feat"] });
+});
+
 test("restore of a branch already at its pin is blocked and exits 3, as in the dashboard", async () => {
   await grove(["status"]);
   const tip = (await repo.git("rev-parse", "feat")).trim();
@@ -408,7 +432,7 @@ test("an unknown flag exits 1 with usage on stderr", async () => {
 });
 
 test("a command with the wrong arguments exits 1 with usage on stderr", async () => {
-  for (const argv of [["restore"], ["pins"], ["check", "remove"], ["check", "push", "x"], ["restore", "feat", "--json"]]) {
+  for (const argv of [["restore"], ["pins"], ["check", "remove"], ["check", "push", "x"], ["restore", "feat", "--stash"], ["ack", "feat", "x"]]) {
     const result = await grove(argv);
     expect(result.code, argv.join(" ")).toBe(1);
     expect(result.err, argv.join(" ")).toContain("Usage: git grove");

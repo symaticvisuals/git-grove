@@ -1,9 +1,12 @@
 import type { Store } from "./store.types.js";
 
-/** Marks every unresolved rewrite and deletion alert of `branch` as intended and returns how many it marked. */
-export function ackAlerts(store: Store, repoId: number, branch: string): number {
-  const open = store.entries(repoId, { unresolved: true }).filter((entry) => entry.branch === branch);
+/** Marks the alerts `ids` of the repository as intended, and only those, and returns how many it marked. */
+export function ackAlerts(store: Store, repoId: number, ids: Iterable<number>): number {
   const now = Date.now();
-  for (const entry of open) if (entry.id !== undefined) store.ack(repoId, entry.id, now);
-  return open.length;
+  let acked = 0;
+  for (const id of ids) {
+    store.ack(repoId, id, now);
+    acked += 1;
+  }
+  return acked;
 }

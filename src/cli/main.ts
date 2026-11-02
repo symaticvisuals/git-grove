@@ -54,8 +54,9 @@ const USAGE = `Usage: git grove [<command>] [options]
   ui                                open the dashboard at this worktree's feature,
                                     starting git grove first; the default command
   status [--json]                   what needs you, then one line per worktree
-  restore <branch> [<pin-ref>]      move a branch back to a pin
-  ack <branch>                      mark a branch's rewrite or deletion as intended
+  restore <branch> [<pin-ref>]      move a branch back to a pin; without one,
+          [--dry-run] [--json]        the pin of its open alert
+  ack <branch> [--dry-run] [--json] mark a branch's rewrite or deletion as intended
   pins list [<branch>]              list pins, newest first
   check remove <worktree> [--json]  exit 0 when safe to remove, 3 when not
   restack <feature> [--stash]       move each level of a stack onto its parent;
@@ -144,6 +145,13 @@ function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command
       ? (io) => runActionCommand(io, "restack", { feature: first, stash }, { dryRun, json })
       : null;
   }
+  if (name === "restore") {
+    const target = second === undefined ? { branch: first } : { branch: first, pinRef: second };
+    return first !== undefined && extra === undefined && !stash ? (io) => runActionCommand(io, "restore", { targets: [target] }, options) : null;
+  }
+  if (name === "ack") {
+    return first !== undefined && second === undefined && !stash ? (io) => runActionCommand(io, "ack", { branch: first }, options) : null;
+  }
   if (stash || dryRun) return null;
   if (name === undefined || name === "ui") return first === undefined && !json ? (io) => uiCommand(io, deps()) : null;
   if (name === "service") {
@@ -156,13 +164,6 @@ function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command
       : null;
   }
   if (name === "status") return first === undefined ? (io) => statusCommand(io, { json }) : null;
-  if (name === "restore") {
-    const target = second === undefined ? { branch: first } : { branch: first, pinRef: second };
-    return first !== undefined && extra === undefined && !json ? (io) => runActionCommand(io, "restore", { targets: [target] }, options) : null;
-  }
-  if (name === "ack") {
-    return first !== undefined && second === undefined && !json ? (io) => runActionCommand(io, "ack", { branch: first }, options) : null;
-  }
   if (name === "pins") return first === "list" && extra === undefined && !json ? (io) => pinsCommand(io, second) : null;
   if (name === "check") {
     return first === "remove" && second !== undefined && extra === undefined

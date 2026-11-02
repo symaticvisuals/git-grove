@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { prepareAction } from "../../src/core/actions/registry.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import type { Store } from "../../src/core/journal/store.types.js";
 import { readSnapshot } from "../../src/core/snapshot/read-snapshot.js";
@@ -71,4 +72,24 @@ test("only a clean sandbox with nothing of its own counts as safe to clean up", 
   expect(shown.detached).toHaveLength(3);
   expect(shown).toMatchObject({ cleanupCount: 1, rescueCount: 0 });
   expect(cleanupLabel(shown)).toBe("1 worktree safe to clean up");
+});
+
+test("a locked worktree whose verdict is safe is not counted, as the clean-up dialog cannot pick it", async () => {
+  const locked = await sandbox("locked");
+  const old = join(repo.path, ".worktrees", "old");
+  await repo.worktree(old, "old");
+  await writeFile(join(old, "old.txt"), "old\n");
+  await repo.git("-C", old, "add", "old.txt");
+  await repo.git("-C", old, "commit", "-m", "add old");
+  await repo.git("merge", "--ff-only", "old");
+  await repo.git("worktree", "lock", locked);
+  await repo.git("worktree", "lock", old);
+
+  const snapshot = await readSnapshot(repo.path, store, Date.now());
+  expect([...snapshot.removals.values(), ...snapshot.sandboxRemovals.values()].map((verdict) => verdict.ok)).toEqual([true, true]);
+  const shown = await view();
+  expect(shown).toMatchObject({ cleanupCount: 0, rescueCount: 0 });
+  expect(cleanupLabel(shown)).toBeNull();
+  const { plan } = await prepareAction("cleanup", { root: repo.path, store, now: Date.now }, {});
+  expect(plan.choices?.map((choice) => choice.selectable)).toEqual([false, false]);
 });

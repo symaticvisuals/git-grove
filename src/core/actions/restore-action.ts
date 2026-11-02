@@ -251,7 +251,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const named: { branch: string; pin: string }[] = [];
   const unnamed: Unnamed[] = [];
   for (const { branch, pinRef } of targets) {
-    const pin = pinRef ?? alertPin(ctx.store, facts, branch);
+    const pin = pinRef ?? (await alertPin(ctx.store, facts, branch));
     if (pin !== undefined) {
       named.push({ branch, pin });
       continue;

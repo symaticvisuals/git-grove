@@ -5,6 +5,7 @@ import { plural } from "../../rules/plural.js";
 import type { ActionContext, ActionDef, Prepared } from "../action.types.js";
 import { InvalidInputError } from "../invalid-input.error.js";
 import type { Choice, Plan } from "../plan.types.js";
+import { cleanupOffer } from "./cleanup-offer.js";
 import { copyDetail } from "./copy-detail.js";
 import { readCleanupCandidates } from "./read-cleanup-candidates.js";
 import type { Removal } from "./read-removal.js";
@@ -28,13 +29,17 @@ function parsePaths(raw: unknown): string[] | undefined {
   return paths;
 }
 
+function pickable(candidate: Removal): boolean {
+  return cleanupOffer(candidate.worktree, candidate.verdict) !== null;
+}
+
 function detailOf(candidate: Removal): string {
-  if (candidate.blockers.length > 0) return candidate.blockers.join(", ");
+  if (!pickable(candidate)) return candidate.blockers.join(", ");
   return candidate.copies.length > 0 ? `copies ${plural(candidate.copies.length, "file")} to main first` : "nothing to keep";
 }
 
 function choiceOf(candidate: Removal, picked: ReadonlySet<string>): Choice {
-  const selectable = candidate.blockers.length === 0;
+  const selectable = pickable(candidate);
   return {
     id: candidate.worktree.path,
     label: candidate.label,
@@ -46,10 +51,10 @@ function choiceOf(candidate: Removal, picked: ReadonlySet<string>): Choice {
 }
 
 function blockersOf(candidates: Removal[], picked: Removal[]): string[] {
-  const blocked = picked.filter((candidate) => candidate.blockers.length > 0);
+  const blocked = picked.filter((candidate) => !pickable(candidate));
   if (blocked.length > 0) return blocked.map((candidate) => `${candidate.label}: ${detailOf(candidate)}`);
   if (picked.length > 0) return [];
-  return candidates.some((candidate) => candidate.blockers.length === 0) ? ["Pick at least one worktree."] : ["Nothing here is safe to clean up"];
+  return candidates.some(pickable) ? ["Pick at least one worktree."] : ["Nothing here is safe to clean up"];
 }
 
 function planOf(facts: RepoFacts, candidates: Removal[], picked: Removal[]): Plan {
@@ -100,7 +105,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const known = new Set(candidates.map((candidate) => candidate.worktree.path));
   const unknown = paths?.find((path) => !known.has(path));
   if (unknown !== undefined) throw new InvalidInputError(`${unknown} is not a merged worktree or a detached sandbox`);
-  const wanted = new Set(paths ?? candidates.filter((candidate) => candidate.blockers.length === 0).map((candidate) => candidate.worktree.path));
+  const wanted = new Set(paths ?? candidates.filter(pickable).map((candidate) => candidate.worktree.path));
   const picked = candidates.filter((candidate) => wanted.has(candidate.worktree.path));
   return { plan: planOf(facts, candidates, picked), execute: (run) => runCleanup(picked, run) };
 }

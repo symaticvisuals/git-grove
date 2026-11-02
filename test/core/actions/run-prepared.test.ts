@@ -453,6 +453,41 @@ test("ack refuses when the branch has an alert the plan never showed, every time
   expect(store.entries(repoId, { unresolved: true })).toHaveLength(2);
 });
 
+test("ack marks only the alerts the plan showed, not one recorded after its last check", async () => {
+  const main = await tip("main");
+  let armed = false;
+  const racing: Store = {
+    ...store,
+    entries(id, options) {
+      const seen = store.entries(id, options);
+      if (armed && options?.unresolved === true) {
+        armed = false;
+        store.record(id, {
+          branch: "feat",
+          oldTip: main,
+          newTip: squashed,
+          kind: "rewritten",
+          lost: [main],
+          matchedByPatch: 0,
+          matchedByMeta: 0,
+          pinRef: null,
+          at: Date.now(),
+          foundLater: false,
+          acked: false,
+        });
+      }
+      return seen;
+    },
+  };
+  const racingCtx = { ...ctx, store: racing };
+  const prepared = await prepareAction("ack", racingCtx, { branch: "feat" });
+  armed = true;
+
+  const receipt = await runPrepared(racingCtx, prepared, ignore);
+  expect(receipt).toMatchObject({ ok: true, lines: ["1 alert cleared", expect.any(String)] });
+  expect(store.entries(repoId, { unresolved: true }).map((entry) => entry.oldTip)).toEqual([main]);
+});
+
 test("ack of a branch with no open alert is blocked", async () => {
   const { plan } = await prepareAction("ack", ctx, { branch: "main" });
   expect(plan.blockers).toEqual(["Nothing to acknowledge on main"]);
@@ -478,6 +513,19 @@ test("with no open alert and no pin named, restore is blocked and lists the pins
   const named = await runPrepared(ctx, await prepareAction("restore", ctx, { targets: [{ branch: "feat", pinRef }] }), ignore);
   expect(named.ok).toBe(true);
   expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("3");
+});
+
+test("an alert status no longer shows, because its commits are back on the branch, names no pin", async () => {
+  const original = (await repo.git("rev-parse", pinRef)).trim();
+  await repo.git("-C", worktree, "reset", "--hard", original);
+  const later = await commitIn(worktree, "d.txt", "d\n", "add d");
+  expect(store.entries(repoId, { unresolved: true }).map((entry) => entry.pinRef)).toEqual([pinRef]);
+
+  const { plan } = await prepareAction("restore", ctx, restoreFeat);
+  expect(plan.title).toBe("Choose a pin for feat");
+  expect(plan.blockers[0]).toBe("No open alert says which pin to restore feat to; name one: git grove restore feat <pin-ref>");
+  expect(plan.moves).toEqual([]);
+  expect(await tip("feat")).toBe(later);
 });
 
 test("a malformed input is invalid", async () => {

@@ -76,7 +76,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
         const now = openIds(ctx.store, id, branch);
         if (now.some((entryId) => !shown.has(entryId))) throw new StalePlanError([`${branch} has a new alert since you looked`]);
         if (now.length !== shown.size) throw new StalePlanError([`An alert on ${branch} was cleared since you looked`]);
-        acked = ackAlerts(ctx.store, id, branch);
+        acked = ackAlerts(ctx.store, id, shown);
         return `${plural(acked, "alert")} cleared`;
       });
       return {
@@ -92,6 +92,6 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
 /**
  * Marks a branch's open rewrite and deletion alerts as intended: `{ branch }`. Changes nothing in git, and is
  * blocked when the branch has no open alert. Refuses at run time when the branch moved since the plan, or when its
- * open alerts are no longer the ones the plan showed.
+ * open alerts are no longer the ones the plan showed; it acks exactly the alerts the plan showed.
  */
 export const ackAction: ActionDef = { name: "ack", prepare };

@@ -1,4 +1,5 @@
 import { relative } from "node:path";
+import { cleanupOffer } from "../../core/actions/remove/cleanup-offer.js";
 import { worst } from "../../core/rules/needs-you.js";
 import type { Snapshot } from "../../core/snapshot/read-snapshot.js";
 import { healthOf } from "./health-of.js";
@@ -37,15 +38,17 @@ function orphansOf(snapshot: Snapshot): WireOrphan[] {
 }
 
 function cleanupOf(snapshot: Snapshot): Pick<WireRepoView, "cleanupCount" | "rescueCount"> {
-  const verdicts = [...snapshot.removals.values(), ...snapshot.sandboxRemovals.values()];
-  const rescuable = verdicts.filter(({ ok, reasons }) => !ok && reasons.length > 0 && reasons.every((reason) => reason.code === "precious-ignored"));
-  return { cleanupCount: verdicts.filter((verdict) => verdict.ok).length, rescueCount: rescuable.length };
+  const offers = [...snapshot.removals, ...snapshot.sandboxRemovals].map(([path, verdict]) => {
+    const worktree = snapshot.facts.worktrees.find((candidate) => candidate.path === path);
+    return worktree === undefined ? null : cleanupOffer(worktree, verdict);
+  });
+  return { cleanupCount: offers.filter((offer) => offer === "safe").length, rescueCount: offers.filter((offer) => offer === "rescue").length };
 }
 
 /**
  * The dashboard's view of one repository: its features (stacks and singles) with their levels, the detached
- * sandboxes, the deleted branches still unresolved, every finding, and how many worktrees clean up would offer: those
- * whose removal verdict is safe, and those it would remove only after a rescue. `project` and `pins` pass through unchanged.
+ * sandboxes, the deleted branches still unresolved, every finding, and how many worktrees the clean-up dialog would
+ * let you pick (`cleanupOffer`): those safe to remove, and those it would remove only after a rescue. `project` and `pins` pass through unchanged.
  */
 export function toRepoView(project: WireProject, snapshot: Snapshot, pins: number): WireRepoView {
   return {

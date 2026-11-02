@@ -149,10 +149,10 @@ git grove rm <worktree> [--rescue]           # remove a worktree's folder when n
 
 `new` and `add-level` copy the main worktree's env files into the new level (`--skip-env` to skip), and take
 `--install` to install dependencies and `--open` to open it in your editor. `rm --rescue` first copies the ignored
-files only that worktree has into the main worktree, and checks the copies. `new`, `add-level`, `restack` and `rm`
-show their plan and change nothing with `--dry-run`, and print JSON with `--json`. `restore` and `ack` print their
-plan, each step and the receipt too, through the same core the dashboard uses. With no open alert to say which pin
-you mean, `restore` lists the branch's pins and asks you to name one. No command pushes.
+files only that worktree has into the main worktree, and checks the copies. `restore`, `ack`, `new`, `add-level`,
+`restack` and `rm` go through the same core the dashboard uses: each prints its plan, each step and the receipt,
+shows the plan and changes nothing with `--dry-run`, and prints JSON with `--json`. With no alert that status still
+shows to say which pin you mean, `restore` lists the branch's newest pins and asks you to name one. No command pushes.
 
 For example, after an agent squashes `feat/coupons-ui` into one commit:
 

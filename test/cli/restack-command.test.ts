@@ -109,7 +109,7 @@ test("restack accepts any branch of the feature", async () => {
 });
 
 test("restack and stack plan with the wrong arguments exit 1 with usage", async () => {
-  const wrong = [["restack"], ["restack", "a", "b"], ["stack", "plan"], ["stack", "list"], ["status", "--stash"], ["ack", "x", "--dry-run"]];
+  const wrong = [["restack"], ["restack", "a", "b"], ["stack", "plan"], ["stack", "list"], ["status", "--stash"], ["ack", "x", "--stash"]];
   for (const argv of wrong) {
     const result = await grove(argv);
     expect(result.code, argv.join(" ")).toBe(1);
