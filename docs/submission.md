@@ -56,6 +56,7 @@ you confirm a plan.
 | `src/core/runner/` | Pins (`pin.ts`), the per-repo lock (`with-repo-lock.ts`) and the restore that moves a branch back. |
 | `src/core/actions/` | Eight actions (restore, ack, restack, new, add-level, copy-env, remove, cleanup) and `run-prepared.ts`, which runs any of them. |
 | `src/core/guard/` | The agent guard: `read-simple-commands.ts` splits a shell line into simple commands, `classify-command.ts` decides what each needs checked, and `evaluate-command-line.ts` judges them in order and pins. |
+| `src/core/guard-install/` | Installing the guard into Claude Code's settings: `plan-guard-install.ts` and `plan-guard-uninstall.ts` plan the new text, `write-settings-file.ts` re-reads, backs up and renames it into place. |
 | `src/server/` | The local server: the gate (`auth/check-request.ts`), the watcher (`live/watch-repo.ts`), cached scans (`live/snapshots.ts`), live events (`live/hub.ts`) and previewed plans (`actions/plan-cache.ts`). |
 | `ui/src/` | The dashboard: plain TypeScript, bundled by esbuild, with no runtime dependencies. |
 | `src/cli/` | The commands. `run-guard.ts` is the hook's entry, which `bin.ts` loads without the rest of the CLI. |
@@ -191,6 +192,20 @@ new pins written as activity rows, for repositories grove already knows, waiting
 `ls` 40 ms and a blocked `git worktree remove` 145 ms on Node 24.11; 111 ms and 212 ms on Homebrew's Node 26, which
 is slow to start.
 
+Installing it is a review like any dashboard change. While the guard is missing from Claude Code's user settings
+(`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`), or points at an old Node or grove path, the
+projects page offers it in a card, and the sidebar and ⌘K reach the same dialog. `src/core/guard-install/` parses the
+file strictly, refuses one that is not a JSON object or whose `hooks.PreToolUse` is not a list, and plans the new text:
+any grove hook is taken out and one group of grove's own is appended, never merged into a user's `Bash` group. The
+dialog shows the file, its backup and the exact JSON. Confirming re-reads the file and refuses if its SHA-256 changed
+since the review, copies it to `settings.json.grove-backup`, and renames a temp file with the old mode over it. Undo is
+an uninstall planned against the file as it is then, so later edits survive. These routes change no repository, so
+they take no repo lock and pin nothing (`src/server/api/guard-routes.ts`). Tests in
+`test/core/guard-install/plan-guard-install.test.ts` and `test/server/guard-api.test.ts`, among them "installing
+keeps every other setting and every other group, the user's own Bash group included, in order, and never merges into
+it" and "the command an install writes, run by sh as Claude Code runs it, blocks removing the demo's precious worktree
+with exit 2".
+
 Tests in `test/core/guard/evaluate-command-line.test.ts`, among them "git worktree remove --force of a merged worktree
 holding a precious ignored file is blocked", "git worktree remove of a worktree by its bare name, as git resolves it,
 is blocked from the root", "the commands around and inside a substitution are checked, Claude Code's commit form
@@ -269,7 +284,7 @@ Each row: what I chose, over what, why, and what would change my mind.
 | `node:sqlite` in WAL mode | JSON files, or better-sqlite3 | the server and the CLI write at once; it is built in, so no native build | Node's SQLite API changed under us |
 | Plain TypeScript and esbuild for the dashboard | React and Vite, as the spec suggested | zero runtime dependencies, one small bundle, and a CSP with no inline script or style | the dashboard grew past what hand-written rendering keeps tidy |
 | The guard fails open | failing closed | a grove bug must never stop an agent's ordinary work: a crash, a git error and a check past 3 s all allow, with one line on stderr | the guard proved reliable; then fail closed for `worktree remove --force` and `push --force` only |
-| `install-guard` prints the hook | writing `~/.claude/settings.json` | the settings file is the user's, and a merge that guesses wrong breaks every hook in it | people pasted it wrong often; then an opt-in `--write` that keeps a backup |
+| grove writes Claude Code settings only after a review; it never merges into the user's own hook groups | printing a snippet to paste, or merging into the user's `Bash` group | installing should need no hand-editing; one group of grove's own, a strict parse that refuses what it cannot read, a re-read before writing, a backup and an atomic rename keep the write reversible, and Undo and Uninstall take out only grove's entry | a user's file is rewritten in a way they did not expect; then show a full diff, or write only through `install-guard --write` |
 | The guard pins without the repo lock | taking `grove.lock` first | a pin only adds a ref, so the lock buys nothing, and holding it would make a dashboard action fail while an agent rebases | a guard pin raced another grove write in practice |
 
 Smaller calls, each with its cost:
@@ -305,6 +320,7 @@ What grove does today when something goes wrong, and the test that shows it.
 | grove cannot read part of a worktree | The removal verdict says unreadable and refuses. | `test/core/rules/safe-to-remove.test.ts`, "a failed read is unreadable, never zero" and "an ignored file grove cannot inspect is unreadable, not skipped" |
 | A rescued file changes after its copy was checked | The removal stops and the folder stays. | `test/core/actions/remove-actions.test.ts`, "E2: a rescued file edited after its copy was checked stops the removal, and the folder stays" |
 | A watched repository's folder is deleted | It stays listed with its error; the other repositories carry on. | `test/server/hub.test.ts`, "a deleted repo folder publishes one scan-error and keeps the project listed" |
+| `~/.claude/settings.json` changed after the review, or does not parse | The install is refused ("settings.json changed since the review; review again"), or never offered, and the file is not rewritten. | `test/core/guard-install/write-settings-file.test.ts`, "a file that changed since the plan read it is refused, and nothing is written"; `test/core/guard-install/plan-guard-install.test.ts`, "invalid JSON, a file that is not an object, a hooks that is not an object and a PreToolUse that is not a list are refused" |
 | The guard itself crashes, cannot read its input, or is slow | It allows the command (exit 0) and prints one line: `git-grove guard: could not check (<reason>); allowing`. | `test/cli/guard-command.test.ts`, "an error thrown inside the evaluation is allowed, with a warning", "an evaluation past its deadline is allowed, with a warning", "garbage on stdin is allowed, with a warning" and "a cwd that is not a repository is allowed: plain commands silently, git ones with a warning"; `test/cli/guard-bin.test.ts`, "guard --claude exits 0 with one warning line for stdin it cannot read" |
 
 What it does not handle yet:
@@ -336,13 +352,14 @@ What it does not handle yet:
 
 ## 5. What's built and what's next
 
-Built, with 1024 tests in 111 files (vitest against real temporary git repositories):
+Built, with 1081 tests in 119 files (vitest against real temporary git repositories):
 
 - the CLI: `status`, `restore`, `ack`, `pins list`, `check remove`, `new`, `add-level`, `restack`, `stack plan`,
   `rm [--rescue]`, `ui`, `serve`, `service install|uninstall|status`, `install-guard` and `guard --claude`;
 - the agent guard: a Claude Code `PreToolUse` hook that blocks worktree removals and recursive `rm` that the removal
   verdict refuses, discards of uncommitted changes and grove's people-only commands, pins the tips that rebase,
-  amend, `branch -D` and a force push could lose, and fails open;
+  amend, `branch -D` and a force push could lose, and fails open; the dashboard installs it into Claude Code's user
+  settings after a review, with a backup, Undo and Uninstall, and offers it in an onboarding card;
 - the core: git facts in three tiers by cost (the whole repository, each worktree, and the removal checks), the
   journal and classifier, pins, restore, stacks from gh-stack config, the fail-closed removal verdict, ten rules and
   `ack`;
