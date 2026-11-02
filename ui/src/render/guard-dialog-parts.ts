@@ -54,9 +54,17 @@ function reviewFoot(dialog: GuardDialogState): SafeHtml {
 
 function doneFoot(dialog: GuardDialogState): SafeHtml {
   const { receipt } = dialog;
-  const undo = receipt === null || receipt.undo === null ? "" : html`<button class="btn" data-guard="undo" data-key="guard:undo">${ICONS.back}Undo</button>`;
+  const updated = receipt?.updated === true;
+  const undo = receipt === null || receipt.undo === null ? "" : html`<button class="btn" data-guard="undo" data-key="guard:undo">${ICONS.back}${updated ? "Uninstall" : "Undo"}</button>`;
   const again = receipt?.ok === false ? html`<button class="btn" data-guard="again" data-key="guard:again">Preview again</button>` : "";
-  const text = receipt?.ok !== true ? "Nothing was written." : receipt.change === "install" ? "Undo takes the hook out again and keeps your other edits." : "Undo puts the hook back, after a review.";
+  const text =
+    receipt?.ok !== true
+      ? "Nothing was written."
+      : updated
+        ? "Uninstall takes the hook out; the old one is not put back."
+        : receipt.change === "install"
+          ? "Undo takes the hook out again and keeps your other edits."
+          : "Undo puts the hook back, after a review.";
   return html`<span class="note">${ICONS.shield}<span>${text}</span></span>${undo}${again}<button class="btn primary" data-guard="close" data-key="guard:done">Done <kbd>↵</kbd></button>`;
 }
 
@@ -64,7 +72,8 @@ function doneFoot(dialog: GuardDialogState): SafeHtml {
  * The agent guard dialog's header, body and footer. Reviewing: the plan's heading, why it was read again, then what
  * blocks it, or the file it writes and its backup, the JSON it adds or removes, and what else is true; the footer
  * confirms only a plan that is checked, armed and unblocked. Running: a spinner. Done: the receipt, with Undo when
- * the change can be reversed and Preview again when it was not made.
+ * the change can be reversed (Uninstall after an update, which does not bring the old hook back) and Preview again
+ * when it was not made.
  */
 export function guardDialogParts(dialog: GuardDialogState, now: number): GuardDialogParts {
   const plan = dialog.plan;

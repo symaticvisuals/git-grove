@@ -51,3 +51,8 @@ test("the launchd agent carries GIT_GROVE_HOME when set, and escapes every strin
   expect(plist).toContain("<key>GIT_GROVE_HOME</key>\n    <string>/tmp/a&amp;b &lt;grove&gt;</string>");
   expect(plist).toContain("<string>/x/&quot;it&apos;s&quot;/bin.js</string>");
 });
+
+test("the launchd agent carries CLAUDE_CONFIG_DIR only when it is set, so the dashboard edits the settings Claude Code reads", () => {
+  expect(launchdPlist(PROGRAM)).not.toContain("CLAUDE_CONFIG_DIR");
+  expect(launchdPlist({ ...PROGRAM, claudeConfigDir: "/Users/me/.claude-work" })).toContain("    <key>CLAUDE_CONFIG_DIR</key>\n    <string>/Users/me/.claude-work</string>\n");
+});

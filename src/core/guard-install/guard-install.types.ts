@@ -8,8 +8,11 @@ export type GuardChange = "install" | "uninstall";
  */
 export type GuardStatus = "absent" | "installed" | "stale" | "unreadable";
 
-/** A settings file as read: its text, null when there is none, its SHA-256 (`missing` for none), and why it could not be read. */
-export type SettingsFile = { path: string; text: string | null; hash: string; problem: string | null };
+/**
+ * A settings file as read: its bytes and text, null when there is none, its SHA-256 (`missing` for none), why it could
+ * not be read, and whether it is read-only, which grove leaves alone.
+ */
+export type SettingsFile = { path: string; text: string | null; bytes: Uint8Array | null; hash: string; problem: string | null; readOnly: boolean };
 
 /** The status of grove's hook in a settings file, whether that file turns every hook off, and why it is unreadable. */
 export type GuardReading = { status: GuardStatus; hooksDisabled: boolean; problem: string | null };
@@ -47,12 +50,16 @@ export type GuardPlan = {
 /** The write a plan makes: the new text for `path`, made only while the file still hashes to `saw`. */
 export type GuardEdit = { path: string; saw: string; text: string };
 
-/** A reviewed change: its plan, the edit it makes (null when it is blocked), and the receipt's title once it is made. */
-export type PreparedGuardChange = { plan: GuardPlan; edit: GuardEdit | null; done: string };
+/** A reviewed change: its plan, the edit it makes (null when it is blocked), the receipt's title once it is made, and whether it replaces an older grove hook. */
+export type PreparedGuardChange = { plan: GuardPlan; edit: GuardEdit | null; done: string; updated: boolean };
 
-/** What a change did. `undo` is the change that reverses it, offered for review; null when nothing changed. */
+/**
+ * What a change did. `undo` is the change offered after it, for review; null when nothing changed. After an install
+ * that `updated` an older grove hook it is an uninstall, which does not bring the old hook back.
+ */
 export type GuardReceipt = {
   change: GuardChange;
+  updated: boolean;
   ok: boolean;
   refused: boolean;
   title: string;

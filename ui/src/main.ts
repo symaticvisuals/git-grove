@@ -12,11 +12,14 @@ import { createDialogEffects } from "./dialogs/dialog-effects.js";
 import { createDialogHost } from "./dialogs/dialog-host.js";
 import { DIALOGS } from "./dialogs/dialog-specs.js";
 import { effectivePick } from "./effective-pick.js";
+import { focusAfterClose } from "./focus-after-close.js";
 import { createGuardDialogHost } from "./guard/guard-dialog-host.js";
 import { createGuardEffects } from "./guard/guard-effects.js";
 import { html } from "./html.js";
 import { ICONS } from "./icons.js";
+import { isGuardStatus } from "./is-guard-status.js";
 import { keyCommand, type KeyCommand, type KeyInput, type KeyMode } from "./keys.js";
+import { landmarkAfterCard } from "./landmark-after-card.js";
 import { connectLive } from "./live.js";
 import { loadable } from "./loadable.js";
 import { MESSAGES } from "./messages.js";
@@ -178,7 +181,7 @@ function paintScrim(now: number): void {
   if (owner === "palette") palette.paint(state);
   if (owner === null && scrimOwner !== null) {
     scrim.innerHTML = "";
-    if (!focusKey(returnFocus)) document.querySelector<HTMLElement>("#view .row.sel")?.focus({ preventScroll: true });
+    if (!focusAfterClose(scrimOwner, returnFocus).some(focusKey)) document.querySelector<HTMLElement>("#view .row.sel")?.focus({ preventScroll: true });
     returnFocus = null;
   }
   scrimOwner = owner;
@@ -339,13 +342,16 @@ function storage(): Storage | null {
   }
 }
 
-function dismissGuardCard(): void {
+function dismissGuardCard(status: string | undefined): void {
+  if (!isGuardStatus(status)) return;
   try {
-    storage()?.setItem(GUARD_DISMISSED, "1");
+    storage()?.setItem(GUARD_DISMISSED, status);
   } catch {
     // A page that cannot store the choice hides the card for this visit only.
   }
-  dispatch({ type: "guard-dismiss" });
+  const rows = [...document.querySelectorAll<HTMLElement>("#view .row[data-key]")].map((row) => row.dataset["key"] ?? "");
+  focusAfterPaint = { key: landmarkAfterCard(rows), until: Date.now() + FOCUS_WAIT_MS };
+  dispatch({ type: "guard-dismiss", status });
 }
 
 function openGuard(change: string | undefined): void {
@@ -386,7 +392,7 @@ function runUi(element: HTMLElement): void {
       openGuard(data["change"]);
       return;
     case "guard-dismiss":
-      dismissGuardCard();
+      dismissGuardCard(data["status"]);
       return;
     case "jump": {
       const group = data["group"] === undefined ? null : document.querySelector(`.group[data-group="${CSS.escape(data["group"])}"]`);
@@ -593,7 +599,8 @@ function bind(): void {
 async function boot(): Promise<void> {
   bind();
   try {
-    if (storage()?.getItem(GUARD_DISMISSED) === "1") dispatch({ type: "guard-dismiss" });
+    const dismissed = storage()?.getItem(GUARD_DISMISSED);
+    if (isGuardStatus(dismissed)) dispatch({ type: "guard-dismiss", status: dismissed });
   } catch {
     // A page that cannot read storage shows the card.
   }

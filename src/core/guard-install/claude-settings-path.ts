@@ -1,7 +1,7 @@
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { claudeConfigDir } from "./claude-config-dir.js";
 
-/** Claude Code's user settings file: `$CLAUDE_CONFIG_DIR/settings.json` when it is set and not empty, else `<home>/.claude/settings.json`. */
+/** Claude Code's user settings file: `settings.json` in `claudeConfigDir` when `CLAUDE_CONFIG_DIR` is set, else `<home>/.claude/settings.json`. */
 export function claudeSettingsPath(env: NodeJS.ProcessEnv, home: string): string {
-  const dir = env["CLAUDE_CONFIG_DIR"];
-  return dir !== undefined && dir !== "" ? join(resolve(dir), "settings.json") : join(home, ".claude", "settings.json");
+  return join(claudeConfigDir(env, home) ?? join(home, ".claude"), "settings.json");
 }

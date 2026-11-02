@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -47,7 +47,7 @@ test("the plan says when it rewrites the file with 2-space indentation, warns wh
   await writeFile(path, '{"disableAllHooks":true}');
   const { plan } = await prepare("install");
   expect(plan.lines).toContain("This file is not written as 2-space JSON, so grove rewrites it with 2-space indentation. No setting changes.");
-  expect(plan.warnings).toEqual(["This file sets disableAllHooks to true, so Claude Code runs no hooks, this one included, until that is removed."]);
+  expect(plan.warnings).toEqual(["This file sets disableAllHooks to true, so the hook will not run unless a project turns hooks back on."]);
   await rm(path);
   expect((await prepare("install")).plan.backupPath).toBeNull();
 });
@@ -88,9 +88,36 @@ test("a plan whose file changed before it ran is refused as changed since you lo
 
 test("replacing a stale command is an update", async () => {
   await mkdir(join(home, ".claude"));
-  await writeFile(path, JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "/old/node /old/bin.js guard --claude" }] }] } }));
+  await writeFile(path, JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "/old/node /old/git-grove/dist/cli/bin.js guard --claude" }] }] } }));
   const prepared = await prepare("install");
   expect(prepared.plan.title).toBe("Update the agent guard");
   expect(prepared.plan.removes).toHaveLength(1);
-  expect((await runGuardChange(prepared)).title).toBe("Updated the agent guard");
+  expect(await runGuardChange(prepared)).toMatchObject({ title: "Updated the agent guard", updated: true, undo: "uninstall" });
+});
+
+test("a read-only file is read for its status, and every change to it is blocked", async () => {
+  await mkdir(join(home, ".claude"));
+  await writeFile(path, "{}\n");
+  await chmod(path, 0o444);
+  const install = await prepare("install");
+  expect(install.edit).toBeNull();
+  expect(install.plan.blockers).toEqual([`grove will not edit ${path}: it is read-only. To add the hook yourself, run git grove install-guard.`]);
+  expect(await runGuardChange(install)).toMatchObject({ ok: false, refused: true, title: "Not run" });
+  expect(await readFile(path, "utf8")).toBe("{}\n");
+});
+
+test("the receipt names the backup, and the first time the original copy grove never overwrites", async () => {
+  await mkdir(join(home, ".claude"));
+  await writeFile(path, '{\n  "model": "opus"\n}\n');
+  expect((await runGuardChange(await prepare("install"))).lines).toEqual([
+    `Wrote ${path}`,
+    `The file as it was is in ${path}.grove-backup`,
+    `It is also in ${path}.grove-original, which grove never overwrites`,
+  ]);
+  expect((await runGuardChange(await prepare("uninstall"))).lines).toEqual([
+    `Wrote ${path}`,
+    `The file as it was is in ${path}.grove-backup`,
+    `The file from before grove first changed it is in ${path}.grove-original`,
+  ]);
+  expect(await readFile(`${path}.grove-original`, "utf8")).toBe('{\n  "model": "opus"\n}\n');
 });

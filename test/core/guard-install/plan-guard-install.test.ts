@@ -91,3 +91,32 @@ test("a file not written as 2-space JSON is rewritten with 2-space indentation, 
   expect(changed(planGuardInstall('{"model":"opus"}', COMMAND)).reformats).toBe(true);
   expect(changed(planGuardInstall('{\n  "model": "opus"\n}', COMMAND)).reformats).toBe(false);
 });
+
+test("a number grove cannot write back exactly is refused rather than rounded", () => {
+  expect(planGuardInstall('{ "x": 12345678901234567890 }\n', COMMAND)).toEqual({ kind: "refused", problem: "holds a number grove cannot write back exactly" });
+  expect(planGuardInstall('{ "y": [1e400] }\n', COMMAND)).toEqual({ kind: "refused", problem: "holds a number grove cannot write back exactly" });
+  expect(changed(planGuardInstall('{ "z": 9007199254740991, "w": 0.1 }\n', COMMAND)).reformats).toBe(true);
+});
+
+test("a byte-order mark is refused", () => {
+  expect(planGuardInstall("\uFEFF{}\n", COMMAND)).toEqual({ kind: "refused", problem: "starts with a byte-order mark" });
+});
+
+test("a user's own hook that ends in guard --claude is not grove's, and is kept", () => {
+  const theirs = { matcher: "Bash", hooks: [{ type: "command", command: "my-sec-tool guard --claude" }] };
+  const plan = changed(planGuardInstall(text({ hooks: { PreToolUse: [theirs] } }), COMMAND));
+  expect(plan.removes).toEqual([]);
+  expect(JSON.parse(plan.text)).toEqual({ hooks: { PreToolUse: [theirs, GROUP] } });
+});
+
+test("grove's hook under a matcher that matches Bash, *, an empty one, none or a list naming Bash, is replaced, and the rest of that group kept", () => {
+  for (const matcher of ["*", "", undefined, "Edit|Bash"]) {
+    const mine = { type: "command", command: "~/bin/audit.sh" };
+    const group = { ...(matcher === undefined ? {} : { matcher }), hooks: [mine, { type: "command", command: OLD }] };
+    const plan = changed(planGuardInstall(text({ hooks: { PreToolUse: [group] } }), COMMAND));
+    expect(plan.removes, String(matcher)).toEqual([{ type: "command", command: OLD }]);
+    expect(JSON.parse(plan.text), String(matcher)).toEqual({ hooks: { PreToolUse: [{ ...group, hooks: [mine] }, GROUP] } });
+  }
+  const edits = { matcher: "Edit|Write", hooks: [{ type: "command", command: OLD }] };
+  expect(changed(planGuardInstall(text({ hooks: { PreToolUse: [edits] } }), COMMAND)).removes).toEqual([]);
+});

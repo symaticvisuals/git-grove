@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -147,6 +147,33 @@ test("the guard routes need the token, a same-origin change and a JSON body, lik
   expect((await call("POST", "/api/guard/actions", { planId }, { "x-grove-token": live().token, origin: "http://evil.example" })).status).toBe(403);
   expect((await call("POST", "/api/guard/actions", { planId }, { "x-grove-token": "f".repeat(64) })).status).toBe(401);
   await expect(readFile(settingsPath)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("the guard routes answer only a loopback Host", async () => {
+  await start();
+  expect((await call("GET", "/api/guard", undefined, { "x-grove-token": live().token, host: "evil.example" })).status).toBe(421);
+  expect((await call("POST", "/api/guard/plans", { change: "install" }, { "x-grove-token": live().token, host: `evil.example:${live().port}` })).status).toBe(421);
+});
+
+test("two changes run at once are made one at a time: the second sees the file changed and is refused, and one hook is written", async () => {
+  await start();
+  const [one, two] = [await plan("install"), await plan("install")];
+  const receipts = await Promise.all([runPlan(one.planId), runPlan(two.planId)]);
+  expect(receipts.map((reply) => record(reply.body["receipt"])["title"]).sort()).toEqual(["Changed since you looked", "Installed the agent guard"]);
+  const written = record(await settings());
+  expect(record(first(record(written["hooks"])["PreToolUse"]))["matcher"]).toBe("Bash");
+  expect(record(written["hooks"])["PreToolUse"]).toHaveLength(1);
+});
+
+test("a read-only settings file is reported with grove's refusal, and its status is still read", async () => {
+  await start();
+  await mkdir(join(claude, ".claude"));
+  await writeFile(settingsPath, "{}\n");
+  await chmod(settingsPath, 0o444);
+  expect((await call("GET", "/api/guard")).body).toMatchObject({
+    status: "absent",
+    refusal: `grove will not edit ${settingsPath}: it is read-only. To add the hook yourself, run git grove install-guard.`,
+  });
 });
 
 test("from a package runner's cache the state and the plan carry install-guard's refusal, and nothing is written", async () => {

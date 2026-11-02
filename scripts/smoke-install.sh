@@ -18,9 +18,10 @@ for file in dist/ui/index.html dist/ui/app.js dist/ui/sw.js dist/ui/manifest.web
   [ -f "$installed/$file" ] || { echo "expected $file in the installed package" >&2; exit 1; }
 done
 
-# A throwaway home, grove home and git config, so the check never touches the user's own.
+# A throwaway home, Claude Code folder, grove home and git config, so the check never touches the user's own.
 export HOME="$work/user"
 mkdir -p "$HOME"
+export CLAUDE_CONFIG_DIR="$work/claude"
 export GIT_GROVE_HOME="$work/home"
 export GIT_GROVE_NO_OPEN=1
 export GIT_CONFIG_GLOBAL="$work/gitconfig"

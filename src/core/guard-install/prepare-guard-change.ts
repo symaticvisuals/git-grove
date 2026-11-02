@@ -22,7 +22,7 @@ const PICKUP: Record<GuardChange, string> = {
   uninstall: "Claude Code reloads this file when it changes, so running sessions normally drop the hook; new sessions always do.",
 };
 const REFORMAT = "This file is not written as 2-space JSON, so grove rewrites it with 2-space indentation. No setting changes.";
-const DISABLED = "This file sets disableAllHooks to true, so Claude Code runs no hooks, this one included, until that is removed.";
+const DISABLED = "This file sets disableAllHooks to true, so the hook will not run unless a project turns hooks back on.";
 const ADVICE: Record<GuardChange, string> = {
   install: "To add the hook yourself, run git grove install-guard.",
   uninstall: "To take grove's hook out, edit the file yourself.",
@@ -37,6 +37,7 @@ function headings(change: GuardChange, stale: boolean): Pick<GuardPlan, "title" 
 function blockersOf(input: GuardChangeInput, planned: SettingsPlan): string[] {
   if (input.refusal !== null && input.change === "install") return [input.refusal];
   if (input.file.problem !== null) return [`${willNotEdit(input.file.path, input.file.problem)} ${ADVICE[input.change]}`];
+  if (input.file.readOnly) return [`${willNotEdit(input.file.path, "is read-only")} ${ADVICE[input.change]}`];
   if (planned.kind === "refused") return [`${willNotEdit(input.file.path, planned.problem)} ${ADVICE[input.change]}`];
   if (planned.kind === "unchanged") return [input.change === "install" ? "The agent guard is already installed." : "The agent guard is not installed."];
   return [];
@@ -52,7 +53,7 @@ function plannedOf(input: GuardChangeInput): SettingsPlan {
  * names the file and its backup, shows the JSON added or removed, and says the other settings are kept, when Claude
  * Code picks the change up, and that the file is rewritten with 2-space indentation when it is; an install warns when
  * the file turns every hook off. It is blocked, with no edit, from a package runner's cache (install only), for a file
- * grove cannot read, and when there is nothing to change.
+ * grove cannot read or that is read-only, and when there is nothing to change.
  */
 export function prepareGuardChange(input: GuardChangeInput): PreparedGuardChange {
   const { change, file } = input;
@@ -74,6 +75,7 @@ export function prepareGuardChange(input: GuardChangeInput): PreparedGuardChange
     blockers,
     readAt: input.now,
   };
-  const done = change === "uninstall" ? "Uninstalled the agent guard" : reading.status === "stale" ? "Updated the agent guard" : "Installed the agent guard";
-  return { plan, edit: changing === null ? null : { path: file.path, saw: file.hash, text: changing.text }, done };
+  const updated = change === "install" && reading.status === "stale";
+  const done = change === "uninstall" ? "Uninstalled the agent guard" : updated ? "Updated the agent guard" : "Installed the agent guard";
+  return { plan, edit: changing === null ? null : { path: file.path, saw: file.hash, text: changing.text }, done, updated };
 }

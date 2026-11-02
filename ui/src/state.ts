@@ -1,5 +1,5 @@
 import type { Plan } from "../../src/core/actions/plan.types.js";
-import type { GuardState } from "../../src/core/guard-install/guard-install.types.js";
+import type { GuardState, GuardStatus } from "../../src/core/guard-install/guard-install.types.js";
 import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { activityQuery } from "./activity-query.js";
@@ -50,8 +50,8 @@ export type State = {
   /** The id the last dialog opened got; each open takes the next one. */
   dialogSeq: number;
   guardDialog: GuardDialogState | null;
-  /** The agent guard card was put off with "Not now". */
-  guardDismissed: boolean;
+  /** The agent guard status the card was put off for with "Not now"; it shows again for any other. */
+  guardDismissed: GuardStatus | null;
 };
 
 export type UiAction =
@@ -297,7 +297,7 @@ export function initialState(route: Route, pageVersion: string): State {
     palette: null,
     dialogSeq: 0,
     guardDialog: null,
-    guardDismissed: false,
+    guardDismissed: null,
   };
   const wanted = sliceRequests(blank);
   return SLICE_NAMES.reduce((state, slice) => (wanted[slice] === null ? state : update(state, slice, () => LOADING)), blank);

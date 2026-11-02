@@ -451,6 +451,32 @@ test("an installed service that runs this copy and this Node is left alone", asy
   expect(await readFile(PLIST(), "utf8")).toBe(before);
 });
 
+test("an installed service that reads another Claude Code folder is rewritten to this shell's CLAUDE_CONFIG_DIR", async () => {
+  const calls: string[] = [];
+  const service = createServiceManager(launchdHost(calls));
+  await service.install({ node: process.execPath, bin: BIN, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  calls.length = 0;
+  process.env["CLAUDE_CONFIG_DIR"] = join(home, "claude-work");
+  try {
+    const result = await ui(harness(service).deps, home);
+    expect(result.out).toContain("Updated the login service to this copy of git grove\n");
+    expect(await readFile(PLIST(), "utf8")).toContain(`<key>CLAUDE_CONFIG_DIR</key>\n    <string>${join(home, "claude-work")}</string>`);
+    expect(calls).toContain(`launchctl bootstrap gui/501 ${PLIST()}`);
+  } finally {
+    delete process.env["CLAUDE_CONFIG_DIR"];
+  }
+});
+
+test("when the running server would install the agent guard into another settings file than this shell's, ui names both", async () => {
+  const served = join(home, "server-claude", "settings.json");
+  servers.push(await startServer({ port: 0, home, version: packageVersion(), guard: () => ({ node: process.execPath, bin: BIN, settingsPath: served }) }));
+  const shell = join(home, "shell-claude", "settings.json");
+  const result = await ui(harness(fakeService({ kind: "launchd" }), { claudeSettingsPath: shell }).deps, home);
+  expect(result.out).toContain(`The dashboard installs the agent guard into ${served}, but Claude Code here reads ${shell}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
+  const same = await ui(harness(fakeService({ kind: "launchd" }), { claudeSettingsPath: served }).deps, home);
+  expect(same.out).not.toContain("installs the agent guard into");
+});
+
 test("from an npx cache, an installed service for another copy is left alone", async () => {
   const calls: string[] = [];
   const service = createServiceManager(launchdHost(calls));

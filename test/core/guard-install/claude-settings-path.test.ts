@@ -11,6 +11,12 @@ test("the settings file is under CLAUDE_CONFIG_DIR when it is set, else under <h
   expect(claudeSettingsPath({ CLAUDE_CONFIG_DIR: "/Users/robin/.claude-work" }, "/Users/robin")).toBe("/Users/robin/.claude-work/settings.json");
 });
 
+test("a CLAUDE_CONFIG_DIR starting with ~, or relative, is taken from the home folder, not the current one", () => {
+  expect(claudeSettingsPath({ CLAUDE_CONFIG_DIR: "~/.claude-work" }, "/Users/robin")).toBe("/Users/robin/.claude-work/settings.json");
+  expect(claudeSettingsPath({ CLAUDE_CONFIG_DIR: "~" }, "/Users/robin")).toBe("/Users/robin/settings.json");
+  expect(claudeSettingsPath({ CLAUDE_CONFIG_DIR: ".claude-work" }, "/Users/robin")).toBe("/Users/robin/.claude-work/settings.json");
+});
+
 test("under vitest the real settings path throws, so no test can reach the real ~/.claude", () => {
   expect(process.env["VITEST"]).toBeDefined();
   expect(() => realClaudeSettingsPath()).toThrow(/refuses to run under vitest/);

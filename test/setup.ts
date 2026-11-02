@@ -10,5 +10,7 @@ writeFileSync(globalConfig, "[user]\n\tname = Test Author\n\temail = author@exam
 
 process.env["GIT_CONFIG_GLOBAL"] = globalConfig;
 process.env["GIT_CONFIG_NOSYSTEM"] = "1";
+// A developer's own Claude Code folder must not reach the login service programs or settings paths under test.
+delete process.env["CLAUDE_CONFIG_DIR"];
 
 afterAll(() => rmSync(dir, { recursive: true, force: true }));

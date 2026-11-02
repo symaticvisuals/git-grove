@@ -16,7 +16,7 @@ test("no file, or no grove hook, is absent; a group whose matcher is not Bash do
 
 test("one grove hook running the wanted command is installed; another command, or two hooks, is stale", () => {
   expect(readGuardStatus(settings(COMMAND), COMMAND).status).toBe("installed");
-  expect(readGuardStatus(settings("/old/node /old/bin.js guard --claude"), COMMAND).status).toBe("stale");
+  expect(readGuardStatus(settings("/old/node /old/git-grove/dist/cli/bin.js guard --claude"), COMMAND).status).toBe("stale");
   expect(readGuardStatus(settings(COMMAND, COMMAND), COMMAND).status).toBe("stale");
 });
 
@@ -28,4 +28,19 @@ test("a file that cannot be parsed, or that the reader could not read, is unread
 test("disableAllHooks: true in the file is reported", () => {
   expect(readGuardStatus(JSON.stringify({ disableAllHooks: true }), COMMAND)).toEqual({ status: "absent", hooksDisabled: true, problem: null });
   expect(readGuardStatus(JSON.stringify({ disableAllHooks: "true" }), COMMAND).hooksDisabled).toBe(false);
+});
+
+test("grove's hook is known by what grove writes: a dist/cli/bin.js path, or git-grove or git grove before guard --claude", () => {
+  for (const command of ["git grove guard --claude", "npx @deepanshugoel/git-grove guard --claude", "'/Users/Robin Example/git-grove/dist/cli/bin.js' guard --claude"]) {
+    expect(readGuardStatus(settings(command), COMMAND).status, command).toBe("stale");
+  }
+  expect(readGuardStatus(settings("my-sec-tool guard --claude"), COMMAND).status).toBe("absent");
+});
+
+test("grove's hook under a matcher of *, none, or a list naming Bash counts; under Edit it does not", () => {
+  const under = (group: Record<string, unknown>): string => JSON.stringify({ hooks: { PreToolUse: [{ ...group, hooks: [{ type: "command", command: COMMAND }] }] } });
+  expect(readGuardStatus(under({ matcher: "*" }), COMMAND).status).toBe("installed");
+  expect(readGuardStatus(under({}), COMMAND).status).toBe("installed");
+  expect(readGuardStatus(under({ matcher: "Write|Bash" }), COMMAND).status).toBe("installed");
+  expect(readGuardStatus(under({ matcher: "Edit" }), COMMAND).status).toBe("absent");
 });

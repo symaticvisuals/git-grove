@@ -39,3 +39,8 @@ test("the systemd unit carries GIT_GROVE_HOME when set, and escapes quotes, back
 test("a path with a line break is refused rather than written into a unit", () => {
   expect(() => systemdUnit({ ...PROGRAM, bin: "/a\nExecStartPre=/bin/evil" })).toThrow(InvalidInputError);
 });
+
+test("the systemd unit carries CLAUDE_CONFIG_DIR only when it is set", () => {
+  expect(systemdUnit(PROGRAM)).not.toContain("CLAUDE_CONFIG_DIR");
+  expect(systemdUnit({ ...PROGRAM, claudeConfigDir: "/home/me/.claude-work" })).toContain('Environment="CLAUDE_CONFIG_DIR=/home/me/.claude-work"');
+});

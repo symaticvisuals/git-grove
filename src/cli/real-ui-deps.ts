@@ -13,13 +13,15 @@ import { stableNodePath } from "./stable-node-path.js";
 
 /** `ui` and `service` as they run for real: this machine's launchd or systemd, its browser, this CLI's bin, and this user's Claude Code settings, which it only reads. */
 export function realUiDeps(): UiDeps {
+  const settingsPath = claudeSettingsPath(process.env, homedir());
   return {
     service: createServiceManager(realServiceHost()),
     openUrl: (url) => openUrl(url),
     serveForeground,
     bin: binPath(),
+    claudeSettingsPath: settingsPath,
     guardStatus: async () => {
-      const file = await readSettingsFile(claudeSettingsPath(process.env, homedir()));
+      const file = await readSettingsFile(settingsPath);
       return readGuardStatus(file.text, guardHookCommand(stableNodePath(), binPath()), file.problem).status;
     },
   };

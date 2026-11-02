@@ -36,6 +36,9 @@ function drift(program: ServiceStatus["program"], bin: string): string | null {
   if (program.groveHome !== wanted.groveHome) {
     return `  it uses another grove folder (${program.groveHome ?? "~/.git-grove"}); git grove ui or git grove service install points it at this one`;
   }
+  if ((program.claudeConfigDir ?? null) !== (wanted.claudeConfigDir ?? null)) {
+    return `  it reads another Claude Code folder (${program.claudeConfigDir ?? "~/.claude"}); git grove ui or git grove service install points it at this one`;
+  }
   return null;
 }
 

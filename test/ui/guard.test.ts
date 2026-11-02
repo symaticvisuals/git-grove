@@ -1,5 +1,9 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { GuardPlan, GuardReceipt, GuardState } from "../../src/core/guard-install/guard-install.types.js";
+import { focusAfterClose } from "../../ui/src/focus-after-close.js";
+import { landmarkAfterCard } from "../../ui/src/landmark-after-card.js";
 import { paletteItems } from "../../ui/src/palette/palette-items.js";
 import { guardCard } from "../../ui/src/render/guard-card.js";
 import { guardDialogParts } from "../../ui/src/render/guard-dialog-parts.js";
@@ -41,7 +45,7 @@ function guardPlan(overrides: Partial<GuardPlan> = {}): GuardPlan {
 }
 
 function receipt(overrides: Partial<GuardReceipt> = {}): GuardReceipt {
-  return { change: "install", ok: true, refused: false, title: "Installed the agent guard", lines: [`Wrote ${PATH}`], undo: "uninstall", at: 2_000, ...overrides };
+  return { change: "install", updated: false, ok: true, refused: false, title: "Installed the agent guard", lines: [`Wrote ${PATH}`], undo: "uninstall", at: 2_000, ...overrides };
 }
 
 function plain(text: string): string {
@@ -86,27 +90,32 @@ test("the guard's state is loaded on every route", () => {
 });
 
 test("the card shows while the guard is absent or stale, and hides once it is installed or put off with Not now", () => {
-  const absent = plain(guardCard(ready(guard()), false).text);
+  const absent = plain(guardCard(ready(guard()), null).text);
   expect(absent).toContain("Protect worktrees from Claude Code");
   expect(absent).toContain("Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.");
   expect(absent).toContain("Not now");
   expect(absent).toContain("Install…");
-  expect(guardCard(ready(guard({ status: "installed" })), false).text).toBe("");
-  expect(guardCard(ready(guard()), true).text).toBe("");
-  expect(guardCard({ status: "loading" }, false).text).toBe("");
-  const stale = plain(guardCard(ready(guard({ status: "stale" })), false).text);
+  expect(guardCard(ready(guard({ status: "installed" })), null).text).toBe("");
+  expect(guardCard(ready(guard()), "absent").text).toBe("");
+  expect(guardCard({ status: "loading" }, null).text).toBe("");
+  const stale = plain(guardCard(ready(guard({ status: "stale" })), null).text);
   expect(stale).toContain("The agent guard points at an old Node or grove path.");
   expect(stale).toContain("Update…");
   expect(stale).not.toContain("Install…");
 });
 
-test("the card says when hooks are turned off, and for a file grove will not edit points to install-guard with no Install", () => {
-  expect(plain(guardCard(ready(guard({ hooksDisabled: true })), false).text)).toContain(`Hooks are turned off in ${PATH}: it sets disableAllHooks to true, so the guard would not run.`);
-  const refusal = `grove will not edit ${PATH}: it is not valid JSON (Unexpected token '/').`;
-  const unreadable = guardCard(ready(guard({ status: "unreadable", refusal })), false).text;
-  expect(plain(unreadable)).toContain(`${refusal} To add the guard yourself, run git grove install-guard.`);
+test("the card says when hooks are turned off, and for a file grove will not edit shows the server's refusal, which points to install-guard, with no Install", () => {
+  expect(plain(guardCard(ready(guard({ hooksDisabled: true })), null).text)).toContain(
+    `Hooks are turned off in ${PATH}: it sets disableAllHooks to true, so the guard will not run unless a project turns hooks back on.`,
+  );
+  const refusal = `grove will not edit ${PATH}: it is not valid JSON (Unexpected token '/'). To add the hook yourself, run git grove install-guard.`;
+  const unreadable = guardCard(ready(guard({ status: "unreadable", refusal })), null).text;
+  expect(plain(unreadable)).toContain(refusal);
   expect(unreadable).not.toContain('data-ui="guard-open"');
-  const npx = guardCard(ready(guard({ refusal: NPX })), false).text;
+  const readOnly = guardCard(ready(guard({ refusal: `grove will not edit ${PATH}: it is read-only. To add the hook yourself, run git grove install-guard.` })), null).text;
+  expect(plain(readOnly)).toContain("it is read-only.");
+  expect(readOnly).not.toContain('data-ui="guard-open"');
+  const npx = guardCard(ready(guard({ refusal: NPX })), null).text;
   expect(plain(npx)).toContain(NPX);
   expect(npx).not.toContain('data-ui="guard-open"');
 });
@@ -114,7 +123,7 @@ test("the card says when hooks are turned off, and for a file grove will not edi
 test("the card sits at the top of the projects view only", () => {
   const state = home();
   expect(mainView(state, 5_000).text).toContain('class="guard-card"');
-  expect(mainView(reduce(state, { type: "guard-dismiss" }), 5_000).text).not.toContain('class="guard-card"');
+  expect(mainView(reduce(state, { type: "guard-dismiss", status: "absent" }), 5_000).text).not.toContain('class="guard-card"');
   expect(mainView({ ...state, route: { view: "pins" } }, 5_000).text).not.toContain('class="guard-card"');
 });
 
@@ -211,7 +220,7 @@ test("the guard dialog does not open over an action dialog, the palette does not
   const withAction = reduce(home(), { type: "dialog-open", action: "new", ctx: { repo: view, feature: null, level: null, branch: null, targets: null, worktree: null } });
   expect(reduce(withAction, { type: "guard-open", change: "install" }).guardDialog).toBeNull();
   expect(reduce(opened(), { type: "palette-open" }).palette).toBeNull();
-  expect(run(home(), { type: "guard-dismiss" }, { type: "route", route: { view: "pins" } }, { type: "route", route: { view: "projects" } }).guardDismissed).toBe(true);
+  expect(run(home(), { type: "guard-dismiss", status: "absent" }, { type: "route", route: { view: "pins" } }, { type: "route", route: { view: "projects" } }).guardDismissed).toBe("absent");
   expect(reduce(opened(), { type: "guard-close" }).guardDialog).toBeNull();
 });
 
@@ -219,4 +228,42 @@ test("the guard's state reloads with the project list every 30 s while live, so 
   const live = run(home(), { type: "live", state: "up" }, { type: "loaded", key: "projects", result: { slice: "projects", data: [] } }, { type: "tick", now: 1_000 });
   expect(reduce(live, { type: "tick", now: 20_000 }).guard).toMatchObject({ stale: false });
   expect(reduce(live, { type: "tick", now: 31_000 }).guard).toMatchObject({ status: "ready", stale: true });
+});
+
+test("Not now is kept per status, so a guard that later goes stale shows the card once more", () => {
+  const dismissed = reduce(home(), { type: "guard-dismiss", status: "absent" });
+  expect(guardCard(dismissed.guard, dismissed.guardDismissed).text).toBe("");
+  const stale = reduce(dismissed, { type: "loaded", key: "guard", result: { slice: "guard", data: guard({ status: "stale" }) } });
+  expect(guardCard(stale.guard, stale.guardDismissed).text).toContain("Update…");
+  expect(guardCard(stale.guard, stale.guardDismissed).text).toContain('data-status="stale"');
+  const again = reduce(stale, { type: "guard-dismiss", status: "stale" });
+  expect(guardCard(again.guard, again.guardDismissed).text).toBe("");
+});
+
+test("after an update the receipt offers Uninstall, not Undo, and says the old hook is not put back", () => {
+  const running = confirmed(armed(planned(opened(), { title: "Update the agent guard" })));
+  const done = reduce(running, { type: "guard-ran", dialog: running.guardDialog?.id ?? 0, receipt: receipt({ updated: true, title: "Updated the agent guard" }) });
+  if (done.guardDialog === null) throw new Error("no dialog");
+  const foot = guardDialogParts(done.guardDialog, 5_000).foot.text;
+  const start = foot.indexOf('data-guard="undo"');
+  expect(start).toBeGreaterThan(-1);
+  expect(plain(foot.slice(foot.indexOf(">", start) + 1, foot.indexOf("</button>", start)))).toBe("Uninstall");
+  expect(plain(foot)).not.toContain("Undo");
+  expect(plain(foot)).toContain("Uninstall takes the hook out; the old one is not put back.");
+});
+
+test("closing the guard dialog gives focus back to its opener, else to the sidebar's guard status; Not now moves it to the list", () => {
+  expect(focusAfterClose("guard", "guard:install")).toEqual(["guard:install", "side:guard"]);
+  expect(focusAfterClose("guard", null)).toEqual(["side:guard"]);
+  expect(focusAfterClose("dialog", "row:#/r/1")).toEqual(["row:#/r/1"]);
+  expect(landmarkAfterCard(["row:#/r/1", "row:#/r/2"])).toBe("row:#/r/1");
+  expect(landmarkAfterCard([])).toBe("bar:scan");
+});
+
+test("a dialog's footer sticks to the bottom of the dialog, so confirm is on screen however long the review is", async () => {
+  const css = await readFile(join(import.meta.dirname, "..", "..", "ui", "styles.css"), "utf8");
+  const rule = /\.dlg footer\{([^}]*)\}/.exec(css)?.[1] ?? "";
+  expect(rule).toContain("position:sticky");
+  expect(rule).toContain("bottom:0");
+  expect(rule).toContain("background:var(--raise)");
 });

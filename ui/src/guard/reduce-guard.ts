@@ -1,4 +1,4 @@
-import type { GuardChange, GuardPlan, GuardReceipt } from "../../../src/core/guard-install/guard-install.types.js";
+import type { GuardChange, GuardPlan, GuardReceipt, GuardStatus } from "../../../src/core/guard-install/guard-install.types.js";
 import type { DialogState, PaletteState } from "../dialogs/reduce-dialog.js";
 
 /**
@@ -20,10 +20,10 @@ export type GuardDialogState = {
   receipt: GuardReceipt | null;
 };
 
-/** `guardDismissed` is the onboarding card's "Not now". */
+/** `guardDismissed` is the status the onboarding card was put off for with "Not now". */
 export type GuardSlices = {
   guardDialog: GuardDialogState | null;
-  guardDismissed: boolean;
+  guardDismissed: GuardStatus | null;
   dialog: DialogState | null;
   palette: PaletteState | null;
   dialogSeq: number;
@@ -40,7 +40,7 @@ export type GuardAction =
   | { type: "guard-again" }
   | { type: "guard-undo" }
   | { type: "guard-close" }
-  | { type: "guard-dismiss" };
+  | { type: "guard-dismiss"; status: GuardStatus };
 
 const EXPIRED = "That preview expired, so grove read the file again. Look it over, then confirm.";
 
@@ -93,11 +93,11 @@ function step(dialog: GuardDialogState, action: GuardAction): GuardDialogState |
  * dialog opens only while no action dialog is, closing the palette, and previews at once. Confirm takes the plan only
  * when the id painted on its button is the plan shown, that plan has been armed, and nothing is being checked,
  * failing or blocking it. A run refused because its preview expired previews it again at once. Undo opens the
- * opposite change for review. "Not now" hides the card.
+ * opposite change for review. "Not now" hides the card for the status it was shown for.
  */
 export function reduceGuard(slices: GuardSlices, action: GuardAction): GuardSlices {
   if (action.type === "guard-open") return opened(slices, action.change);
-  if (action.type === "guard-dismiss") return slices.guardDismissed ? slices : { ...slices, guardDismissed: true };
+  if (action.type === "guard-dismiss") return slices.guardDismissed === action.status ? slices : { ...slices, guardDismissed: action.status };
   const dialog = slices.guardDialog;
   if (dialog === null) return slices;
   if (action.type === "guard-undo") {

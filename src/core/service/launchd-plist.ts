@@ -10,6 +10,7 @@ function string(text: string): string {
 function environment(program: ServiceProgram): string[] {
   const vars: [string, string][] = [["PATH", program.path]];
   if (program.groveHome !== null) vars.push(["GIT_GROVE_HOME", program.groveHome]);
+  if (program.claudeConfigDir !== undefined) vars.push(["CLAUDE_CONFIG_DIR", program.claudeConfigDir]);
   return vars.flatMap(([key, value]) => [`    <key>${key}</key>`, `    ${string(value)}`]);
 }
 

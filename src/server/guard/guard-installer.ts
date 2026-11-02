@@ -21,10 +21,13 @@ export type GuardInstaller = {
 
 type Read = { setup: GuardSetup; command: string; file: SettingsFile };
 
+const BY_HAND = "To add the hook yourself, run git grove install-guard.";
+
 /**
  * Installs and uninstalls the agent guard's hook in Claude Code's user settings, after a review: a plan, held in its
  * own plan cache (`createPlanCache`) and run once by id, then a receipt. Runs are made one at a time. `setup` is read
- * at each call; without one, every call is a 503.
+ * at each call; without one, every call is a 503. The state's `refusal` says why grove will not install from here, or
+ * will not edit the file, when it cannot read it or it is read-only.
  */
 export function createGuardInstaller(setup: (() => GuardSetup) | null, options: PlanCacheOptions = {}): GuardInstaller {
   const now = options.now ?? Date.now;
@@ -41,7 +44,8 @@ export function createGuardInstaller(setup: (() => GuardSetup) | null, options: 
     async state() {
       const { setup: resolved, command, file } = await read();
       const reading = readGuardStatus(file.text, command, file.problem);
-      const unreadable = reading.problem === null ? null : willNotEdit(resolved.settingsPath, reading.problem);
+      const leftAlone = reading.problem ?? (file.readOnly ? "is read-only" : null);
+      const unreadable = leftAlone === null ? null : `${willNotEdit(resolved.settingsPath, leftAlone)} ${BY_HAND}`;
       return {
         status: reading.status,
         settingsPath: resolved.settingsPath,

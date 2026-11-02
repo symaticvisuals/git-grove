@@ -265,7 +265,7 @@ a.sec span{font-size:11px}
 .dlg ul{list-style:none;display:grid;gap:7px;font-size:12.5px}
 .dlg ul li{display:grid;grid-template-columns:16px 1fr;gap:8px;line-height:1.45}
 .dlg pre{font:500 11px/1.5 var(--mono);font-variation-settings:"wdth" 87.5;white-space:pre-wrap;color:var(--muted);background:var(--side);border:1px solid var(--line);border-radius:6px;padding:8px 10px}
-.dlg footer{display:flex;align-items:center;gap:8px;padding:12px 20px;background:var(--raise);border-radius:0 0 12px 12px}
+.dlg footer{position:sticky;bottom:0;z-index:1;display:flex;align-items:center;gap:8px;padding:12px 20px;background:var(--raise);border-top:1px solid var(--line);border-radius:0 0 12px 12px}
 .dlg footer .note{font-size:12px;color:var(--muted);margin-right:auto;display:flex;gap:7px;align-items:center}
 .dlg footer .note.bad{color:#EE8D78}
 .dlg footer .note svg,.dlg footer .note .spin{flex:none}
