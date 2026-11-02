@@ -45,16 +45,21 @@ pnpm install && pnpm build && npm link
 ## Agents
 
 AI coding agents run git in many worktrees at once, and the commands that lose work succeed quietly. The agent guard
-is a Claude Code `PreToolUse` hook that reads each Bash command before it runs, through `&&`, `;`, `|`, quotes, `cd`
-and `git -C`:
+is a Claude Code `PreToolUse` hook that reads each Bash command before it runs, through `&&`, `;`, `|`, quotes, `cd`,
+`git -C`, and the commands inside `$( … )` and backticks:
 
-- `git worktree remove [--force]`, and `rm -r` of a worktree or of a folder holding one, are blocked unless every
-  worktree they would delete is safe to remove. That is the verdict `git grove check remove` prints. A folder that
-  holds the main worktree is always blocked.
-- `git reset --hard`, `git checkout -- <paths>`, `git checkout .` and `git restore <paths>` are blocked while there
-  are uncommitted changes they would discard. A `git stash` earlier in the same command lets them through.
+- `git worktree remove [--force]` is blocked unless the worktree is safe to remove, whether it is named by path or,
+  as git allows, by its folder name alone. That is the verdict `git grove check remove` prints. `rm -r` of a worktree,
+  or of a folder holding one, is blocked the same way when the folder belongs to the repository you are in or to the
+  one the path is in. A folder that holds the main worktree is always blocked.
+- `git reset --hard`, `git checkout -f`, `git switch -f` or `--discard-changes`, `git checkout [<commit>] <paths>`
+  (with or without `--`), `git checkout .` and `git restore <paths>` are blocked while there are uncommitted changes
+  they would discard. To keep them, run `git stash` (or `git stash push -- <paths>`) on its own first, then retry.
+  During a merge, rebase, cherry-pick or revert, the block names the `--abort` that keeps your own changes instead.
+  Git's conflict tools, `--ours`, `--theirs`, `-m` and `--conflict`, are allowed.
 - `git grove ack`, `git grove pins prune` and `git grove rm --force` are blocked, because those decisions are for
-  people. `git grove rm --rescue` runs.
+  people, also when run through `npx`, `pnpm dlx`, `bunx` or `node <git-grove>/dist/cli/bin.js`.
+  `git grove rm --rescue` runs.
 - `git rebase`, `git commit --amend`, `git branch -D`, `git push --force` and a `git reset --hard <rev>` that moves
   the branch run after grove pins the tips they could lose. For a force push, that is the remote tip it replaces.
 - Everything else runs untouched.
@@ -75,14 +80,16 @@ git grove install-guard
 
 `install-guard` prints the JSON block to add to `~/.claude/settings.json` and changes no file. Add the block yourself,
 then start a new Claude Code session. The hook runs `<node> <git-grove>/dist/cli/bin.js guard --claude` by absolute
-path, so it does not depend on `PATH`, with a 10 s timeout. `install-guard` refuses to run from an `npx` cache, which
-npm may clear.
+path, so it does not depend on `PATH`, with a 10 s timeout. The Node it names is the `node` on your `PATH` that is the
+running one, such as `/opt/homebrew/bin/node` rather than a versioned folder; run `install-guard` again after you
+change Node versions. It refuses to run from an `npx`, `pnpm dlx`, `bunx` or `yarn dlx` cache, which may be cleared.
 
 The guard fails open. When grove cannot check a command (input it cannot read, a git error, a repository it does not
-support, or a check that takes more than 3 s), it allows the command and prints one line saying why. A command that
-hides what it runs, with `$(…)`, backticks, `eval` or `bash -c` around `git` or `rm`, is allowed with
-`git grove cannot check this command`. Blocks and the pins the guard takes appear in the dashboard's activity, for
-repositories grove already knows.
+support, or a check that takes more than 3 s, whose git calls it then stops), it allows the command and prints one
+line saying why. A command whose own paths or folder the guard cannot know, because they come from a variable, a
+`$( … )`, a glob `cd` or a `GIT_DIR`-style prefix, is allowed with `git grove cannot check this command`, as is a whole
+line that runs `eval` or `bash -c` around `git` or `rm`, or leaves a `$(` unclosed. Blocks and the pins the guard
+takes appear in the dashboard's activity, for repositories grove already knows, the next time it loads the activity.
 
 So that agents know what the guard expects, add this to your `CLAUDE.md`:
 
@@ -94,8 +101,9 @@ it: tell me what it said. Never run `git grove ack`, `git grove pins prune` or `
 ```
 
 Known limit: the guard sees only the commands Claude Code runs through its Bash tool. A command inside a script that
-Claude runs, a git alias, another agent's tool and your own terminal are not checked. For those, the watcher still
-pins every branch tip it sees replaced.
+Claude runs, a git alias, a wrapper such as `xargs`, `find -exec`, `sudo` or `timeout`, another agent's tool and your
+own terminal are not checked. For those, the watcher still pins every branch tip it sees replaced. "Not yet" below
+lists the commands the guard reads but does not check yet.
 
 ## How it works
 
@@ -130,7 +138,8 @@ them call the same core, so the CLI, the dashboard and the guard cannot disagree
   receipt with an undo where one exists.
 - The guard splits a command line into simple commands, decides what each needs checked, and asks the same facts
   and the same removal verdict. `bin.js` loads it on its own, without the server or the dashboard, so a check of
-  `ls` costs little more than starting Node, and a worktree removal check on the demo repository about 0.1 to 0.2 s.
+  `ls` costs little more than starting Node, and a worktree removal check on the demo repository about 0.15 to
+  0.25 s.
 
 Pins are git refs (`refs/grove/pins/<branch>/<UTC time>`), so they outlive grove's database. The journal,
 acknowledgements and activity are in SQLite at `~/.git-grove/grove.db`. Previewed plans live in the server's memory
@@ -243,7 +252,19 @@ branch is. Errors print one line on stderr and exit 1; an action blocked by what
   - saying which agent session made a change in the journal;
   - recording branch tips on each guard call. The watcher and `status` still journal them;
   - writing settings files. `install-guard` prints the hook, and you add it;
-  - other agents' hook formats. Only Claude Code's `PreToolUse` hook is read.
+  - other agents' hook formats. Only Claude Code's `PreToolUse` hook is read;
+  - wrappers the guard does not follow, which run whatever they wrap unchecked: `xargs rm -r`, `find … -delete`,
+    `find … -exec rm -r`, `sudo`, `timeout` and `nice`;
+  - git aliases, including ones defined inline with `git -c alias.x=…`;
+  - `git rm -f` and `git rm -r -f` of files with local changes;
+  - commands that move or drop refs without a pin: `git branch -f`, `git branch -M`, `git checkout -B`,
+    `git switch -C`, `git rebase --update-refs` (which moves other branches of a stack), `git pull --rebase`,
+    `git update-ref -d`, `git reflog expire` and `git gc --prune=now`;
+  - `rm -r` of a folder holding whole repositories, run from a folder outside them, and `rm -rf .git`, which takes
+    the pins with it;
+  - pins for a detached HEAD;
+  - a custom `GIT_GROVE_HOME`, which the hook does not carry, so such a setup records no guard activity; and guard
+    activity reaches an open dashboard on its next load, not live.
 - Reflog catch-up. A change made while grove was not running is found at the next scan as one move, from the last tip
   grove saved to the current one, and is pinned and classified like any other. The steps in between are not read
   from the reflog, a branch grove never saw has nothing to compare, and an old tip git has already pruned is

@@ -163,29 +163,37 @@ Claude Code runs a `PreToolUse` hook before each Bash command, with the command 
 
 1. Read the line. `splitShellLine` and `readSimpleCommands` (`src/core/guard/`) split it on `&&`, `||`, `;`, `|` and
    newlines outside quotes, drop comments, redirections and here-document bodies, strip `VAR=value` and `env`, and
-   follow the folder through `cd` and subshells; `parseGitCall` follows `git -C`. A line that hides what it runs
-   (`$(…)`, a backtick, `eval`, `bash -c`) around `git` or `rm` is allowed, with one line saying the guard cannot
-   check it.
+   follow the folder through `cd` and subshells; `parseGitCall` follows `git -C`. The commands inside `$( … )` and
+   backticks are read too, and run first, so Claude Code's `"$(cat <<'EOF' … EOF)"` commit form is no obstacle. A
+   command whose own paths or folder come from a variable, a substitution, a glob `cd` or a `GIT_DIR`-style prefix
+   cannot be checked, nor can a whole line with `eval` or `bash -c` around `git` or `rm`; either is allowed, with one
+   line saying so.
 2. Classify each simple command from its words alone (`classifyCommand`): a worktree removal, a recursive `rm`, a
-   discard of uncommitted changes, a command whose tips should be pinned, one of grove's people-only commands, or
-   nothing.
-3. Judge them in order; the first block wins. A removal asks `removalVerdict` about every worktree it would delete.
-   A discard counts `git status --porcelain=v2 --untracked-files=no` entries in the paths it names. Nothing is pinned
-   until the whole line is allowed. Pins are taken without the repo lock: a pin only adds a ref, and `pin()` already
-   copes with two processes creating one.
+   discard of uncommitted changes, a `checkout` whose operands git must sort into a commit and paths, a command whose
+   tips should be pinned, one of grove's people-only commands, or nothing.
+3. Judge them in order; the first block wins. A worktree removal names its worktree the way git does, by a unique
+   trailing folder name first, then by path (`findWorktree`), and asks `removalVerdict` about every worktree it would
+   delete. A discard counts `git status --porcelain=v2 --untracked-files=no --ignore-submodules=all` entries in the
+   paths it names; unmerged paths count only for a discard of the whole tree, so git's conflict tools stay usable,
+   and a block during a merge, rebase, cherry-pick or revert names its `--abort`. Nothing is pinned until the whole
+   line is allowed. Pins are taken without the repo lock: a pin only adds a ref, and `pin()` already copes with two
+   processes creating one.
 4. Fail open. Stdin that is not the hook's JSON, any error inside grove, and a check past 3 s allow the command, with
-   one line on stderr.
+   one line on stderr; the deadline also stops the git calls still running.
 
-A block exits 2 with what would be lost and the safe alternative, which Claude reads. Blocks and new pins become
-activity rows, for repositories grove already knows. `bin.ts` loads the guard by dynamic import, and its static
-imports never reach `src/server`, `ui/`, `main.ts` or `node:sqlite` (`test/cli/guard-imports.test.ts`). Medians of 10
-runs on the demo repository: `ls` 35 ms and a blocked `git worktree remove` 115 ms on Node 24.11; 101 ms and 181 ms on
-Homebrew's Node 26, which takes 85 ms just to start.
+A block exits 2 with what would be lost and the safe alternative, which Claude reads, and only then are blocks and
+new pins written as activity rows, for repositories grove already knows, waiting at most 200 ms for the database.
+`bin.ts` imports nothing statically and loads the guard by dynamic import; its imports never reach `src/server`,
+`ui/`, `main.ts` or `node:sqlite` (`test/cli/guard-imports.test.ts`). Medians of 10 runs on the demo repository:
+`ls` 40 ms and a blocked `git worktree remove` 145 ms on Node 24.11; 111 ms and 212 ms on Homebrew's Node 26, which
+is slow to start.
 
 Tests in `test/core/guard/evaluate-command-line.test.ts`, among them "git worktree remove --force of a merged worktree
-holding a precious ignored file is blocked", "cd .worktrees && rm -rf x is blocked, with the path as seen from where
-the agent stands", "git reset --hard HEAD~1 on a clean tree is allowed and pins the old tip" and "git push --force
-origin feat pins the remote tip it would replace, under feat". The parser's are in
+holding a precious ignored file is blocked", "git worktree remove of a worktree by its bare name, as git resolves it,
+is blocked from the root", "the commands around and inside a substitution are checked, Claude Code's commit form
+included", "git's conflict tools are allowed mid-merge: --ours, --theirs, -m and --conflict", "a discard mid-operation
+is blocked with the abort that keeps your own changes", "git reset --hard HEAD~1 on a clean tree is allowed and pins
+the old tip" and "git push --force origin feat pins the remote tip it would replace, under feat". The parser's are in
 `test/core/guard/read-simple-commands.test.ts`.
 
 ### What makes a dashboard action safe to click
@@ -307,14 +315,23 @@ What it does not handle yet:
 - Commands the guard does not see or check. It sees only what Claude Code runs through its Bash tool, so a script, a
   git alias, another agent or a terminal can still run `git worktree remove --force`, `rm -rf` on a worktree or
   `git reset --hard`, which destroy uncommitted and ignored files before any scan can see them. Through the guard,
-  `git clean -fdx` and `git stash drop` still run unchecked, and a force push is pinned but not compared with the
-  remote.
+  these still run unchecked:
+  - `git clean -fdx`, `git stash drop` and `git stash clear`;
+  - `git rm -f` of files with local changes;
+  - wrappers the guard does not follow: `xargs rm -r`, `find … -delete`, `find … -exec rm -r`, `sudo`, `timeout`,
+    `nice`, and git aliases, inline `git -c alias.x=…` included;
+  - ref moves with no pin: `git branch -f`/`-M`, `git checkout -B`, `git switch -C`, `git rebase --update-refs`,
+    `git pull --rebase`, `git update-ref -d`, `git reflog expire`, `git gc --prune=now`;
+  - `rm -r` of a folder holding whole repositories, run from outside them, and `rm -rf .git`, which takes the pins
+    with it.
+
+  A force push is pinned but not compared with the remote, and a detached HEAD gets no pin.
 - Commits that only a detached HEAD held, once that HEAD moves on. The removal verdict and the prunable rule count
   them, but the journal follows branches only.
 
 ## 5. What's built and what's next
 
-Built, with 977 tests in 109 files (vitest against real temporary git repositories):
+Built, with 1018 tests in 111 files (vitest against real temporary git repositories):
 
 - the CLI: `status`, `restore`, `ack`, `pins list`, `check remove`, `new`, `add-level`, `restack`, `stack plan`,
   `rm [--rescue]`, `ui`, `serve`, `service install|uninstall|status`, `install-guard` and `guard --claude`;
@@ -334,7 +351,8 @@ Built, with 977 tests in 109 files (vitest against real temporary git repositori
 Next, in order:
 
 1. The guard's next checks: compare a force push with the remote and block one that drops commits, `git clean -fdx`,
-   `git stash drop` and `clear`, and say in the journal which agent session made a change.
+   `git stash drop` and `clear`, the wrappers and ref moves listed in section 4, and say in the journal which agent
+   session made a change.
 2. Reflog catch-up at startup, marking what it finds as found later.
 3. Status cached by each worktree's HEAD and index mtime, for repositories with a hundred worktrees.
 4. GitHub data through `gh`: PR state and review threads.
