@@ -84,6 +84,11 @@ test("the list is one Tab stop: the selected row and its own actions, else the f
   expect(picked).toEqual([row, `${row}:restack`, `${row}:open-editor`, `${row}:open-terminal`, `${row}:palette`]);
   expect(tabbable(list(1, false))[0]).toBe("row:#/r/1/f/1.QQ/one%2F01");
   const folded = tabbable(list(1, false, { kind: "feature", feature: "1.QQ", branch: "one/01" }, ["f:1.QQ"]));
-  expect(folded[0]).toBe("row:#/r/1/f/1.Qg/two%2F01");
+  expect(folded).toEqual(["group:f:1.QQ"]);
+  expect(tabbable(list(1, false, null, ["f:1.QQ"]))[0]).toBe("row:#/r/1/f/1.Qg/two%2F01");
   expect(tabbable(list(1, false, null, ["f:1.QQ", "f:1.Qg"]))).toEqual(["group:f:1.QQ"]);
+});
+
+test("when the selected row's group is folded, its header holds the list's Tab stop", () => {
+  expect(tabbable(list(1, false, { kind: "feature", feature: "1.Qg", branch: "two/02" }, ["f:1.Qg"]))).toEqual(["group:f:1.Qg"]);
 });

@@ -36,6 +36,9 @@ export const ICONS = {
   no: raw(
     `<svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="fails"><circle cx="7" cy="7" r="6" fill="var(--ember)"/><path d="M4.8 4.8l4.4 4.4M9.2 4.8l-4.4 4.4" stroke="#1A0E0A" stroke-width="1.6" stroke-linecap="round"/></svg>`,
   ),
+  tick: raw(
+    `<svg class="tick" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="none" stroke="var(--moss)" stroke-width="1.5"/><path d="M4.4 7.2l1.8 1.8 3.5-3.6" fill="none" stroke="var(--moss)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  ),
   dot: raw(`<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="7" r="2.2" fill="var(--muted)"/></svg>`),
   shield: raw(
     `<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 13.5 4v4.2c0 3.2-2.3 5.6-5.5 6.3-3.2-.7-5.5-3.1-5.5-6.3V4z" fill="none" stroke="var(--moss)" stroke-width="1.5" stroke-linejoin="round"/><path d="M5.6 8.1l1.6 1.6 3.2-3.3" fill="none" stroke="var(--moss)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,

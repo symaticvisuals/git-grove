@@ -1,30 +1,24 @@
-import type { FolderLine, Plan } from "../../../src/core/actions/plan.types.js";
+import type { Choice, Plan } from "../../../src/core/actions/plan.types.js";
 import type { DialogContext, DialogSpec, Field, FieldValues } from "../dialogs/dialog-specs.js";
 import { pickGroups } from "../dialogs/pick-groups.js";
 import { html, type SafeHtml } from "../html.js";
 import { ICONS } from "../icons.js";
 import { checkRow } from "./check-row.js";
 import { laneView } from "./lane-view.js";
+import { nameChips } from "./name-chips.js";
 import { timeAgo } from "./time-ago.js";
 
-function parentFolder(plan: Plan, root: string): string {
-  const created = plan.expects.find((expect) => expect.kind === "absent" && expect.path.startsWith(`${root}/`));
-  if (created === undefined || created.kind !== "absent") return ".worktrees/";
-  const relative = created.path.slice(root.length + 1);
-  const cut = relative.lastIndexOf("/");
-  return cut < 0 ? "./" : `${relative.slice(0, cut)}/`;
-}
-
-function folderLine(line: FolderLine): SafeHtml {
-  const note = line.isNew ? html`<span class="new">${line.note === "" ? "new" : `new, ${line.note}`}</span>` : line.note === "" ? "" : html`<span class="on">${line.note}</span>`;
-  return html`<div class="leaf">└ <b>${line.path}</b> ${note}</div>`;
-}
-
-function folders(plan: Plan, ctx: DialogContext): SafeHtml {
-  const lines = plan.folders ?? [];
-  if (lines.length === 0) return html``;
-  const fresh = lines.every((line) => line.isNew);
-  return html`<section class="tight"><div class="preview" role="group" aria-label="Folders"><div>${parentFolder(plan, ctx.repo.project.root)}${fresh ? html` <span class="new">new</span>` : ""}</div>${lines.map(folderLine)}</div></section>`;
+function namesOf(plan: Plan | null, ctx: DialogContext): string[] {
+  const { repo } = ctx;
+  const levels = repo.features.flatMap((feature) => feature.levels);
+  return [
+    repo.trunk,
+    ...levels.map((level) => level.branch),
+    ...levels.flatMap((level) => (level.worktree === null ? [] : [level.worktree.rel])),
+    ...repo.orphans.map((orphan) => orphan.branch),
+    ...repo.detached.map((sandbox) => sandbox.rel),
+    ...(plan?.moves ?? []),
+  ];
 }
 
 function lanes(plan: Plan): SafeHtml {
@@ -32,8 +26,7 @@ function lanes(plan: Plan): SafeHtml {
   return html`<section><div class="compare">${plan.before === null ? "" : laneView(plan.before)}${plan.after === null ? "" : laneView(plan.after)}</div></section>`;
 }
 
-function picks(plan: Plan, field: Field, values: FieldValues, ctx: DialogContext): SafeHtml {
-  const choices = plan.choices ?? [];
+function picks(choices: readonly Choice[], field: Field, values: FieldValues, ctx: DialogContext): SafeHtml {
   if (choices.length === 0) return html``;
   const value = values[field.name];
   const chosen = new Set(Array.isArray(value) ? value : choices.filter((choice) => choice.selected).map((choice) => choice.id));
@@ -44,10 +37,10 @@ function picks(plan: Plan, field: Field, values: FieldValues, ctx: DialogContext
   return html`<section class="tight" role="group" aria-label="${field.label}">${rows}</section>`;
 }
 
-function checks(plan: Plan, now: number): SafeHtml {
+function checks(plan: Plan, now: number, names: readonly string[]): SafeHtml {
   if (plan.blockers.length === 0 && plan.checks.length === 0) return html``;
-  const blockers = plan.blockers.map((text) => checkRow({ ok: false, text, why: null }));
-  return html`<section><div class="h3">Checks <span class="t">checked ${timeAgo(plan.readAt, now, "long")}</span></div><div class="checks">${blockers}${plan.checks.map(checkRow)}</div></section>`;
+  const blockers = plan.blockers.map((text) => checkRow({ ok: false, text, why: null }, names));
+  return html`<section><div class="h3">Checks <span class="t">checked ${timeAgo(plan.readAt, now, "long")}</span></div><div class="checks">${blockers}${plan.checks.map((check) => checkRow(check, names))}</div></section>`;
 }
 
 function toggles(fields: readonly Field[], values: FieldValues): SafeHtml {
@@ -59,9 +52,10 @@ function toggles(fields: readonly Field[], values: FieldValues): SafeHtml {
   )}</section>`;
 }
 
-function effects(plan: Plan): SafeHtml {
+function effects(plan: Plan, names: readonly string[]): SafeHtml {
   if (plan.effects.length === 0) return html``;
-  return html`<section><div class="h3">What else changes</div><ul>${plan.effects.map((effect) => html`<li>${ICONS.dot}<span>${effect}</span></li>`)}</ul></section>`;
+  const items = plan.effects.map((effect) => html`<li>${effect.startsWith("Offer ") ? ICONS.dot : ICONS.tick}<span>${nameChips(effect, names)}</span></li>`);
+  return html`<section><div class="h3">Grove will also</div><ul>${items}</ul></section>`;
 }
 
 function commands(plan: Plan): SafeHtml {
@@ -70,12 +64,19 @@ function commands(plan: Plan): SafeHtml {
 }
 
 /**
- * A dialog's body under its text fields: the folders a plan creates, its before and after lanes, the cleanup
- * checklist, the checks (what blocks it first) with how long ago they were read, the toggles, what else changes and,
- * folded away, the git commands. Without a plan yet only the toggles show.
+ * A dialog's body under its form: the plan's before and after lanes, the cleanup checklist, the checks (what blocks
+ * it first) with how long ago they were read, the toggles, what grove will also do (a tick for what it does, a dot
+ * for what it only offers) and, folded away, the git commands. A form shows its toggles before the checks. Branch and
+ * folder names show as code chips. Without a plan only the toggles show, and the cleanup checklist from `choices`,
+ * the last ones known, so a folder that vanished can still be unpicked.
  */
-export function renderPlanBody(plan: Plan | null, values: FieldValues, spec: DialogSpec, ctx: DialogContext, now: number): SafeHtml {
+export function renderPlanBody(plan: Plan | null, values: FieldValues, spec: DialogSpec, ctx: DialogContext, now: number, choices: readonly Choice[] | null = plan?.choices ?? null): SafeHtml {
   const pickField = spec.fields.find((field) => field.kind === "picks");
-  if (plan === null) return toggles(spec.fields, values);
-  return html`${folders(plan, ctx)}${lanes(plan)}${pickField === undefined ? "" : picks(plan, pickField, values, ctx)}${checks(plan, now)}${toggles(spec.fields, values)}${effects(plan)}${commands(plan)}`;
+  const checklist = pickField === undefined ? "" : picks(choices ?? [], pickField, values, ctx);
+  const switches = toggles(spec.fields, values);
+  if (plan === null) return html`${checklist}${switches}`;
+  const names = namesOf(plan, ctx);
+  const checked = checks(plan, now, names);
+  const middle = spec.fixed === true ? html`${switches}${checked}` : html`${checked}${switches}`;
+  return html`${lanes(plan)}${checklist}${middle}${effects(plan, names)}${commands(plan)}`;
 }

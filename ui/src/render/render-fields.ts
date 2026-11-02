@@ -15,7 +15,7 @@ function control(field: Field, values: FieldValues, ctx: DialogContext): SafeHtm
 
 /**
  * A dialog's text and select fields, laid out as the mockup's forms are: the first on its own line when there is
- * an odd number of them, the rest two to a line. Empty when the dialog has none.
+ * an odd number of them, the rest two to a line, then a slot for the folder preview. Empty when the dialog has none.
  */
 export function renderFields(spec: DialogSpec, values: FieldValues, ctx: DialogContext): SafeHtml {
   const fields = spec.fields.filter((field) => field.kind === "text" || field.kind === "select").map((field) => control(field, values, ctx));
@@ -23,5 +23,5 @@ export function renderFields(spec: DialogSpec, values: FieldValues, ctx: DialogC
   const lone = fields.length % 2 === 1 ? fields.slice(0, 1) : [];
   const pairs: SafeHtml[] = [];
   for (let index = lone.length; index < fields.length; index += 2) pairs.push(html`<div class="two">${fields[index]}${fields[index + 1]}</div>`);
-  return html`<section class="tight">${lone}${pairs}</section>`;
+  return html`<section class="tight">${lone}${pairs}<div id="dlg-preview"></div></section>`;
 }

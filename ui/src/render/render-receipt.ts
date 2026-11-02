@@ -1,16 +1,16 @@
 import type { Receipt } from "../../../src/core/actions/plan.types.js";
 import { html, type SafeHtml } from "../html.js";
-import { ICONS } from "../icons.js";
+import { sentence } from "../sentence.js";
 import { checkRow } from "./check-row.js";
 
 /**
- * What a run did: its title and lines, passing when it worked and failing when it stopped or was refused. Undo
- * shows when the receipt can be undone, and Preview again when it was refused, so the plan can be read afresh.
+ * What a run did, compactly: Done (or Not run, or Stopped) and one sentence, with its lines folded under Details,
+ * passing when it worked and failing when it did not. Details start open when it did not work, since they say why.
  */
 export function renderReceipt(receipt: Receipt): SafeHtml {
-  const lines = receipt.lines.map((text) => checkRow({ ok: receipt.ok, text, why: null }));
-  const undo = receipt.undo !== null && receipt.undo.length > 0 ? html`<button class="btn" data-dlg="undo" data-key="dlg:undo">${ICONS.back}Undo</button>` : "";
-  const again = receipt.refused ? html`<button class="btn" data-dlg="again" data-key="dlg:again">Preview again</button>` : "";
-  const acts = undo === "" && again === "" ? "" : html`<div class="acts">${undo}${again}</div>`;
-  return html`<section><div class="receipt${receipt.ok ? "" : " bad"}"><b>${receipt.title}</b>${lines.length === 0 ? "" : html`<div class="checks">${lines}</div>`}${acts}</div></section>`;
+  const head = receipt.ok ? "Done" : receipt.refused ? "Not run" : "Stopped";
+  const text = sentence(receipt.title.replace(/^(?:Stopped|Refused): /, ""));
+  const lines = receipt.lines.map((line) => checkRow({ ok: receipt.ok, text: line, why: null }));
+  const details = lines.length === 0 ? "" : html`<details class="more" data-key="dlg:details"${receipt.ok ? "" : html` open`}><summary>Details</summary><div class="checks">${lines}</div></details>`;
+  return html`<section><div class="receipt${receipt.ok ? "" : " bad"}"><b>${head}</b><span>${text}</span>${details}</div></section>`;
 }

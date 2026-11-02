@@ -1,6 +1,7 @@
 import type { ActionName } from "../../src/core/actions/plan.types.js";
 import type { WireRepoView } from "../../src/server/wire/wire.types.js";
 import { adjacentRow } from "./adjacent-row.js";
+import { cycleFocus } from "./cycle-focus.js";
 import { adoptToken, type TokenDeps } from "./adopt-token.js";
 import { announcement } from "./announcement.js";
 import { type Api, createApi } from "./api.js";
@@ -12,12 +13,12 @@ import { DIALOGS } from "./dialogs/dialog-specs.js";
 import { effectivePick } from "./effective-pick.js";
 import { html } from "./html.js";
 import { ICONS } from "./icons.js";
-import { keyCommand, type KeyCommand, type KeyMode } from "./keys.js";
+import { keyCommand, type KeyCommand, type KeyInput, type KeyMode } from "./keys.js";
 import { connectLive } from "./live.js";
 import { loadable } from "./loadable.js";
 import { MESSAGES } from "./messages.js";
 import { createPalette } from "./palette/palette.js";
-import { type PaletteItem, paletteItems } from "./palette/palette-items.js";
+import type { PaletteItem } from "./palette/palette-items.js";
 import { parseRoute, routeHash } from "./parse-route.js";
 import { createRegionPainter } from "./region-painter.js";
 import { detailPanel } from "./render/detail-panel.js";
@@ -35,6 +36,8 @@ declare const __GROVE_VERSION__: string;
 
 const PROJECTS_EVERY_MS = 1_000;
 const CLOCK_MS = 5_000;
+const SPEAK_MS = 50;
+const TRAPPED = 'input:not([disabled]), select:not([disabled]), button:not([disabled]), summary, a[href], [tabindex="0"]';
 const FOCUS_WAIT_MS = 2_000;
 const TABS: readonly Tab[] = ["feature", "health", "activity"];
 const ACTION_NAMES = Object.keys(DIALOGS);
@@ -54,17 +57,23 @@ let projectsTimer = 0;
 let scrimOwner: "dialog" | "palette" | null = null;
 let returnFocus: string | null = null;
 let focusAfterPaint: { key: string; until: number } | null = null;
+let spoken: string[] = [];
+let speaking = 0;
 const inFlight = new Map<SliceName, { key: string; again: boolean }>();
 const paintRegion = createRegionPainter();
 const scrim = document.getElementById("scrim") ?? document.body;
 
 function announce(text: string): void {
+  spoken.push(text);
+  if (speaking !== 0) return;
   const region = document.getElementById("announce");
-  if (region === null) return;
-  region.textContent = "";
-  window.setTimeout(() => {
-    region.textContent = text;
-  }, 50);
+  if (region !== null) region.textContent = "";
+  speaking = window.setTimeout(() => {
+    speaking = 0;
+    const out = document.getElementById("announce");
+    if (out !== null) out.textContent = spoken.map((text) => (/[.!?]$/.test(text) ? text : `${text}.`)).join(" ");
+    spoken = [];
+  }, SPEAK_MS);
 }
 
 const effects = createDialogEffects({ api: () => api, state: () => state, dispatch: (action) => dispatch(action), toast });
@@ -141,7 +150,7 @@ function focusKey(key: string | null): boolean {
 
 const dialogHost = createDialogHost({ root: scrim, dispatch, paint: paintRegion });
 
-const palette = createPalette({ root: scrim, dispatch, state: () => state, run: (item) => runPaletteItem(item) });
+const palette = createPalette({ root: scrim, dispatch, run: (item) => runPaletteItem(item) });
 
 function paintScrim(now: number): void {
   const owner = state.palette !== null ? "palette" : state.dialog !== null ? "dialog" : null;
@@ -336,14 +345,34 @@ function activate(target: Element): boolean {
 }
 
 function moveSelection(delta: 1 | -1): void {
-  const rows = [...document.querySelectorAll<HTMLElement>("#view .rows:not(.closed) > .row[data-href]")];
-  const hrefs = rows.map((row) => row.dataset["href"] ?? "");
-  const current = rows.find((row) => row.classList.contains("sel"))?.dataset["href"] ?? null;
-  const next = adjacentRow(hrefs, current, delta);
+  const items = [...document.querySelectorAll<HTMLElement>("#view .group.closed, #view .rows:not(.closed) > .row[data-href]")];
+  const keys = items.map((item) => item.dataset["key"] ?? "");
+  const active = document.activeElement;
+  const from = active instanceof HTMLElement && items.includes(active) ? active : (items.find((item) => item.classList.contains("sel")) ?? null);
+  const next = adjacentRow(keys, from?.dataset["key"] ?? null, delta);
   if (next === null) return;
-  focusAfterPaint = { key: `row:${next}`, until: Date.now() + FOCUS_WAIT_MS };
-  if (next === current) schedule();
-  else location.hash = next;
+  focusAfterPaint = { key: next, until: Date.now() + FOCUS_WAIT_MS };
+  const href = items[keys.indexOf(next)]?.dataset["href"];
+  if (href !== undefined && href !== location.hash) location.hash = href;
+  else schedule();
+}
+
+function fold(open: boolean): void {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return;
+  const header = active.matches(".group") ? active : active.closest(".rows")?.previousElementSibling;
+  const key = header instanceof HTMLElement && header.matches(".group") ? header.dataset["group"] : undefined;
+  if (key === undefined) return;
+  focusAfterPaint = { key: `group:${key}`, until: Date.now() + FOCUS_WAIT_MS };
+  if (state.closed.includes(key) === open) dispatch({ type: "toggle-group", key });
+  else schedule();
+}
+
+function trapTab(back: boolean): void {
+  const items = [...scrim.querySelectorAll<HTMLElement>(TRAPPED)].filter((item) => item.getClientRects().length > 0);
+  const active = document.activeElement;
+  const next = cycleFocus(active instanceof HTMLElement ? items.indexOf(active) : -1, items.length, back);
+  (next === null ? scrim.querySelector<HTMLElement>(".dlg, .palette") : items[next])?.focus();
 }
 
 function shortcut(key: ShortcutKey): void {
@@ -353,7 +382,6 @@ function shortcut(key: ShortcutKey): void {
 }
 
 function command(name: KeyCommand): void {
-  const query = state.palette?.query ?? "";
   switch (name) {
     case "palette":
       dispatch({ type: "palette-open" });
@@ -361,19 +389,25 @@ function command(name: KeyCommand): void {
     case "close":
       dispatch(state.palette !== null ? { type: "palette-close" } : { type: "dialog-close" });
       return;
-    case "confirm":
-      if (state.dialog?.stage === "review") dispatch({ type: "dialog-confirm" });
-      else if (state.run !== null && state.run.receipt !== null) dispatch({ type: "dialog-close" });
-      return;
-    case "up":
-    case "down":
-      dispatch({ type: "palette-move", delta: name === "down" ? 1 : -1, count: paletteItems(state, query).length });
-      return;
-    case "run-item": {
-      const item = state.palette === null ? undefined : paletteItems(state, query)[state.palette.index];
-      if (item !== undefined) runPaletteItem(item);
+    case "confirm": {
+      const button = scrim.querySelector<HTMLButtonElement>('#dlg-foot [data-dlg="confirm"]');
+      const planId = button?.dataset["plan"];
+      if (button !== null && !button.disabled && planId !== undefined) dispatch({ type: "dialog-confirm", planId });
       return;
     }
+    case "up":
+    case "down":
+      dispatch({ type: "palette-move", delta: name === "down" ? 1 : -1, count: palette.count() });
+      return;
+    case "run-item": {
+      const item = palette.chosen();
+      if (item !== null) runPaletteItem(item);
+      return;
+    }
+    case "fold":
+    case "unfold":
+      fold(name === "unfold");
+      return;
     case "new":
       openAction("new", {});
       return;
@@ -396,8 +430,27 @@ function keyMode(): KeyMode {
 function onKey(event: KeyboardEvent): void {
   const target = event.target instanceof HTMLElement ? event.target : null;
   const typing = target !== null && (target.isContentEditable || (target.matches("input, select, textarea") && !target.matches("input[type=checkbox], input[type=radio]")));
-  const onControl = target !== null && target.matches("button, a, select, textarea, summary");
-  const input = { key: event.key, meta: event.metaKey, ctrl: event.ctrlKey, alt: event.altKey, typing, onControl, onRow: target?.matches(".row") ?? false };
+  if (event.repeat && !typing && (event.key === "Enter" || event.key === " ")) {
+    event.preventDefault();
+    return;
+  }
+  if (event.key === "Tab" && keyMode() !== "page") {
+    event.preventDefault();
+    trapTab(event.shiftKey);
+    return;
+  }
+  const input: KeyInput = {
+    key: event.key,
+    meta: event.metaKey,
+    ctrl: event.ctrlKey,
+    alt: event.altKey,
+    repeat: event.repeat,
+    typing,
+    submits: target !== null && target.matches("input") && typing,
+    onControl: target !== null && target.matches("button, a, select, textarea, summary"),
+    onRow: target?.matches(".row") ?? false,
+    onGroup: target?.matches(".group") ?? false,
+  };
   const name = state.signedOut || event.isComposing ? null : keyCommand(input, keyMode());
   if (name !== null) {
     event.preventDefault();

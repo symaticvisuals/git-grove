@@ -69,11 +69,13 @@ function groupView(group: ListGroup, input: RepoViewInput, stop: string | null):
 }
 
 function tabStop(groups: readonly ListGroup[], input: RepoViewInput): string | null {
-  const open = groups.filter((group) => !input.closed.includes(group.key));
-  const hrefs = open.flatMap((group) => group.rows.map((row) => rowHref(input.repoId, row).href));
   const selected = input.pick === null ? null : routeHash({ view: "repo", repo: input.repoId, pick: input.pick });
-  if (selected !== null && hrefs.includes(selected)) return selected;
-  return hrefs[0] ?? (groups[0] === undefined ? null : `group:${groups[0].key}`);
+  const holder = selected === null ? undefined : groups.find((group) => group.rows.some((row) => rowHref(input.repoId, row).href === selected));
+  if (selected !== null && holder !== undefined) return input.closed.includes(holder.key) ? `group:${holder.key}` : selected;
+  const open = groups.filter((group) => !input.closed.includes(group.key));
+  const first = open[0]?.rows[0];
+  if (first !== undefined) return rowHref(input.repoId, first).href;
+  return groups[0] === undefined ? null : `group:${groups[0].key}`;
 }
 
 function summary(view: WireRepoView): string {
@@ -107,8 +109,9 @@ function scanFailed(view: WireRepoView): SafeHtml {
 /**
  * A repository's view: its bar with the By feature, By health and Activity tabs and Scan now, the filters (the
  * Needs you toggle, the clean-up chip and a summary), and the list of its groups, or its activity on that tab. A
- * repo whose last scan failed keeps its last data under a banner. The list is one Tab stop: the selected row, else
- * the first row of an open group, else the first group's header; group buttons are reached by mouse, palette or keys.
+ * repo whose last scan failed keeps its last data under a banner. The list is one Tab stop: the selected row (its
+ * group's header while that group is folded), else the first row of an open group, else the first group's header.
+ * Group buttons are reached by mouse, the palette or the shortcut keys.
  */
 export function repoView(input: RepoViewInput): SafeHtml {
   const view = input.repo === null || input.repo.status === "loading" ? null : input.repo.data;

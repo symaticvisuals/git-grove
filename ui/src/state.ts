@@ -2,6 +2,8 @@ import type { Plan } from "../../src/core/actions/plan.types.js";
 import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { activityQuery } from "./activity-query.js";
+import { effectivePick } from "./effective-pick.js";
+import { groupKeyOf } from "./render/group-key-of.js";
 import { type DialogAction, type DialogSlices, type DialogState, type PaletteState, reduceDialog, type RunSlice } from "./dialogs/reduce-dialog.js";
 import type { LiveProblem, LiveState } from "./live.js";
 import type { Route } from "./parse-route.js";
@@ -180,10 +182,18 @@ function onEvent(state: State, event: ServerEvent, at: number): State {
   }
 }
 
+function unfoldedFor(state: State, route: Route): string[] {
+  const loaded = state.repo !== null && state.repo.status !== "loading" ? state.repo.data : null;
+  if (route.view !== "repo" || loaded === null || loaded.project.id !== route.repo) return state.closed;
+  const pick = effectivePick(route, loaded);
+  const key = pick === null ? null : groupKeyOf(loaded, state.tab === "health", pick);
+  return key === null || !state.closed.includes(key) ? state.closed : state.closed.filter((closed) => closed !== key);
+}
+
 function step(state: State, action: UiAction): State {
   switch (action.type) {
     case "route":
-      return { ...state, route: action.route };
+      return { ...state, route: action.route, closed: unfoldedFor(state, action.route) };
     case "loaded":
       return sliceRequests(state)[action.result.slice]?.key === action.key ? settle(state, action.result) : state;
     case "failed": {
@@ -260,7 +270,7 @@ export function initialState(route: Route, pageVersion: string): State {
  * The next state; pure. A reply is kept only for the slice and key the state still asks for. A digest reloads the
  * slices it concerns, failed ones included; an activity event joins the lists it belongs to; while live, the project
  * list reloads every 30 s; and once the live stream is back after dropping, every slice is reloaded. A slice the
- * route no longer needs is cleared; one it newly needs starts loading. Dialog, run and palette actions, and the
+ * route no longer needs is cleared; one it newly needs starts loading. A route to a row in a folded group unfolds it. Dialog, run and palette actions, and the
  * step and receipt events, go to `reduceDialog`; a stream that is back after dropping reads the current run again.
  */
 export function reduce(state: State, action: UiAction): State {

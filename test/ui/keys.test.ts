@@ -1,17 +1,31 @@
 import { expect, test } from "vitest";
 import { adjacentRow } from "../../ui/src/adjacent-row.js";
+import { cycleFocus } from "../../ui/src/cycle-focus.js";
 import { keyCommand, type KeyInput } from "../../ui/src/keys.js";
+import { paletteChoice } from "../../ui/src/palette/palette-choice.js";
+import type { PaletteItem } from "../../ui/src/palette/palette-items.js";
 import { shortcutTarget } from "../../ui/src/shortcut-target.js";
 import { feature, finding, level, repoView } from "./wire-fixtures.js";
 
 function key(name: string, overrides: Partial<KeyInput> = {}): KeyInput {
-  return { key: name, meta: false, ctrl: false, alt: false, typing: false, onControl: false, onRow: false, ...overrides };
+  return { key: name, meta: false, ctrl: false, alt: false, repeat: false, typing: false, submits: false, onControl: false, onRow: false, onGroup: false, ...overrides };
 }
 
-test("⌘K and Ctrl-K open the palette from anywhere, even a text field, and close it again", () => {
+test("⌘K and Ctrl-K open the palette from the page, even a text field, and close it again; in a dialog they do nothing", () => {
   expect(keyCommand(key("k", { meta: true }), "page")).toBe("palette");
-  expect(keyCommand(key("K", { ctrl: true, typing: true }), "dialog")).toBe("palette");
+  expect(keyCommand(key("K", { ctrl: true, typing: true }), "page")).toBe("palette");
   expect(keyCommand(key("k", { meta: true }), "palette")).toBe("close");
+  expect(keyCommand(key("k", { meta: true }), "dialog")).toBeNull();
+  expect(keyCommand(key("K", { ctrl: true, typing: true, submits: true }), "dialog")).toBeNull();
+});
+
+test("a held key repeats no shortcut and no Enter; the palette's arrows still repeat", () => {
+  for (const name of ["n", "r", "s", "a", "j", "k"]) expect(keyCommand(key(name, { repeat: true }), "page")).toBeNull();
+  expect(keyCommand(key("k", { meta: true, repeat: true }), "page")).toBeNull();
+  expect(keyCommand(key("Enter", { repeat: true, typing: true, submits: true }), "dialog")).toBeNull();
+  expect(keyCommand(key("Enter", { repeat: true, typing: true }), "palette")).toBeNull();
+  expect(keyCommand(key("Escape", { repeat: true }), "dialog")).toBeNull();
+  expect(keyCommand(key("ArrowDown", { repeat: true, typing: true }), "palette")).toBe("down");
 });
 
 test("the page's letters open dialogs and move the selection, but not while typing or with a modifier", () => {
@@ -33,13 +47,40 @@ test("the arrow keys move the selection only from a row", () => {
   expect(keyCommand(key("ArrowDown"), "page")).toBeNull();
 });
 
-test("in a dialog Esc closes and Enter confirms, except on a button, link, select or disclosure", () => {
+test("in a dialog Esc closes; Enter confirms only from a field where Enter submits, never from the page or the box", () => {
   expect(keyCommand(key("Escape"), "dialog")).toBe("close");
-  expect(keyCommand(key("Enter", { typing: true }), "dialog")).toBe("confirm");
-  expect(keyCommand(key("Enter"), "dialog")).toBe("confirm");
+  expect(keyCommand(key("Enter", { typing: true, submits: true }), "dialog")).toBe("confirm");
+  expect(keyCommand(key("Enter"), "dialog")).toBeNull();
+  expect(keyCommand(key("Enter", { typing: true }), "dialog")).toBeNull();
   expect(keyCommand(key("Enter", { onControl: true }), "dialog")).toBeNull();
   expect(keyCommand(key("n"), "dialog")).toBeNull();
   expect(keyCommand(key("j"), "dialog")).toBeNull();
+});
+
+test("← on a row or open group folds it, → on a folded group unfolds it, and the arrows walk headers too", () => {
+  expect(keyCommand(key("ArrowLeft", { onRow: true }), "page")).toBe("fold");
+  expect(keyCommand(key("ArrowLeft", { onGroup: true }), "page")).toBe("fold");
+  expect(keyCommand(key("ArrowRight", { onGroup: true }), "page")).toBe("unfold");
+  expect(keyCommand(key("ArrowRight", { onRow: true }), "page")).toBeNull();
+  expect(keyCommand(key("ArrowDown", { onGroup: true }), "page")).toBe("next");
+  expect(keyCommand(key("ArrowLeft"), "page")).toBeNull();
+});
+
+test("Tab and Shift+Tab cycle inside a dialog, never leaving it", () => {
+  expect(cycleFocus(0, 3, false)).toBe(1);
+  expect(cycleFocus(2, 3, false)).toBe(0);
+  expect(cycleFocus(0, 3, true)).toBe(2);
+  expect(cycleFocus(-1, 3, false)).toBe(0);
+  expect(cycleFocus(-1, 3, true)).toBe(2);
+  expect(cycleFocus(-1, 0, false)).toBeNull();
+});
+
+test("the palette runs the item it painted, its index held to a list that shrank", () => {
+  const item = (text: string): PaletteItem => ({ kind: "Go to", text, hint: null, run: { route: { view: "pins" } } });
+  const painted = [item("a"), item("b")];
+  expect(paletteChoice(painted, 1)).toEqual({ index: 1, item: painted[1] });
+  expect(paletteChoice(painted, 7)).toEqual({ index: 1, item: painted[1] });
+  expect(paletteChoice([], 3)).toEqual({ index: 0, item: null });
 });
 
 test("in the palette the arrows move, Enter runs and Esc closes", () => {

@@ -5,7 +5,7 @@ import { failed } from "../../ui/src/render/failed.js";
 import { loading } from "../../ui/src/render/loading.js";
 import { sliceRequests } from "../../ui/src/slice-requests.js";
 import { initialState, reduce, type State, type UiAction } from "../../ui/src/state.js";
-import { activityItem } from "./wire-fixtures.js";
+import { activityItem, feature, plan, repoView } from "./wire-fixtures.js";
 
 const START = initialState({ view: "repo", repo: 1, pick: null }, "1.0.0");
 
@@ -44,4 +44,24 @@ test("repainted states carry no live role, so a repaint announces nothing", () =
 test("the busy notice asks to close a dashboard; a refused connection still says git grove isn't running", () => {
   expect(notices({ liveDropped: true, live: "connecting", liveProblem: "busy", updateAvailable: false }).text).toContain("Too many open dashboards. Close one and this one reconnects.");
   expect(notices({ liveDropped: true, live: "down", liveProblem: "unreachable", updateAvailable: false }).text).toContain("git grove isn&#39;t running");
+});
+
+test("each run step is announced once, when it first finishes or fails", () => {
+  const view = repoView();
+  const shown = reduce(START, { type: "loaded", key: sliceRequests(START).repo?.key ?? "", result: { slice: "repo", data: view } });
+  const ctx = { repo: view, feature: feature(), level: null, branch: null, targets: null, worktree: null };
+  const steps = ["Check nothing moved since you looked", "Pin the current tip", "Move the branch back", "Check all 3 commits are back"].map((title) => ({ title, detail: "" }));
+  let state = reduce(shown, { type: "dialog-open", action: "restore", ctx });
+  state = reduce(state, { type: "dialog-planned", dialog: state.dialog?.id ?? 0, revision: 0, planId: "p", plan: plan({ steps }) });
+  state = reduce(state, { type: "dialog-armed", dialog: state.dialog?.id ?? 0, planId: "p" });
+  state = reduce(reduce(state, { type: "dialog-confirm", planId: "p" }), { type: "run-started", planId: "p", runId: "r" });
+  const event = (runId: string, index: number, kind: "running" | "done" | "failed"): UiAction => ({ type: "event", at: 1, event: { type: "step", runId, event: { index, state: kind, detail: "", ms: 3 } } });
+  expect(said(state, event("r", 1, "running"))).toBeNull();
+  const pinned = reduce(state, event("r", 1, "done"));
+  expect(announcement(state, pinned, event("r", 1, "done"))).toBe("Step 2 of 4 done: Pin the current tip");
+  expect(said(pinned, event("r", 1, "done"))).toBeNull();
+  expect(said(pinned, event("r", 2, "failed"))).toBe("Step 3 of 4 failed: Move the branch back");
+  expect(said(pinned, event("other", 3, "done"))).toBeNull();
+  const synced: UiAction = { type: "run-synced", runId: "r", request: 1, state: { plan: plan({ steps }), events: [{ index: 0, state: "done", detail: "", ms: 2 }, { index: 1, state: "done", detail: "", ms: 3 }], receipt: null } };
+  expect(said(state, synced)).toBe("Step 1 of 4 done: Check nothing moved since you looked. Step 2 of 4 done: Pin the current tip");
 });

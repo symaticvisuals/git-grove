@@ -91,7 +91,7 @@ test("cleanup's input is the picked paths, and the detached sandboxes toggle tog
   );
   expect(groups.map((group) => group.ids)).toEqual([["/src/acme-shop/.worktrees/fix"], ["/src/acme-shop/.worktrees/a", "/src/acme-shop/.worktrees/b"], ["/src/acme-shop/.worktrees/bump"]]);
   expect(groups[1]).toMatchObject({ label: "2 detached sandboxes", detail: "nothing to keep", selectable: true });
-  expect(groups[2]).toMatchObject({ selectable: false, detail: "2 commits only here" });
+  expect(groups[2]).toMatchObject({ selectable: false, detail: "2 commits only here", health: "idle" });
 
   const spec = DIALOGS.cleanup;
   expect(spec.fields.map((field) => [field.kind, field.name])).toEqual([["picks", "paths"]]);
@@ -131,4 +131,11 @@ test("a button's data names the feature, level, branch, pin and worktree the dia
 
   const deleted = dialogContext(view, { branch: "feat/gone" });
   expect(deleted).toMatchObject({ feature: null, level: null, branch: "feat/gone", targets: [{ branch: "feat/gone" }] });
+});
+
+test("blocked worktrees come last in the checklist, whatever order grove sent them in", () => {
+  const ctx = context();
+  const groups = pickGroups([choice("/w/bump", { selectable: false, selected: false, health: "loses" }), choice("/w/fix"), choice("/w/old", { selectable: false, selected: false })], ctx);
+  expect(groups.map((group) => group.ids[0])).toEqual(["/w/fix", "/w/bump", "/w/old"]);
+  expect(groups.slice(1).every((group) => group.health === "idle")).toBe(true);
 });

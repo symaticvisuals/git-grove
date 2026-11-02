@@ -261,9 +261,16 @@ a.sec span{font-size:11px}
 .newbtn kbd{margin-left:auto}
 .cmds{border-top:1px solid var(--line);padding:10px 20px}
 .cmds summary{cursor:pointer;font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:6px}
+.cmds summary::-webkit-details-marker{display:none}
 .cmds summary::before{content:"›";display:inline-block;transition:transform .15s}
 .cmds[open] summary::before{transform:rotate(90deg)}
 .cmds pre{margin-top:8px}
+.more summary{cursor:pointer;font-size:12px;color:var(--muted);list-style:none;display:flex;align-items:center;gap:6px}
+.more summary::-webkit-details-marker{display:none}
+.more summary::before{content:"›";display:inline-block;transition:transform .15s}
+.more[open] summary::before{transform:rotate(90deg)}
+.more .checks{margin-top:8px}
+#dlg-preview:empty{display:none}
 .field{display:grid;gap:6px}
 .field label{font-size:12px;color:var(--muted)}
 .field input,.field select{height:32px;border-radius:7px;border:1px solid var(--line-hi);background:var(--bg);color:var(--text);padding:0 10px;font:13px "Atkinson Hyperlegible Next",sans-serif}

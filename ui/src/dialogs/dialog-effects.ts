@@ -30,7 +30,8 @@ function statusOf(error: unknown): number {
 /**
  * What the dialogs ask git grove for, driven by each state change: a preview at once when a dialog opens or must be
  * checked again, and 250 ms after the last change while a form is edited; the run once a plan is confirmed; the run's
- * state once right after it starts and again after the stream drops, so no step is missed. A receipt toasts and
+ * state once right after it starts and again after the stream drops, so no step is missed, one read at a time: a read
+ * asked for while one is in flight runs once more after it. A receipt toasts and
  * reloads what the run changed, including a run whose dialog was replaced by another; a run that fails after its
  * dialog was hidden says why in a toast.
  */
@@ -84,17 +85,17 @@ export function createDialogEffects(deps: DialogEffectsDeps): DialogEffects {
   const syncRun = (state: State): void => {
     const { run } = state;
     const api = deps.api();
-    if (api === null || run === null || run.runId === null || !run.sync || syncing === run.runId) return;
-    const { runId } = run;
+    if (api === null || run === null || run.runId === null || run.sync <= run.synced || syncing === run.runId) return;
+    const { runId, sync: request } = run;
     syncing = runId;
     api.runState(runId).then(
       (read) => {
         syncing = null;
-        deps.dispatch({ type: "run-synced", runId, state: read });
+        deps.dispatch({ type: "run-synced", runId, request, state: read });
       },
       (error: unknown) => {
         syncing = null;
-        deps.dispatch({ type: "run-sync-failed", runId, message: statusOf(error) === 404 ? RESTARTED : messageOf(error) });
+        deps.dispatch({ type: "run-sync-failed", runId, request, message: statusOf(error) === 404 ? RESTARTED : messageOf(error) });
       },
     );
   };

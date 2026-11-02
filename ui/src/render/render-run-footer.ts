@@ -4,7 +4,8 @@ import { ICONS } from "../icons.js";
 
 /**
  * A run's footer. While it runs: that it keeps going when closed, and Hide; with `error`, why its progress cannot be
- * read. Once it has a receipt: whether what moved was pinned first, and Done.
+ * read. Once it has a receipt: whether what moved was pinned first, Undo when it can be undone, Preview again when
+ * it was refused, and Done.
  */
 export function renderRunFooter(receipt: Receipt | null, error: string | null): SafeHtml {
   if (receipt === null) {
@@ -12,5 +13,7 @@ export function renderRunFooter(receipt: Receipt | null, error: string | null): 
     return html`${note}<button class="btn" data-dlg="close" data-key="dlg:hide">Hide</button>`;
   }
   const text = receipt.pins.length > 0 ? "Every branch that moved was pinned first." : "Recorded in Activity.";
-  return html`<span class="note">${ICONS.shield}<span>${text}</span></span><button class="btn primary" data-dlg="close" data-key="dlg:done">Done <kbd>↵</kbd></button>`;
+  const undo = receipt.undo !== null && receipt.undo.length > 0 ? html`<button class="btn" data-dlg="undo" data-key="dlg:undo">${ICONS.back}Undo</button>` : "";
+  const again = receipt.refused ? html`<button class="btn" data-dlg="again" data-key="dlg:again">Preview again</button>` : "";
+  return html`<span class="note">${ICONS.shield}<span>${text}</span></span>${undo}${again}<button class="btn primary" data-dlg="close" data-key="dlg:done">Done <kbd>↵</kbd></button>`;
 }

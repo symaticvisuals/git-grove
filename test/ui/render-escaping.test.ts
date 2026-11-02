@@ -91,11 +91,16 @@ test("a dialog's heading, plan, picks, steps and receipt render agent-written te
   const planned = reduce(open, { type: "dialog-planned", dialog: open.dialog?.id ?? 0, revision: 0, planId: "p", plan: evilPlan });
   const review = dialogParts(planned, 2);
   safe(`${review?.head.text}${review?.body.text}${review?.foot.text}`);
-  const confirmed = reduce(reduce(planned, { type: "dialog-confirm" }), { type: "run-started", planId: "p", runId: "r" });
+  const ready = reduce(planned, { type: "dialog-armed", dialog: planned.dialog?.id ?? 0, planId: "p" });
+  const confirmed = reduce(reduce(ready, { type: "dialog-confirm", planId: "p" }), { type: "run-started", planId: "p", runId: "r" });
   const stepped = reduce(confirmed, { type: "event", at: 3, event: { type: "step", runId: "r", event: { index: 0, state: "failed", detail: EVIL, ms: 4 } } });
   const done = reduce(stepped, { type: "event", at: 4, event: { type: "receipt", runId: "r", receipt: { action: "ack", ok: false, refused: true, title: EVIL, lines: [EVIL], pins: [], undo: null, at: 4 } } });
   const run = dialogParts(done, 5);
   safe(`${run?.body.text}`);
+  const form = reduce(shown, { type: "dialog-open", action: "add-level", ctx });
+  const formPlan = reduce(form, { type: "dialog-field", name: "branch", value: EVIL });
+  const withFolders = reduce(formPlan, { type: "dialog-planned", dialog: formPlan.dialog?.id ?? 0, revision: formPlan.dialog?.revision ?? 0, planId: "q", plan: evilPlan });
+  safe(`${dialogParts(withFolders, 2)?.preview.text}`);
   safe(renderFields(DIALOGS["add-level"], { feature: EVIL, branch: EVIL, on: EVIL, env: true }, ctx).text);
   safe(paletteOptions(paletteItems(shown, ""), 0).text);
 });

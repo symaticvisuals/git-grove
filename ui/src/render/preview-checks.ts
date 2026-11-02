@@ -11,7 +11,7 @@ export function previewChecks(heading: string, preview: Load<Plan> | null, now: 
   const when = plan === null ? "" : html`<span class="t">checked ${timeAgo(plan.readAt, now, "long")}</span>`;
   const body = loadView(preview, "preview", (data) => {
     const blockers = data.blockers.map((text) => checkRow({ ok: false, text, why: null }));
-    return html`<div class="checks">${blockers}${data.checks.map(checkRow)}</div>`;
+    return html`<div class="checks">${blockers}${data.checks.map((check) => checkRow(check))}</div>`;
   });
   return html`<div class="d-sec"><div class="h3">${heading} ${when}</div>${body}</div>`;
 }
