@@ -2,6 +2,7 @@ import type { RegionPainter } from "../region-painter.js";
 import { dialogParts } from "../render/dialog-parts.js";
 import { renderFields } from "../render/render-fields.js";
 import type { State, UiAction } from "../state.js";
+import { ARM_MS } from "./arm-ms.js";
 import { DIALOGS } from "./dialog-specs.js";
 
 export type DialogHostDeps = { root: HTMLElement; dispatch(action: UiAction): void; paint: RegionPainter };
@@ -10,8 +11,6 @@ export type DialogHost = { paint(state: State, now: number): void; reset(): void
 
 const SHELL =
   '<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-t" tabindex="-1"><header id="dlg-head"></header><div id="dlg-fields"></div><div id="dlg-body"></div><footer id="dlg-foot"></footer></div>';
-
-const ARM_MS = 400;
 
 function isStrings(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");

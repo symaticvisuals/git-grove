@@ -6,6 +6,8 @@ import { openStore } from "../core/journal/open-store.js";
 import type { Store } from "../core/journal/store.types.js";
 import { createPlanCache } from "./actions/plan-cache.js";
 import { createRuns } from "./actions/runs.js";
+import { createGuardInstaller } from "./guard/guard-installer.js";
+import type { GuardSetup } from "./guard/guard-setup.types.js";
 import { createHub, type Hub } from "./live/hub.js";
 import { createSnapshots } from "./live/snapshots.js";
 import { registerApi } from "./api/register-api.js";
@@ -31,6 +33,8 @@ export type StartServerOptions = {
   watch?: { debounceMs?: number | undefined; pollMs?: number | undefined };
   /** How long `close` waits for runs in progress; 60 s by default. */
   closeWaitMs?: number;
+  /** Where the agent guard's hook runs from and the settings file it goes into, read when asked; without it the guard routes answer 503. */
+  guard?: () => GuardSetup;
 };
 
 export type RunningServer = { port: number; url: string; token: string; context: ServerContext; close(): Promise<void> };
@@ -93,6 +97,7 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
       hub: liveHub,
       plans: createPlanCache(),
       runs,
+      guard: createGuardInstaller(options.guard ?? null),
       token,
       port: 0,
       version: options.version,

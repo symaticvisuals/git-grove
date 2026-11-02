@@ -211,6 +211,25 @@ test("with no server and an uninstalled service, ui installs it and prints the f
   expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${started[0]?.port ?? 0}/`));
 });
 
+const OFFER_GUARD = "Protect your worktrees from Claude Code: use Install on the dashboard, or run git grove install-guard.\n";
+
+test("the run that installs the login service, with the agent guard absent, prints one line pointing to the dashboard's Install", async () => {
+  const service = fakeService({ kind: "launchd", onInstall: async () => void (await serve()) });
+  const result = await ui(harness(service, { guardStatus: async () => "absent" }).deps, home);
+  expect(result.out).toContain(`Remove it with: git grove service uninstall\n${OFFER_GUARD}`);
+  expect(result.out.split(OFFER_GUARD)).toHaveLength(2);
+});
+
+test("the guard line is not printed when the guard is installed, stale or unreadable, or when the service was already installed", async () => {
+  for (const status of ["installed", "stale", "unreadable"] as const) {
+    const service = fakeService({ kind: "launchd", onInstall: async () => void (await serve()) });
+    expect((await ui(harness(service, { guardStatus: async () => status }).deps, home)).out, status).not.toContain(OFFER_GUARD);
+    await Promise.all(servers.splice(0).map((server) => server.close()));
+  }
+  const started = fakeService({ kind: "launchd", installed: true, onStart: async () => void (await serve()) });
+  expect((await ui(harness(started, { guardStatus: async () => "absent" }).deps, home)).out).not.toContain(OFFER_GUARD);
+});
+
 test("with no server and an installed service that is not running, ui starts it", async () => {
   const service = fakeService({ kind: "systemd", installed: true, onStart: async () => void (await serve()) });
   const run = harness(service);
@@ -430,6 +449,32 @@ test("an installed service that runs this copy and this Node is left alone", asy
   expect(result.out).not.toContain("Updated the login service");
   expect(calls.filter((call) => /bootout|bootstrap/.test(call))).toEqual([]);
   expect(await readFile(PLIST(), "utf8")).toBe(before);
+});
+
+test("an installed service that reads another Claude Code folder is rewritten to this shell's CLAUDE_CONFIG_DIR", async () => {
+  const calls: string[] = [];
+  const service = createServiceManager(launchdHost(calls));
+  await service.install({ node: process.execPath, bin: BIN, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  calls.length = 0;
+  process.env["CLAUDE_CONFIG_DIR"] = join(home, "claude-work");
+  try {
+    const result = await ui(harness(service).deps, home);
+    expect(result.out).toContain("Updated the login service to this copy of git grove\n");
+    expect(await readFile(PLIST(), "utf8")).toContain(`<key>CLAUDE_CONFIG_DIR</key>\n    <string>${join(home, "claude-work")}</string>`);
+    expect(calls).toContain(`launchctl bootstrap gui/501 ${PLIST()}`);
+  } finally {
+    delete process.env["CLAUDE_CONFIG_DIR"];
+  }
+});
+
+test("when the running server would install the agent guard into another settings file than this shell's, ui names both", async () => {
+  const served = join(home, "server-claude", "settings.json");
+  servers.push(await startServer({ port: 0, home, version: packageVersion(), guard: () => ({ node: process.execPath, bin: BIN, settingsPath: served }) }));
+  const shell = join(home, "shell-claude", "settings.json");
+  const result = await ui(harness(fakeService({ kind: "launchd" }), { claudeSettingsPath: shell }).deps, home);
+  expect(result.out).toContain(`The dashboard installs the agent guard into ${served}, but Claude Code here reads ${shell}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
+  const same = await ui(harness(fakeService({ kind: "launchd" }), { claudeSettingsPath: served }).deps, home);
+  expect(same.out).not.toContain("installs the agent guard into");
 });
 
 test("from an npx cache, an installed service for another copy is left alone", async () => {

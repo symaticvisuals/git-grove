@@ -12,9 +12,14 @@ import { createDialogEffects } from "./dialogs/dialog-effects.js";
 import { createDialogHost } from "./dialogs/dialog-host.js";
 import { DIALOGS } from "./dialogs/dialog-specs.js";
 import { effectivePick } from "./effective-pick.js";
+import { focusAfterClose } from "./focus-after-close.js";
+import { createGuardDialogHost } from "./guard/guard-dialog-host.js";
+import { createGuardEffects } from "./guard/guard-effects.js";
 import { html } from "./html.js";
 import { ICONS } from "./icons.js";
+import { isGuardStatus } from "./is-guard-status.js";
 import { keyCommand, type KeyCommand, type KeyInput, type KeyMode } from "./keys.js";
+import { landmarkAfterCard } from "./landmark-after-card.js";
 import { connectLive } from "./live.js";
 import { loadable } from "./loadable.js";
 import { MESSAGES } from "./messages.js";
@@ -43,6 +48,7 @@ const TRAPPED = 'input:not([disabled]), select:not([disabled]), button:not([disa
 const FOCUS_WAIT_MS = 2_000;
 const TABS: readonly Tab[] = ["feature", "health", "activity"];
 const ACTION_NAMES = Object.keys(DIALOGS);
+const GUARD_DISMISSED = "grove.guardCardDismissed";
 
 function pageVersion(): string {
   const content = document.querySelector('meta[name="grove-version"]')?.getAttribute("content") ?? "";
@@ -56,7 +62,7 @@ let frame = 0;
 let reveal = true;
 let projectsFetchedAt = 0;
 let projectsTimer = 0;
-let scrimOwner: "dialog" | "palette" | null = null;
+let scrimOwner: "dialog" | "guard" | "palette" | null = null;
 let returnFocus: string | null = null;
 let focusAfterPaint: { key: string; until: number } | null = null;
 let spoken: string[] = [];
@@ -79,6 +85,7 @@ function announce(text: string): void {
 }
 
 const effects = createDialogEffects({ api: () => api, state: () => state, dispatch: (action) => dispatch(action), toast });
+const guardEffects = createGuardEffects({ api: () => api, state: () => state, dispatch: (action) => dispatch(action), toast });
 
 function dispatch(action: UiAction): void {
   if (action.type === "event" && action.event.type === "digest") for (const flight of inFlight.values()) flight.again = true;
@@ -89,6 +96,7 @@ function dispatch(action: UiAction): void {
   const spoken = announcement(before, state, action);
   if (spoken !== null) announce(spoken);
   effects.after(before, state, action);
+  guardEffects.after(state);
   schedule();
   load();
 }
@@ -152,10 +160,12 @@ function focusKey(key: string | null): boolean {
 
 const dialogHost = createDialogHost({ root: scrim, dispatch, paint: paintRegion });
 
+const guardHost = createGuardDialogHost({ root: scrim, dispatch, paint: paintRegion });
+
 const palette = createPalette({ root: scrim, dispatch, run: (item) => runPaletteItem(item) });
 
 function paintScrim(now: number): void {
-  const owner = state.palette !== null ? "palette" : state.dialog !== null ? "dialog" : null;
+  const owner = state.palette !== null ? "palette" : state.dialog !== null ? "dialog" : state.guardDialog !== null ? "guard" : null;
   if (owner !== null && scrimOwner === null) {
     const active = document.activeElement;
     returnFocus = active instanceof HTMLElement ? (active.dataset["key"] ?? null) : null;
@@ -164,12 +174,14 @@ function paintScrim(now: number): void {
   if (app !== null) app.inert = owner !== null;
   scrim.classList.toggle("on", owner !== null);
   if (owner !== "dialog") dialogHost.reset();
+  if (owner !== "guard") guardHost.reset();
   if (owner !== "palette") palette.reset();
   if (owner === "dialog") dialogHost.paint(state, now);
+  if (owner === "guard") guardHost.paint(state, now);
   if (owner === "palette") palette.paint(state);
   if (owner === null && scrimOwner !== null) {
     scrim.innerHTML = "";
-    if (!focusKey(returnFocus)) document.querySelector<HTMLElement>("#view .row.sel")?.focus({ preventScroll: true });
+    if (!focusAfterClose(scrimOwner, returnFocus).some(focusKey)) document.querySelector<HTMLElement>("#view .row.sel")?.focus({ preventScroll: true });
     returnFocus = null;
   }
   scrimOwner = owner;
@@ -182,7 +194,7 @@ function paint(): void {
   const onRepo = route.view === "repo" && !state.signedOut;
   const pick = effectivePick(route, view);
   const header = html`<div class="ws">${ICONS.logo}<b>git grove</b><span class="local">local</span></div>`;
-  const side = state.signedOut ? header : sidebar({ route, projects: state.projects, repo: view, live: state.live, now, notify: notifyPermission() });
+  const side = state.signedOut ? header : sidebar({ route, projects: state.projects, repo: view, live: state.live, now, notify: notifyPermission(), guard: state.guard });
   paintRegion(document.getElementById("side"), side, "side");
   paintRegion(document.getElementById("view"), mainView(state, now), `${route.view}:${route.view === "repo" ? route.repo : ""}:${state.tab}`);
   const detail = onRepo ? detailPanel({ repo: state.repo, pick, feature: state.feature, preview: state.preview, now }) : html``;
@@ -303,6 +315,7 @@ function runPaletteItem(item: PaletteItem): void {
   dispatch({ type: "palette-close" });
   const { run } = item;
   if ("open" in run) dispatch({ type: "dialog-open", action: run.open, ctx: run.ctx });
+  else if ("guard" in run) dispatch({ type: "guard-open", change: run.guard });
   else if ("route" in run) {
     const hash = routeHash(run.route);
     if (run.route.view === "repo" && run.route.pick !== null) focusAfterPaint = { key: `row:${hash}`, until: Date.now() + FOCUS_WAIT_MS };
@@ -319,6 +332,32 @@ function runAction(element: HTMLElement): void {
     return;
   }
   openAction(name, { feature: data["feature"], branch: data["branch"], pin: data["pin"], path: data["path"] });
+}
+
+function storage(): Storage | null {
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function dismissGuardCard(status: string | undefined): void {
+  if (!isGuardStatus(status)) return;
+  try {
+    storage()?.setItem(GUARD_DISMISSED, status);
+  } catch {
+    // A page that cannot store the choice hides the card for this visit only.
+  }
+  const rows = [...document.querySelectorAll<HTMLElement>("#view .row[data-key]")].map((row) => row.dataset["key"] ?? "");
+  focusAfterPaint = { key: landmarkAfterCard(rows), until: Date.now() + FOCUS_WAIT_MS };
+  dispatch({ type: "guard-dismiss", status });
+}
+
+function openGuard(change: string | undefined): void {
+  const guard = state.guard === null || state.guard.status === "loading" ? null : state.guard.data;
+  const wanted = change ?? (guard?.status === "installed" ? "uninstall" : "install");
+  if (wanted === "install" || wanted === "uninstall") dispatch({ type: "guard-open", change: wanted });
 }
 
 function isSlice(name: string | undefined): name is SliceName {
@@ -347,6 +386,13 @@ function runUi(element: HTMLElement): void {
       return;
     case "notify":
       askToNotify();
+      return;
+    case "guard":
+    case "guard-open":
+      openGuard(data["change"]);
+      return;
+    case "guard-dismiss":
+      dismissGuardCard(data["status"]);
       return;
     case "jump": {
       const group = data["group"] === undefined ? null : document.querySelector(`.group[data-group="${CSS.escape(data["group"])}"]`);
@@ -419,12 +465,14 @@ function command(name: KeyCommand): void {
       dispatch({ type: "palette-open" });
       return;
     case "close":
-      dispatch(state.palette !== null ? { type: "palette-close" } : { type: "dialog-close" });
+      closeScrim();
       return;
     case "confirm": {
-      const button = scrim.querySelector<HTMLButtonElement>('#dlg-foot [data-dlg="confirm"]');
+      const guard = state.guardDialog !== null && state.dialog === null;
+      const button = scrim.querySelector<HTMLButtonElement>(guard ? '#dlg-foot [data-guard="confirm"]' : '#dlg-foot [data-dlg="confirm"]');
       const planId = button?.dataset["plan"];
-      if (button !== null && !button.disabled && planId !== undefined) dispatch({ type: "dialog-confirm", planId });
+      if (button === null || button.disabled || planId === undefined) return;
+      dispatch(guard ? { type: "guard-confirm", planId } : { type: "dialog-confirm", planId });
       return;
     }
     case "up":
@@ -456,7 +504,13 @@ function command(name: KeyCommand): void {
 }
 
 function keyMode(): KeyMode {
-  return state.palette !== null ? "palette" : state.dialog !== null ? "dialog" : "page";
+  return state.palette !== null ? "palette" : state.dialog !== null || state.guardDialog !== null ? "dialog" : "page";
+}
+
+function closeScrim(): void {
+  if (state.palette !== null) dispatch({ type: "palette-close" });
+  else if (state.dialog !== null) dispatch({ type: "dialog-close" });
+  else dispatch({ type: "guard-close" });
 }
 
 function onKey(event: KeyboardEvent): void {
@@ -527,7 +581,7 @@ function tokenDeps(): TokenDeps {
 function bind(): void {
   document.addEventListener("click", (event) => {
     if (event.target === scrim) {
-      dispatch(state.palette !== null ? { type: "palette-close" } : { type: "dialog-close" });
+      closeScrim();
       return;
     }
     if (event.target instanceof Element && !scrim.contains(event.target) && activate(event.target)) event.preventDefault();
@@ -544,6 +598,12 @@ function bind(): void {
 
 async function boot(): Promise<void> {
   bind();
+  try {
+    const dismissed = storage()?.getItem(GUARD_DISMISSED);
+    if (isGuardStatus(dismissed)) dispatch({ type: "guard-dismiss", status: dismissed });
+  } catch {
+    // A page that cannot read storage shows the card.
+  }
   schedule();
   navigator.serviceWorker?.register("/sw.js").catch(() => undefined);
   const token = await adoptToken(tokenDeps());

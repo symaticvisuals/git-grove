@@ -5,29 +5,30 @@ export type PlanCacheOptions = { ttlMs?: number; max?: number; now?: () => numbe
 
 export type CachedPlan = { repoId: number; prepared: Prepared };
 
-export type PlanCache = {
-  /** Holds `prepared` for `repoId` and returns its id. */
-  put(repoId: number, prepared: Prepared): string;
+export type PlanCache<T = CachedPlan> = {
+  /** Holds `plan` and returns its id. */
+  put(plan: T): string;
   /** The plan, once. Then `"taken"` until its ttl ends; `"expired"` past the ttl, or for an id it does not hold. */
-  take(planId: string): CachedPlan | "expired" | "taken";
+  take(planId: string): T | "expired" | "taken";
   /** What `take` would return, without taking the plan. */
-  peek(planId: string): CachedPlan | "expired" | "taken";
+  peek(planId: string): T | "expired" | "taken";
 };
 
 const TTL_MS = 600_000;
 const MAX = 50;
 
-type Entry = { expiresAt: number; plan: CachedPlan | null };
+type Entry<T> = { expiresAt: number; plan: T | null };
 
 /**
- * Holds previewed plans for `ttlMs` (10 minutes) under ids of 16 random bytes in base64url. At most `max` (50) wait
- * to run; one more drops the oldest. A taken plan keeps only the fact it was taken, until its ttl ends.
+ * Holds previewed plans, a repository's prepared actions by default, for `ttlMs` (10 minutes) under ids of 16 random
+ * bytes in base64url. At most `max` (50) wait to run; one more drops the oldest. A taken plan keeps only the fact it
+ * was taken, until its ttl ends.
  */
-export function createPlanCache(options: PlanCacheOptions = {}): PlanCache {
+export function createPlanCache<T = CachedPlan>(options: PlanCacheOptions = {}): PlanCache<T> {
   const ttlMs = options.ttlMs ?? TTL_MS;
   const max = options.max ?? MAX;
   const now = options.now ?? Date.now;
-  const entries = new Map<string, Entry>();
+  const entries = new Map<string, Entry<T>>();
 
   const dropExpired = (): void => {
     const at = now();
@@ -45,11 +46,11 @@ export function createPlanCache(options: PlanCacheOptions = {}): PlanCache {
   };
 
   return {
-    put(repoId, prepared) {
+    put(plan) {
       dropExpired();
       makeRoom();
       const id = randomBytes(16).toString("base64url");
-      entries.set(id, { expiresAt: now() + ttlMs, plan: { repoId, prepared } });
+      entries.set(id, { expiresAt: now() + ttlMs, plan });
       return id;
     },
     take(planId) {

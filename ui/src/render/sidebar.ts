@@ -1,3 +1,4 @@
+import type { GuardState } from "../../../src/core/guard-install/guard-install.types.js";
 import type { WireProject, WireRepoView } from "../../../src/server/wire/wire.types.js";
 import { html, type SafeHtml } from "../html.js";
 import { ICONS } from "../icons.js";
@@ -7,6 +8,7 @@ import type { Route } from "../parse-route.js";
 import { plural } from "../plural.js";
 import type { Load } from "../state.js";
 import { groupsOf } from "./groups-of.js";
+import { guardStatus } from "./guard-status.js";
 import { loadView } from "./load-view.js";
 import { timeAgo } from "./time-ago.js";
 
@@ -18,6 +20,8 @@ export type SidebarInput = {
   now: number;
   /** Whether notifications may be raised; "Notify me" shows while the browser has not been asked. */
   notify?: NotifyPermission;
+  /** Where the agent guard stands, shown as a quiet button that opens its dialog. */
+  guard?: Load<GuardState> | null;
 };
 
 function nav(href: string, on: boolean, icon: SafeHtml, label: string, count: SafeHtml | string = ""): SafeHtml {
@@ -29,8 +33,9 @@ function notifyButton(permission: NotifyPermission | undefined): SafeHtml {
   return html`<button class="notify" data-ui="notify" data-key="side:notify" title="A system notification when work is about to be lost">${ICONS.bell}Notify me</button>`;
 }
 
-function footer(projects: WireProject[], live: LiveState, now: number, notify: NotifyPermission | undefined): SafeHtml {
-  const button = notifyButton(notify);
+function footer(projects: WireProject[], input: SidebarInput): SafeHtml {
+  const { live, now } = input;
+  const button = html`${notifyButton(input.notify)}${guardStatus(input.guard ?? null)}`;
   if (live !== "up") return html`<div class="side-foot">${button}<div><span class="pulse off" aria-hidden="true"></span>Not connected, retrying</div></div>`;
   const newest = Math.max(...projects.map((project) => project.scannedAt ?? 0));
   const when = newest > 0 ? html`, ${timeAgo(newest, now, "long")}` : "";
@@ -48,7 +53,7 @@ function repoNav(project: WireProject, input: SidebarInput): SafeHtml {
 /**
  * The sidebar: Needs you (hot when anything does), Activity, Pins, every repo with its health and worktree count
  * and, under the current one, its groups to jump to; then "Notify me" while notifications are not yet allowed or
- * refused, whether the dashboard is live, and how fresh it is.
+ * refused, whether the agent guard is on, whether the dashboard is live, and how fresh it is.
  */
 export function sidebar(input: SidebarInput): SafeHtml {
   const { route } = input;
@@ -64,5 +69,5 @@ ${nav("#/activity", route.view === "activity", ICONS.activity, "Activity")}
 ${nav("#/pins", route.view === "pins", ICONS.pin, "Pins", html`<span class="count">${pins}</span>`)}
 <a class="sec${route.view === "projects" ? " on" : ""}" href="#/" data-key="nav:#/">Repos<span>All</span></a>
 <div class="repos">${repos}</div>
-${footer(data, input.live, input.now, input.notify)}`;
+${footer(data, input)}`;
 }

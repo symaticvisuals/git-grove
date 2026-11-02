@@ -33,7 +33,8 @@ only refuses on changed or untracked files, and the inner folder is ignored.
 4. Normal work looks like damage. Rebases and amends rewrite history too. Alarm on every rewrite and people stop
    reading. Telling a rebase from a squash is the real problem.
 5. Agents act fast and in parallel. Full protection has to sit in the agent's path, before the command runs. git-grove
-   today catches the damage afterwards and keeps it recoverable; the guard that sits in the agent's path is next.
+   catches the damage afterwards and keeps it recoverable, and its agent guard sits in Claude Code's path and stops
+   the commands that would lose work before they run.
 
 ### What it is and is not
 
@@ -54,9 +55,11 @@ you confirm a plan.
 | `src/core/rules/` | Ten rules in `registry.ts` turn facts and the journal into findings; `safe-to-remove.ts` is the removal verdict. |
 | `src/core/runner/` | Pins (`pin.ts`), the per-repo lock (`with-repo-lock.ts`) and the restore that moves a branch back. |
 | `src/core/actions/` | Eight actions (restore, ack, restack, new, add-level, copy-env, remove, cleanup) and `run-prepared.ts`, which runs any of them. |
+| `src/core/guard/` | The agent guard: `read-simple-commands.ts` splits a shell line into simple commands, `classify-command.ts` decides what each needs checked, and `evaluate-command-line.ts` judges them in order and pins. |
+| `src/core/guard-install/` | Installing the guard into Claude Code's settings: `plan-guard-install.ts` and `plan-guard-uninstall.ts` plan the new text, `write-settings-file.ts` re-reads, backs up and renames it into place. |
 | `src/server/` | The local server: the gate (`auth/check-request.ts`), the watcher (`live/watch-repo.ts`), cached scans (`live/snapshots.ts`), live events (`live/hub.ts`) and previewed plans (`actions/plan-cache.ts`). |
 | `ui/src/` | The dashboard: plain TypeScript, bundled by esbuild, with no runtime dependencies. |
-| `src/cli/` | The commands. |
+| `src/cli/` | The commands. `run-guard.ts` is the hook's entry, which `bin.ts` loads without the rest of the CLI. |
 
 State lives in two places. Pins are git refs (`refs/grove/pins/<branch>/<UTC time>`). The journal of tip changes,
 acknowledgements and activity are in SQLite (`~/.git-grove/grove.db`, WAL mode, so the server and a CLI command can
@@ -95,8 +98,8 @@ Server-Sent Events.
 
 Every door shares this core so that the CLI and the dashboard cannot disagree about what is safe, and a fix to a
 check lands everywhere at once. The same holds for findings: `status` and the dashboard's "Needs you" read the same
-`readSnapshot` and the same rules. The guard, when it is built, is meant to call the same removal verdict that
-`git grove check remove` exposes today.
+`readSnapshot` and the same rules. The agent guard calls the same removal verdict as `git grove check remove`
+(`removalVerdict`, `src/core/facts/removal-verdict.ts`), so an agent is refused exactly what `check` would refuse.
 
 ### How grove tells a rebase from a squash
 
@@ -153,6 +156,67 @@ worktree, through a symlink or a firmlink, is not a copy: folders are compared b
 more than 2,000 ignored files make it refuse as too many to check. Tests in `test/core/rules/safe-to-remove.test.ts`,
 among them "a clean merged worktree holding .local/seed.sql is not safe", "a failed read is unreadable, never zero" and
 "a main folder that is a symlink into the worktree is the same file seen twice, not a copy".
+
+### The agent guard
+
+Claude Code runs a `PreToolUse` hook before each Bash command, with the command and its folder as JSON on stdin.
+`git grove guard --claude` answers it in four steps:
+
+1. Read the line. `splitShellLine` and `readSimpleCommands` (`src/core/guard/`) split it on `&&`, `||`, `;`, `|` and
+   newlines outside quotes, drop comments, redirections and here-document bodies, strip `VAR=value` and `env`, and
+   follow the folder through `cd` and subshells; `parseGitCall` follows `git -C`. The commands inside `$( … )` and
+   backticks are read too, and run first, so Claude Code's `"$(cat <<'EOF' … EOF)"` commit form is no obstacle. The
+   exceptions are a `$( … )` inside `${…}`, a `$((…) )` subshell and a `$( … )` in an unquoted here-document body,
+   which are not read (section 4). A command whose own paths or folder come from a variable, a substitution, a glob
+   `cd` or a `GIT_DIR`-style prefix cannot be checked, nor can a whole line with `eval` or `bash -c` around `git` or
+   `rm`, or a `case` inside a substitution; either is allowed, with one line saying so.
+2. Classify each simple command from its words alone (`classifyCommand`): a worktree removal, a recursive `rm`, a
+   discard of uncommitted changes, a `checkout` whose operands git must sort into a commit and paths, a command whose
+   tips should be pinned, one of grove's people-only commands, or nothing.
+3. Judge them in order; the first block wins. A worktree removal names its worktree the way git does, by a unique
+   trailing folder name first, then by path (`findWorktree`), and asks `removalVerdict` about every worktree it would
+   delete. A discard counts `git status --porcelain=v2 --untracked-files=no --ignore-submodules=all` entries in the
+   paths it names; unmerged paths count only for a discard of the whole tree, so git's conflict tools stay usable on
+   conflicted paths while `--ours`, `--theirs`, `-m` and `--conflict` on any other path are checked like any discard.
+   During a merge, rebase, cherry-pick or revert, a whole-tree block names its `--abort`, and a path block says to
+   name only the conflicted paths. Nothing is pinned until the whole
+   line is allowed. Pins are taken without the repo lock: a pin only adds a ref, and `pin()` already copes with two
+   processes creating one.
+4. Fail open. Stdin that is not the hook's JSON, any error inside grove, and a check past 3 s allow the command, with
+   one line on stderr; the deadline also stops the git calls still running.
+
+A block exits 2 with what would be lost and the safe alternative, which Claude reads, and only then are blocks and
+new pins written as activity rows, for repositories grove already knows, waiting at most 200 ms for the database.
+`bin.ts` imports nothing statically and loads the guard by dynamic import; its imports never reach `src/server`,
+`ui/`, `main.ts` or `node:sqlite` (`test/cli/guard-imports.test.ts`). Medians of 10 runs on the demo repository:
+`ls` 40 ms and a blocked `git worktree remove` 145 ms on Node 24.11; 111 ms and 212 ms on Homebrew's Node 26, which
+is slow to start.
+
+Installing it is a review like any dashboard change. While the guard is missing from Claude Code's user settings
+(`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`), or points at an old Node or grove path, the
+projects page offers it in a card, and the sidebar and ⌘K reach the same dialog. `src/core/guard-install/` parses the
+file strictly, and refuses one that is not a JSON object, whose `hooks.PreToolUse` is not a list, that is read-only,
+starts with a byte-order mark, is a link to a missing file, or holds a number it cannot write back exactly. It then
+plans the new text: any grove hook is taken out and one group of grove's own is appended, never merged into a user's
+`Bash` group. The dialog shows the file, its backup and the exact JSON. Confirming writes the new text to a temp file,
+checks that the file's SHA-256 is still the one the review saw, copies the old bytes to `settings.json.grove-backup`
+(and, the first time, to `settings.json.grove-original`, never overwritten), and renames the temp file into place, so
+a failure before the rename leaves every earlier copy as it was. Undo is an uninstall planned against the file as it
+is then, so later edits survive. The login service carries `CLAUDE_CONFIG_DIR`, so the server edits the file Claude
+Code reads. These routes change no repository, so
+they take no repo lock and pin nothing (`src/server/api/guard-routes.ts`). Tests in
+`test/core/guard-install/plan-guard-install.test.ts` and `test/server/guard-api.test.ts`, among them "installing
+keeps every other setting and every other group, the user's own Bash group included, in order, and never merges into
+it" and "the command an install writes, run by sh as Claude Code runs it, blocks removing the demo's precious worktree
+with exit 2".
+
+Tests in `test/core/guard/evaluate-command-line.test.ts`, among them "git worktree remove --force of a merged worktree
+holding a precious ignored file is blocked", "git worktree remove of a worktree by its bare name, as git resolves it,
+is blocked from the root", "the commands around and inside a substitution are checked, Claude Code's commit form
+included", "git's conflict tools are allowed mid-merge: --ours, --theirs, -m and --conflict", "a discard mid-operation
+is blocked with the abort that keeps your own changes", "git reset --hard HEAD~1 on a clean tree is allowed and pins
+the old tip" and "git push --force origin feat pins the remote tip it would replace, under feat". The parser's are in
+`test/core/guard/read-simple-commands.test.ts`.
 
 ### What makes a dashboard action safe to click
 
@@ -223,7 +287,9 @@ Each row: what I chose, over what, why, and what would change my mind.
 | `fs.watch` with a debounce, plus a 30 s poll | polling only | a squash shows within a second or two, and the poll covers missed events and folders that cannot be watched | `fs.watch` proved unreliable on a platform; then a shorter poll there |
 | `node:sqlite` in WAL mode | JSON files, or better-sqlite3 | the server and the CLI write at once; it is built in, so no native build | Node's SQLite API changed under us |
 | Plain TypeScript and esbuild for the dashboard | React and Vite, as the spec suggested | zero runtime dependencies, one small bundle, and a CSP with no inline script or style | the dashboard grew past what hand-written rendering keeps tidy |
-| The guard fails open (next) | failing closed | a grove bug must never stop an agent's ordinary work | the guard proved reliable; then fail closed for `worktree remove --force` and `push --force` only |
+| The guard fails open | failing closed | a grove bug must never stop an agent's ordinary work: a crash, a git error and a check past 3 s all allow, with one line on stderr | the guard proved reliable; then fail closed for `worktree remove --force` and `push --force` only |
+| grove writes Claude Code settings only after a review; it never merges into the user's own hook groups | printing a snippet to paste, or merging into the user's `Bash` group | installing should need no hand-editing; one group of grove's own, a strict parse that refuses what it cannot read, a re-read before writing, a backup and an atomic rename keep the write reversible, and Undo and Uninstall take out only grove's entry | a user's file is rewritten in a way they did not expect; then show a full diff, or write only through `install-guard --write` |
+| The guard pins without the repo lock | taking `grove.lock` first | a pin only adds a ref, so the lock buys nothing, and holding it would make a dashboard action fail while an agent rebases | a guard pin raced another grove write in practice |
 
 Smaller calls, each with its cost:
 
@@ -258,6 +324,8 @@ What grove does today when something goes wrong, and the test that shows it.
 | grove cannot read part of a worktree | The removal verdict says unreadable and refuses. | `test/core/rules/safe-to-remove.test.ts`, "a failed read is unreadable, never zero" and "an ignored file grove cannot inspect is unreadable, not skipped" |
 | A rescued file changes after its copy was checked | The removal stops and the folder stays. | `test/core/actions/remove-actions.test.ts`, "E2: a rescued file edited after its copy was checked stops the removal, and the folder stays" |
 | A watched repository's folder is deleted | It stays listed with its error; the other repositories carry on. | `test/server/hub.test.ts`, "a deleted repo folder publishes one scan-error and keeps the project listed" |
+| `~/.claude/settings.json` changed after the review, or does not parse | The install is refused ("settings.json changed since the review; review again"), or never offered, and the file is not rewritten. | `test/core/guard-install/write-settings-file.test.ts`, "a file that changed since the plan read it is refused, and nothing is written"; `test/core/guard-install/plan-guard-install.test.ts`, "invalid JSON, a file that is not an object, a hooks that is not an object and a PreToolUse that is not a list are refused" |
+| The guard itself crashes, cannot read its input, or is slow | It allows the command (exit 0) and prints one line: `git-grove guard: could not check (<reason>); allowing`. | `test/cli/guard-command.test.ts`, "an error thrown inside the evaluation is allowed, with a warning", "an evaluation past its deadline is allowed, with a warning", "garbage on stdin is allowed, with a warning" and "a cwd that is not a repository is allowed: plain commands silently, git ones with a warning"; `test/cli/guard-bin.test.ts`, "guard --claude exits 0 with one warning line for stdin it cannot read" |
 
 What it does not handle yet:
 
@@ -267,19 +335,35 @@ What it does not handle yet:
   are not seen, a branch it never saw has nothing to compare, the entry carries the time grove saw it rather than
   when it happened, and an old tip git has already pruned is replaced without an entry ("a last tip git no longer
   has is replaced without an entry", `test/core/journal/observe.test.ts`).
-- Agents acting directly with `--force`. `git worktree remove --force`, `rm -rf` on a worktree, `git reset --hard`
-  and `git clean -fdx` destroy uncommitted and ignored files before any scan can see them, and pins only cover
-  commits on branch tips. Force pushes to a remote are not watched, because grove journals local branches only. The
-  guard is the answer, and it is next.
+- Commands the guard does not see or check. It sees only what Claude Code runs through its Bash tool, so a script, a
+  git alias, another agent or a terminal can still run `git worktree remove --force`, `rm -rf` on a worktree or
+  `git reset --hard`, which destroy uncommitted and ignored files before any scan can see them. Through the guard,
+  these still run unchecked:
+  - `git clean -fdx`, `git stash drop` and `git stash clear`;
+  - `git rm -f` of files with local changes;
+  - wrappers the guard does not follow: `xargs rm -r`, `find … -delete`, `find … -exec rm -r`, `sudo`, `timeout`,
+    `nice`, and git aliases, inline `git -c alias.x=…` included;
+  - ref moves with no pin: `git branch -f`/`-M`, `git checkout -B`, `git switch -C`, `git rebase --update-refs`,
+    `git pull --rebase`, `git update-ref -d`, `git reflog expire`, `git gc --prune=now`;
+  - `rm -r` of a folder holding whole repositories, run from outside them, and `rm -rf .git`, which takes the pins
+    with it;
+  - commands bash runs from three places the reader skips: a `$((…) )` subshell, a `$( … )` inside `${…}` such as
+    `${x:-$(…)}`, and a `$( … )` in an unquoted here-document body.
+
+  A force push is pinned but not compared with the remote, and a detached HEAD gets no pin.
 - Commits that only a detached HEAD held, once that HEAD moves on. The removal verdict and the prunable rule count
   them, but the journal follows branches only.
 
 ## 5. What's built and what's next
 
-Built, with 873 tests in 95 files (vitest against real temporary git repositories):
+Built, with 1108 tests in 119 files (vitest against real temporary git repositories):
 
 - the CLI: `status`, `restore`, `ack`, `pins list`, `check remove`, `new`, `add-level`, `restack`, `stack plan`,
-  `rm [--rescue]`, `ui`, `serve` and `service install|uninstall|status`;
+  `rm [--rescue]`, `ui`, `serve`, `service install|uninstall|status`, `install-guard` and `guard --claude`;
+- the agent guard: a Claude Code `PreToolUse` hook that blocks worktree removals and recursive `rm` that the removal
+  verdict refuses, discards of uncommitted changes and grove's people-only commands, pins the tips that rebase,
+  amend, `branch -D` and a force push could lose, and fails open; the dashboard installs it into Claude Code's user
+  settings after a review, with a backup, Undo and Uninstall, and offers it in an onboarding card;
 - the core: git facts in three tiers by cost (the whole repository, each worktree, and the removal checks), the
   journal and classifier, pins, restore, stacks from gh-stack config, the fail-closed removal verdict, ten rules and
   `ack`;
@@ -287,12 +371,14 @@ Built, with 873 tests in 95 files (vitest against real temporary git repositorie
 - the local server with its watcher, live events and plan cache;
 - the dashboard, with review dialogs, the ⌘K palette, live steps, receipts and Undo;
 - the login service (launchd or systemd) and an installable web app;
-- `scripts/demo.sh`, which reproduces the squash and the unsafe worktree in a temp folder.
+- `scripts/demo.sh`, which reproduces the squash and the unsafe worktree in a temp folder, and shows the guard
+  blocking an agent's removal of it.
 
 Next, in order:
 
-1. The agent guard: a Claude Code `PreToolUse` hook calling the removal verdict before `git worktree remove`, `rm -rf`
-   on a worktree, `git branch -D`, `git reset --hard` and `git clean`.
+1. The guard's next checks: compare a force push with the remote and block one that drops commits, `git clean -fdx`,
+   `git stash drop` and `clear`, the wrappers and ref moves listed in section 4, and say in the journal which agent
+   session made a change.
 2. Reflog catch-up at startup, marking what it finds as found later.
 3. Status cached by each worktree's HEAD and index mtime, for repositories with a hundred worktrees.
 4. GitHub data through `gh`: PR state and review threads.

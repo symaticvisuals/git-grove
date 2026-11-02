@@ -1,9 +1,13 @@
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { InvalidInputError } from "../core/actions/invalid-input.error.js";
 import { requireGitVersion } from "../core/git/require-git-version.js";
+import { claudeSettingsPath } from "../core/guard-install/claude-settings-path.js";
+import { binPath } from "./bin-path.js";
 import type { CliIo } from "./cli-io.types.js";
 import { checkCommand } from "./commands/check.js";
+import { installGuardCommand } from "./commands/install-guard.js";
 import { pinsCommand } from "./commands/pins.js";
 import { serveCommand } from "./commands/serve.js";
 import { serviceCommand } from "./commands/service.js";
@@ -13,6 +17,7 @@ import { describeCliError } from "./describe-cli-error.js";
 import { packageVersion } from "./package-version.js";
 import { realUiDeps } from "./real-ui-deps.js";
 import { runActionCommand } from "./run-action.js";
+import { stableNodePath } from "./stable-node-path.js";
 
 type Parsed = {
   values: {
@@ -75,9 +80,13 @@ const USAGE = `Usage: git grove [<command>] [options]
                                     on port 47683 or the next free one
   service install|uninstall|status  the login service that keeps the dashboard
                                     server running (launchd or systemd)
+  install-guard                     print the Claude Code hook that runs the agent
+                                    guard, for ~/.claude/settings.json; writes nothing
+                                    (the dashboard installs it after a review)
+  guard --claude                    the agent guard itself, run by that hook
 `;
 
-const COMMANDS = new Set(["ui", "status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm", "serve", "service"]);
+const COMMANDS = new Set(["ui", "status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm", "serve", "service", "install-guard"]);
 
 function parsePort(text: string | undefined): number | undefined {
   if (text === undefined) return undefined;
@@ -165,6 +174,9 @@ function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command
   }
   if (name === "status") return first === undefined ? (io) => statusCommand(io, { json }) : null;
   if (name === "pins") return first === "list" && extra === undefined && !json ? (io) => pinsCommand(io, second) : null;
+  if (name === "install-guard") {
+    return first === undefined && !json ? async (io) => installGuardCommand(io, { node: stableNodePath(), bin: binPath(), settingsPath: claudeSettingsPath(process.env, homedir()) }) : null;
+  }
   if (name === "check") {
     return first === "remove" && second !== undefined && extra === undefined
       ? (io) => checkCommand(io, second, { json })

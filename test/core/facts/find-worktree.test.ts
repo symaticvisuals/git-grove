@@ -35,6 +35,39 @@ test("findWorktree finds a worktree by a relative or symlinked path and names an
   expect(describeError(error)).toBe("git-grove: nowhere is not a worktree of this repository");
 });
 
+test("findWorktree takes a worktree's unique trailing folder names first, as git does, from any folder", async () => {
+  const root = await realpath(repo.path);
+  await repo.worktree(join(root, ".worktrees", "old-onboarding"), "old-onboarding");
+  await repo.worktree(join(root, ".worktrees", "feat", "level-1"), "level-1");
+  const facts = await readRepoFacts(root);
+
+  expect((await findWorktree(facts, root, "old-onboarding")).branch).toBe("old-onboarding");
+  expect((await findWorktree(facts, join(root, ".worktrees", "feat", "level-1"), "old-onboarding")).branch).toBe("old-onboarding");
+  expect((await findWorktree(facts, root, "feat/level-1")).branch).toBe("level-1");
+  expect((await findWorktree(facts, links, "old-onboarding")).branch).toBe("old-onboarding");
+  await expect(findWorktree(facts, root, "onboarding")).rejects.toBeInstanceOf(NotAWorktreeError);
+});
+
+test("an ambiguous trailing name falls through to the path rule", async () => {
+  const root = await realpath(repo.path);
+  await repo.worktree(join(root, "x"), "top-x");
+  await repo.worktree(join(root, ".worktrees", "x"), "inner-x");
+  const facts = await readRepoFacts(root);
+
+  expect((await findWorktree(facts, root, "x")).branch).toBe("top-x");
+  expect((await findWorktree(facts, join(root, ".worktrees"), "x")).branch).toBe("inner-x");
+  await expect(findWorktree(facts, links, "x")).rejects.toBeInstanceOf(NotAWorktreeError);
+});
+
+test("trailing names match case-insensitively only when core.ignorecase is true", async () => {
+  const root = await realpath(repo.path);
+  await repo.worktree(join(root, ".worktrees", "Seeded"), "seeded");
+  await repo.git("config", "core.ignorecase", "true");
+  expect((await findWorktree(await readRepoFacts(root), links, "seeded")).branch).toBe("seeded");
+  await repo.git("config", "core.ignorecase", "false");
+  await expect(findWorktree(await readRepoFacts(root), links, "seeded")).rejects.toBeInstanceOf(NotAWorktreeError);
+});
+
 test("findWorktree finds a worktree whose folder is gone through a symlinked path to its parent", async () => {
   const path = join(await realpath(repo.path), ".worktrees", "gone");
   await repo.worktree(path, "gone");

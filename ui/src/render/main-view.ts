@@ -2,6 +2,7 @@ import { effectivePick } from "../effective-pick.js";
 import { html, type SafeHtml } from "../html.js";
 import type { State } from "../state.js";
 import { activityList } from "./activity-list.js";
+import { guardCard } from "./guard-card.js";
 import { loadView } from "./load-view.js";
 import { needsYouView } from "./needs-you-view.js";
 import { notices } from "./notices.js";
@@ -11,14 +12,14 @@ import { repoView } from "./repo-view.js";
 import { signedOut } from "./signed-out.js";
 import { viewBar } from "./view-bar.js";
 
-/** The main region for the current route: the notices, then that route's bar and list. */
+/** The main region for the current route: the notices, then that route's bar and list; on the projects view, the agent guard's card under its bar. */
 export function mainView(state: State, now: number): SafeHtml {
   if (state.signedOut) return signedOut();
   const { route } = state;
   const top = notices(state);
   switch (route.view) {
     case "projects":
-      return html`${top}${projectsView(state.projects, state.activity, now)}`;
+      return html`${top}${guardCard(state.guard, state.guardDismissed)}${projectsView(state.projects, state.activity, now)}`;
     case "needs":
       return html`${top}${needsYouView(state.needs)}`;
     case "pins":

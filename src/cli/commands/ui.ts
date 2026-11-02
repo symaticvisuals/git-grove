@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { groveHome } from "../../core/grove-home.js";
+import type { GuardStatus } from "../../core/guard-install/guard-install.types.js";
+import { isEphemeralBin } from "../../core/is-ephemeral-bin.js";
 import type { ServiceManager, ServiceStatus } from "../../core/service/service-manager.js";
 import type { ServiceProgram } from "../../core/service/service-program.types.js";
 import { readOrCreateToken } from "../../server/auth/read-or-create-token.js";
@@ -13,8 +15,8 @@ import { compareVersions } from "../compare-versions.js";
 import { dashboardTarget } from "../dashboard-target.js";
 import { dashboardUrl } from "../dashboard-url.js";
 import { findServer } from "../find-server.js";
-import { isEphemeralBin } from "../is-ephemeral-bin.js";
 import { packageVersion } from "../package-version.js";
+import { servedSettingsPath } from "../served-settings-path.js";
 import { serviceProgramOf } from "../service-program-of.js";
 import { waitForExit } from "../wait-for-exit.js";
 
@@ -28,9 +30,14 @@ export type UiDeps = {
   waitMs?: number;
   /** How long to wait for an older server asked to exit: for its service to start this version, or for it to stop; 15 s by default. */
   restartWaitMs?: number;
+  /** Where the agent guard stands in Claude Code's settings; without it, `ui` never mentions the guard. */
+  guardStatus?(): Promise<GuardStatus>;
+  /** The settings file Claude Code reads from this shell; when given, `ui` says so if the dashboard would install the guard elsewhere. */
+  claudeSettingsPath?: string;
 };
 
 const WAIT_MS = 5000;
+const OFFER_GUARD = "Protect your worktrees from Claude Code: use Install on the dashboard, or run git grove install-guard.\n";
 const RESTART_WAIT_MS = 15_000;
 
 function firstLine(error: unknown): string {
@@ -38,8 +45,27 @@ function firstLine(error: unknown): string {
   return text.split("\n")[0] ?? text;
 }
 
+async function warnOnOtherSettings(io: CliIo, deps: UiDeps, port: number, token: string): Promise<void> {
+  if (deps.claudeSettingsPath === undefined) return;
+  const served = await servedSettingsPath(port, token);
+  if (served === null || served === deps.claudeSettingsPath) return;
+  io.out(`The dashboard installs the agent guard into ${served}, but Claude Code here reads ${deps.claudeSettingsPath}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
+}
+
+async function guardAbsent(deps: UiDeps): Promise<boolean> {
+  if (deps.guardStatus === undefined) return false;
+  return (await deps.guardStatus().catch(() => null)) === "absent";
+}
+
 function runsWanted(program: ServiceStatus["program"], wanted: ServiceProgram): boolean {
-  return program !== null && program.nodeExists && program.node === wanted.node && program.bin === wanted.bin && program.groveHome === wanted.groveHome;
+  return (
+    program !== null &&
+    program.nodeExists &&
+    program.node === wanted.node &&
+    program.bin === wanted.bin &&
+    program.groveHome === wanted.groveHome &&
+    (program.claudeConfigDir ?? null) === (wanted.claudeConfigDir ?? null)
+  );
 }
 
 async function installedService(deps: UiDeps): Promise<ServiceStatus | null> {
@@ -102,6 +128,7 @@ async function startService(io: CliIo, deps: UiDeps, home: string, waitMs: numbe
       await privateHome(home);
       const installed = await deps.service.install(serviceProgramOf(deps.bin));
       io.out(`Installed a login service: ${installed.wrote}\nRemove it with: ${installed.removeWith}\n`);
+      if (await guardAbsent(deps)) io.out(OFFER_GUARD);
     }
   } catch (error) {
     io.err(`${firstLine(error)}\n`);
@@ -125,16 +152,18 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
 }
 
 /**
- * Runs `git grove ui`: registers the repository around the current folder, makes sure a dashboard server runs and
- * opens it at the current worktree's feature. An installed login service that runs another copy of git grove, another
- * grove folder, or a Node that is gone, is rewritten to run this one. A server older than this CLI is asked to exit
- * only when no service is installed or the service runs this copy: the service then has 15 s to start this version
- * before it is started, and with no service this one starts as soon as the old one has stopped; an old one still
- * finishing a run after those 15 s is opened instead, saying so. A service that runs
- * another copy keeps its server, and `ui` says how to update it. With no server, the login service is installed
- * (and says how to remove it) or started; on a
- * machine without launchd or systemd, or from an npx cache, the server runs in this process instead, until Ctrl-C.
- * The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`, or when that fails, the address is printed.
+ * Runs `git grove ui`: registers the repository around the current folder, makes sure a dashboard server runs and opens
+ * it at the current worktree's feature. An installed login service that runs another copy of git grove, another grove
+ * folder, another Claude Code folder, or a Node that is gone, is rewritten to run this one. A server older than this
+ * CLI is asked to exit only when no service is installed or the service runs this copy: the service then has 15 s to
+ * start this version before it is started, and with no service this one starts as soon as the old one has stopped; an
+ * old one still finishing a run after those 15 s is opened instead, saying so. A service that runs another copy keeps
+ * its server, and `ui` says how to update it. With no server, the login service is installed (and says how to remove
+ * it, and, when the agent guard is absent from Claude Code's settings, where to install it) or started; on a machine
+ * without launchd or systemd, or from an npx cache, the server runs in this process instead, until Ctrl-C. When a
+ * running server would install the agent guard into another settings file than this shell's Claude Code reads, `ui`
+ * names both. The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`, or when that fails, the address is
+ * printed.
  */
 export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   const home = groveHome();
@@ -145,6 +174,7 @@ export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   if (info !== null) info = await handOver(io, deps, home, info);
   if (info === null) info = await startService(io, deps, home, waitMs);
   const server = info === null ? await serveHere(io, deps, home, waitMs) : { port: info.port, token: await readOrCreateToken(home), foreground: false };
+  if (!server.foreground) await warnOnOtherSettings(io, deps, server.port, server.token);
   const url = dashboardUrl(server.port, server.token, target);
   const opened = process.env["GIT_GROVE_NO_OPEN"] !== "1" && (await deps.openUrl(url));
   io.out(opened ? `Opened the dashboard at http://127.0.0.1:${server.port}/\n` : `Open the dashboard: ${url}\n`);

@@ -1,11 +1,11 @@
 import { groveHome } from "../../core/grove-home.js";
+import { isEphemeralBin } from "../../core/is-ephemeral-bin.js";
 import { ServiceFailedError } from "../../core/service/service-failed.error.js";
 import type { ServiceManager, ServiceStatus } from "../../core/service/service-manager.js";
 import { ServiceUnsupportedError } from "../../core/service/service-unsupported.error.js";
 import { privateHome } from "../../server/private-home.js";
 import type { CliIo } from "../cli-io.types.js";
 import { findServer } from "../find-server.js";
-import { isEphemeralBin } from "../is-ephemeral-bin.js";
 import { serviceProgramOf } from "../service-program-of.js";
 
 export type ServiceSubcommand = "install" | "uninstall" | "status";
@@ -35,6 +35,9 @@ function drift(program: ServiceStatus["program"], bin: string): string | null {
   if (program.node !== wanted.node) return `  it runs another Node (${program.node}); git grove ui or git grove service install points it at this one`;
   if (program.groveHome !== wanted.groveHome) {
     return `  it uses another grove folder (${program.groveHome ?? "~/.git-grove"}); git grove ui or git grove service install points it at this one`;
+  }
+  if ((program.claudeConfigDir ?? null) !== (wanted.claudeConfigDir ?? null)) {
+    return `  it reads another Claude Code folder (${program.claudeConfigDir ?? "~/.claude"}); git grove ui or git grove service install points it at this one`;
   }
   return null;
 }

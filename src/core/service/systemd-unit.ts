@@ -17,7 +17,11 @@ function quoted(text: string): string {
  */
 export function systemdUnit(program: ServiceProgram): string {
   const exec = [program.node, program.bin].map((arg) => quoted(arg).replaceAll("$", "$$$$"));
-  const env = [`PATH=${program.path}`, ...(program.groveHome === null ? [] : [`GIT_GROVE_HOME=${program.groveHome}`])];
+  const env = [
+    `PATH=${program.path}`,
+    ...(program.groveHome === null ? [] : [`GIT_GROVE_HOME=${program.groveHome}`]),
+    ...(program.claudeConfigDir === undefined ? [] : [`CLAUDE_CONFIG_DIR=${program.claudeConfigDir}`]),
+  ];
   const log = checked(program.logFile);
   return [
     "[Unit]",

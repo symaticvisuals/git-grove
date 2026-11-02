@@ -11,10 +11,12 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/git-grove-demo.XXXXXX")"
 work="$(cd "$work" && pwd -P)"
 repo="$work/acme-shop"
 
-# grove's folder, HOME and git config all point into the temp folder, so the demo never reads or writes your own.
+# grove's folder, HOME, Claude Code's folder and git config all point into the temp folder, so the demo never reads
+# or writes your own.
 export GIT_GROVE_HOME="$work/grove-home"
 export GIT_GROVE_NO_OPEN=1
 export HOME="$work/user"
+export CLAUDE_CONFIG_DIR="$work/claude"
 export GIT_CONFIG_GLOBAL="$work/gitconfig"
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME="Robin Example" GIT_AUTHOR_EMAIL="robin@example.com"
@@ -90,13 +92,23 @@ echo "$report"
 grep -q "History rewritten" <<< "$report" || fail "expected status to report the rewrite"
 grep -q "Merged, but not safe to remove" <<< "$report" || fail "expected status to report the unsafe worktree"
 
-step "6/7 Is the merged worktree safe to remove? grove says no, exit 3, and names the file"
+step "6/7 Is the merged worktree safe to remove? grove says no, exit 3, names the file, and the guard stops an agent"
 code=0
 check="$(grove check remove .worktrees/old-onboarding)" || code=$?
 echo "$check"
 echo "(exit $code)"
 [ "$code" = 3 ] || fail "expected check remove to exit 3, got $code"
 grep -q ".local/seed.sql" <<< "$check" || fail "expected check remove to name .local/seed.sql"
+echo
+echo "An agent tries anyway. Claude Code's PreToolUse hook hands the command to the guard, which blocks it (exit 2):"
+echo "\$ git worktree remove --force .worktrees/old-onboarding   (seen by: git grove guard --claude)"
+hook="{\"session_id\":\"demo\",\"cwd\":\"$repo\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git worktree remove --force .worktrees/old-onboarding\"}}"
+code=0
+guarded="$(node "$bin" guard --claude <<< "$hook" 2>&1)" || code=$?
+echo "$guarded"
+echo "(exit $code)"
+[ "$code" = 2 ] || fail "expected the guard to exit 2, got $code"
+grep -q "git grove rm --rescue .worktrees/old-onboarding" <<< "$guarded" || fail "expected the guard to offer rm --rescue"
 
 step "7/7 Put things right: restore the branch, rescue the file, remove the worktree"
 grove restore feat/coupons-ui
@@ -123,8 +135,9 @@ cat << EOF
 
 Done. The scenario stays in $work.
 
-To see it in the dashboard, serve it from this terminal (Ctrl-C stops it):
-  GIT_GROVE_HOME="$GIT_GROVE_HOME" node "$bin" serve
+To see it in the dashboard, serve it from this terminal (Ctrl-C stops it). Its HOME and Claude Code folder are the
+demo's, so installing the agent guard there edits only $CLAUDE_CONFIG_DIR/settings.json:
+  HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" GIT_GROVE_HOME="$GIT_GROVE_HOME" node "$bin" serve
 serve prints its address without the token, and the page needs the token. In a second terminal, this prints
 the address to open, token included:
   bash "$work/dashboard-url.sh"

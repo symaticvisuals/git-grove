@@ -7,7 +7,7 @@ import { checkRow } from "./check-row.js";
  * What a run did, compactly: Done (or Not run, or Stopped) and one sentence, with its lines folded under Details,
  * passing when it worked and failing when it did not. Details start open when it did not work, since they say why.
  */
-export function renderReceipt(receipt: Receipt): SafeHtml {
+export function renderReceipt(receipt: Pick<Receipt, "ok" | "refused" | "title" | "lines">): SafeHtml {
   const head = receipt.ok ? "Done" : receipt.refused ? "Not run" : "Stopped";
   const text = sentence(receipt.title.replace(/^(?:Stopped|Refused): /, ""));
   const lines = receipt.lines.map((line) => checkRow({ ok: receipt.ok, text: line, why: null }));

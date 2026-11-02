@@ -28,3 +28,11 @@ test("a file that is not one grove wrote gives null", () => {
   expect(installedProgram("systemd", "[Service]\nExecStart=/usr/bin/env node bin.js serve\n")).toBeNull();
   expect(installedProgram("systemd", "")).toBeNull();
 });
+
+test("the CLAUDE_CONFIG_DIR a written agent or unit sets is read back, and left out when it sets none", () => {
+  const program: ServiceProgram = { ...ODD, claudeConfigDir: '/h o/"claude"/50%/\\$x&<y>' };
+  const expected = { node: program.node, bin: program.bin, groveHome: null, claudeConfigDir: program.claudeConfigDir };
+  expect(installedProgram("launchd", launchdPlist(program))).toStrictEqual(expected);
+  expect(installedProgram("systemd", systemdUnit(program))).toStrictEqual(expected);
+  expect(installedProgram("launchd", launchdPlist(PROGRAM))).not.toHaveProperty("claudeConfigDir");
+});
