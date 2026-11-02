@@ -2,7 +2,7 @@ import type { Plan } from "../../src/core/actions/plan.types.js";
 import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { activityQuery } from "./activity-query.js";
-import type { LiveState } from "./live.js";
+import type { LiveProblem, LiveState } from "./live.js";
 import type { Route } from "./parse-route.js";
 import { SLICE_NAMES, type SliceName } from "./slice-names.js";
 import { type RepoPins, type SliceResult, sliceRequests } from "./slice-requests.js";
@@ -28,8 +28,12 @@ export type State = {
   /** Keys of the list groups that are folded. */
   closed: string[];
   live: LiveState;
+  /** Why the live stream is down, while it is. */
+  liveProblem: LiveProblem | null;
   /** The live stream dropped since it was last up, so whatever is shown is reloaded when it is back. */
   liveDropped: boolean;
+  /** When the project list was last asked to reload; it is reloaded every 30 s while live, so its scan times stay fresh. */
+  projectsCheckedAt: number | null;
   lastEventAt: number | null;
   updateAvailable: boolean;
   signedOut: boolean;
@@ -41,7 +45,8 @@ export type UiAction =
   | { type: "failed"; slice: SliceName; key: string; status: number; message: string }
   | { type: "invalidate"; slice: SliceName }
   | { type: "event"; event: ServerEvent; at: number }
-  | { type: "live"; state: LiveState }
+  | { type: "live"; state: LiveState; problem?: LiveProblem }
+  | { type: "tick"; now: number }
   | { type: "tab"; tab: Tab }
   | { type: "needs-only"; on: boolean }
   | { type: "toggle-group"; key: string }
@@ -51,6 +56,7 @@ type Change = <T>(load: Load<T> | null) => Load<T> | null;
 
 const LOADING: { status: "loading" } = { status: "loading" };
 const FEATURE_ACTIVITY_LIMIT = 50;
+const PROJECTS_EVERY_MS = 30_000;
 
 function dataOf<T>(load: Load<T> | null): T | null {
   return load === null || load.status === "loading" ? null : load.data;
@@ -107,7 +113,7 @@ function everySlice(state: State, change: Change): State {
 }
 
 function comeBack(state: State): State {
-  const up: State = { ...state, live: "up" };
+  const up: State = { ...state, live: "up", liveProblem: null };
   return state.liveDropped ? { ...everySlice(up, invalidate), liveDropped: false } : up;
 }
 
@@ -131,10 +137,18 @@ function onActivity(state: State, item: ActivityItem): State {
   return next;
 }
 
-function onDigest(state: State, repoId: number): State {
+function onDigest(state: State, repoId: number, at: number): State {
   const shown = state.route.view === "repo" && state.route.repo === repoId;
-  const stale = (slices: SliceName[]): State => slices.reduce((next, slice) => update(next, slice, markStale), state);
-  return stale(shown ? ["projects", "needs", "pins", "repo", "feature", "preview"] : ["projects", "needs", "pins"]);
+  const slices: SliceName[] = shown ? ["projects", "needs", "pins", "repo", "feature", "preview"] : ["projects", "needs", "pins"];
+  const checked: State = { ...state, projectsCheckedAt: at };
+  return slices.reduce((next, slice) => update(next, slice, invalidate), checked);
+}
+
+function onTick(state: State, now: number): State {
+  if (state.live !== "up" || state.projects.status !== "ready") return state;
+  if (state.projectsCheckedAt === null) return { ...state, projectsCheckedAt: now };
+  if (now - state.projectsCheckedAt < PROJECTS_EVERY_MS) return state;
+  return { ...update(state, "projects", markStale), projectsCheckedAt: now };
 }
 
 function onEvent(state: State, event: ServerEvent, at: number): State {
@@ -143,7 +157,7 @@ function onEvent(state: State, event: ServerEvent, at: number): State {
     case "hello":
       return comeBack({ ...next, updateAvailable: next.updateAvailable || event.version !== next.pageVersion });
     case "digest":
-      return onDigest(next, event.repoId);
+      return onDigest(next, event.repoId, at);
     case "activity":
       return onActivity(next, event.item);
     case "step":
@@ -169,7 +183,10 @@ function step(state: State, action: UiAction): State {
       return onEvent(state, action.event, action.at);
     case "live":
       if (action.state === "up") return comeBack(state);
-      return action.state === "down" ? { ...state, live: "down", liveDropped: true } : { ...state, live: action.state };
+      if (action.state === "down") return { ...state, live: "down", liveDropped: true, liveProblem: action.problem ?? "unreachable" };
+      return { ...state, live: action.state };
+    case "tick":
+      return onTick(state, action.now);
     case "tab":
       return { ...state, tab: action.tab };
     case "needs-only":
@@ -208,7 +225,9 @@ export function initialState(route: Route, pageVersion: string): State {
     needsOnly: false,
     closed: [],
     live: "connecting",
+    liveProblem: null,
     liveDropped: false,
+    projectsCheckedAt: null,
     lastEventAt: null,
     updateAvailable: false,
     signedOut: false,
@@ -218,9 +237,10 @@ export function initialState(route: Route, pageVersion: string): State {
 }
 
 /**
- * The next state; pure. A reply is kept only for the slice and key the state still asks for. A digest marks the
- * slices it concerns stale, an activity event joins the lists it belongs to, and once the live stream is back after
- * dropping, every slice is reloaded. A slice the route no longer needs is cleared; one it newly needs starts loading.
+ * The next state; pure. A reply is kept only for the slice and key the state still asks for. A digest reloads the
+ * slices it concerns, failed ones included; an activity event joins the lists it belongs to; while live, the project
+ * list reloads every 30 s; and once the live stream is back after dropping, every slice is reloaded. A slice the
+ * route no longer needs is cleared; one it newly needs starts loading.
  */
 export function reduce(state: State, action: UiAction): State {
   const next = step(state, action);

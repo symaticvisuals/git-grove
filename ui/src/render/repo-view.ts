@@ -52,16 +52,17 @@ function groupActions(group: ListGroup): SafeHtml {
       const rule = worstFinding(level.findings)?.rule;
       return rule === "parent-moved" || rule === "parent-merged";
     });
-    return html`<button class="gbtn${moved ? " hot" : ""}" data-action="restack" data-feature="${id}">${ICONS.restack}Restack</button><button class="gbtn" data-action="add-level" data-feature="${id}">${ICONS.plus}Add level</button>`;
+    const restack = moved ? html`<button class="gbtn hot" data-action="restack" data-feature="${id}" data-key="group:${group.key}:restack">${ICONS.restack}Restack</button>` : "";
+    return html`${restack}<button class="gbtn" data-action="add-level" data-feature="${id}" data-key="group:${group.key}:add-level">${ICONS.plus}Add level</button>`;
   }
-  if (group.kind === "singles" || group.kind === "detached") return html`<button class="gbtn" data-action="cleanup">${ICONS.broom}Clean up</button>`;
+  if (group.kind === "singles" || group.kind === "detached") return html`<button class="gbtn" data-action="cleanup" data-key="group:${group.key}:cleanup">${ICONS.broom}Clean up</button>`;
   return html``;
 }
 
 function groupView(group: ListGroup, input: RepoViewInput): SafeHtml {
   const closed = input.closed.includes(group.key);
   const rows = group.rows.map((_, index) => listRow(group.rows, index, { repoId: input.repoId, pick: input.pick, now: input.now }));
-  return html`<div class="group${closed ? " closed" : ""}" role="button" tabindex="0" aria-expanded="${closed ? "false" : "true"}" data-ui="toggle-group" data-group="${group.key}">${ICONS.caret}<b>${group.name}</b><span class="meta">${group.meta}</span><span class="gacts">${groupActions(group)}</span><span class="tally">${tally(group.rows)}</span></div>
+  return html`<div class="group${closed ? " closed" : ""}" role="button" tabindex="0" aria-expanded="${closed ? "false" : "true"}" data-ui="toggle-group" data-group="${group.key}" data-key="group:${group.key}">${ICONS.caret}<b>${group.name}</b><span class="meta">${group.meta}</span><span class="gacts">${groupActions(group)}</span><span class="tally">${tally(group.rows)}</span></div>
 <div class="rows${closed ? " closed" : ""}">${rows}</div>`;
 }
 
@@ -74,9 +75,9 @@ function summary(view: WireRepoView): string {
 function filters(view: WireRepoView, needsOnly: boolean): SafeHtml {
   const cleanup =
     view.cleanupCount > 0
-      ? html`<button class="fchip on clean" data-action="cleanup">${ICONS.cleanChip}${plural(view.cleanupCount, "worktree")} safe to clean up</button>`
+      ? html`<button class="fchip on clean" data-action="cleanup" data-key="filter:cleanup">${ICONS.cleanChip}${plural(view.cleanupCount, "worktree")} safe to clean up</button>`
       : "";
-  return html`<div class="filters"><button class="fchip${needsOnly ? " on" : ""}" data-ui="needs-only" aria-pressed="${needsOnly ? "true" : "false"}">${ICONS.needsChip}Needs you</button>${cleanup}<span class="sum">${summary(view)}</span></div>`;
+  return html`<div class="filters"><button class="fchip${needsOnly ? " on" : ""}" data-ui="needs-only" data-key="filter:needs-only" aria-pressed="${needsOnly ? "true" : "false"}">${ICONS.needsChip}Needs you</button>${cleanup}<span class="sum">${summary(view)}</span></div>`;
 }
 
 function groupsView(view: WireRepoView, input: RepoViewInput): SafeHtml {
@@ -99,7 +100,7 @@ function scanFailed(view: WireRepoView): SafeHtml {
  */
 export function repoView(input: RepoViewInput): SafeHtml {
   const view = input.repo === null || input.repo.status === "loading" ? null : input.repo.data;
-  const tabs = html`<div class="tabs" role="tablist">${TABS.map(([tab, label]) => html`<button class="tab${input.tab === tab ? " on" : ""}" role="tab" aria-selected="${input.tab === tab ? "true" : "false"}" data-ui="tab" data-tab="${tab}">${label}</button>`)}</div>`;
+  const tabs = html`<div class="tabs" role="tablist">${TABS.map(([tab, label]) => html`<button class="tab${input.tab === tab ? " on" : ""}" role="tab" aria-selected="${input.tab === tab ? "true" : "false"}" data-ui="tab" data-tab="${tab}" data-key="tab:${tab}">${label}</button>`)}</div>`;
   const crumb = html`<span class="dim">${view?.project.name ?? "Repo"}</span><span class="sep">›</span><b>Worktrees</b>`;
   const body =
     input.tab === "activity"

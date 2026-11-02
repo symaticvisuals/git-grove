@@ -15,7 +15,7 @@ export function detachedDetail(view: WireRepoView, now: number): SafeHtml {
   );
   const cleanup =
     view.cleanupCount > 0
-      ? html`<div class="opts">${optionCard("Clean up worktrees", "Only folders whose work is safe somewhere else. Grove re-checks each one right before removing it.", html`<button class="btn primary" data-action="cleanup">Clean up</button>`)}</div>`
+      ? html`<div class="opts">${optionCard("Clean up worktrees", "Only folders whose work is safe somewhere else. Grove re-checks each one right before removing it.", html`<button class="btn primary" data-action="cleanup" data-key="detail:cleanup">Clean up</button>`)}</div>`
       : "";
   return html`${detailHead(["Detached"], `${plural(view.detached.length, "sandbox", "sandboxes")}, detached`)}<div class="d-sec"><div class="sboxes">${rows}</div>${cleanup}</div>`;
 }

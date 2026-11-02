@@ -15,6 +15,7 @@ import { optionCard } from "./option-card.js";
 import { previewChecks } from "./preview-checks.js";
 import { rewriteSections } from "./rewrite-sections.js";
 import { safeBox } from "./safe-box.js";
+import { slashBreaks } from "./slash-breaks.js";
 
 export type LevelDetailInput = {
   view: WireRepoView;
@@ -28,16 +29,16 @@ export type LevelDetailInput = {
 function opens(level: WireLevel): SafeHtml {
   const path = level.worktree?.path;
   if (path === undefined) return html``;
-  return html`<div class="acts"><button class="btn" data-action="open-editor" data-path="${path}">${ICONS.editor}Open in editor</button><button class="btn" data-action="open-terminal" data-path="${path}">${ICONS.terminal}Terminal</button></div>`;
+  return html`<div class="acts"><button class="btn" data-action="open-editor" data-path="${path}" data-key="detail:open-editor">${ICONS.editor}Open in editor</button><button class="btn" data-action="open-terminal" data-path="${path}" data-key="detail:open-terminal">${ICONS.terminal}Terminal</button></div>`;
 }
 
 function findingSections(input: LevelDetailInput): SafeHtml {
   const { view, feature, level, preview, now } = input;
   const worst = worstFinding(level.findings);
-  const restackButton = html`<button class="btn primary" data-action="restack" data-feature="${feature.id}">Restack <kbd>S</kbd></button>`;
+  const restackButton = html`<button class="btn primary" data-action="restack" data-feature="${feature.id}" data-key="detail:restack">Restack <kbd>S</kbd></button>`;
   switch (worst?.rule) {
     case "history-rewritten":
-      return rewriteSections(level, input.detail);
+      return rewriteSections(level, input.detail, now);
     case "parent-moved":
     case "parent-merged": {
       const moved = worst.rule === "parent-moved";
@@ -55,13 +56,13 @@ function findingSections(input: LevelDetailInput): SafeHtml {
           ? banner("loses", `Merged, but removing it would delete ${files === 1 ? "a file" : plural(files, "file")}`, `The code is safe in ${view.trunk}. ${files === 1 ? "One ignored file lives" : `${files} ignored files live`} only in this folder.`)
           : banner("loses", worst.title, sentence(worst.detail));
       const path = level.worktree?.path ?? "";
-      const button = html`<button class="btn primary" data-action="remove" data-path="${path}">Clean up <kbd>R</kbd></button>`;
+      const button = html`<button class="btn primary" data-action="remove" data-path="${path}" data-key="detail:remove">Clean up <kbd>R</kbd></button>`;
       const option = optionCard(`Copy the ${files === 1 ? "file" : "files"} to main, then remove`, "Nothing in main is overwritten. The branch is kept.", button);
       return html`<div class="d-sec">${top}<div class="opts">${option}</div></div>${previewChecks("Safe to remove?", preview, now)}`;
     }
     case "env-missing": {
       const path = level.worktree?.path ?? "";
-      const button = html`<button class="btn primary" data-action="copy-env" data-path="${path}">${ICONS.copy}Copy</button>`;
+      const button = html`<button class="btn primary" data-action="copy-env" data-path="${path}" data-key="detail:copy-env">${ICONS.copy}Copy</button>`;
       return html`<div class="d-sec">${banner("warn", worst.title, sentence(worst.detail))}<div class="opts">${optionCard("Copy env files", "Copies them from the main checkout. Nothing already in this folder is overwritten.", button)}</div></div>`;
     }
     default: {
@@ -81,6 +82,6 @@ function findingSections(input: LevelDetailInput): SafeHtml {
 export function levelDetail(input: LevelDetailInput): SafeHtml {
   const { feature, level, now } = input;
   const path = feature.kind === "stack" ? [feature.name, `level ${level.number ?? ""}`] : ["Singles"];
-  const activity = loadView(input.detail, "feature", (detail) => activityList(detail.activity, now));
-  return html`${detailHead(path, level.branch)}${findingSections(input)}<div class="d-sec">${levelProps(feature, level, now)}</div><div class="d-sec"><div class="h3">Activity</div>${activity}</div>`;
+  const activity = loadView(input.detail, "feature", (detail) => activityList(detail.activity, now), "feature-activity");
+  return html`${detailHead(path, slashBreaks(level.branch))}${findingSections(input)}<div class="d-sec">${levelProps(feature, level, now)}</div><div class="d-sec"><div class="h3">Activity</div>${activity}</div>`;
 }

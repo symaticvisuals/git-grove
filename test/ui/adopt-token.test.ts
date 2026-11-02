@@ -64,3 +64,15 @@ test("with no token in the fragment, the stored token is used and the hash is le
   expect(h.hashes).toEqual([]);
   expect(h.verified).toEqual([]);
 });
+
+test.each([
+  [`#/r/1&token=${GOOD}`, "#/r/1", GOOD],
+  [`#/r/1/f/1.YQ?token=${GOOD}&x=1`, "#/r/1/f/1.YQ", GOOD],
+  ["#/r/2/token=junk", "#/r/2", OLD],
+  [`#token=${GOOD}&route=${encodeURIComponent(`/r/3?token=${"0".repeat(64)}`)}`, "#/r/3", GOOD],
+  ["#/token=x", "#/", OLD],
+])("a token anywhere in %s is stripped", async (hash, route, used) => {
+  const h = harness(OLD, () => true);
+  expect(await h.adopt(hash)).toBe(used);
+  expect(h.hashes).toEqual([route]);
+});

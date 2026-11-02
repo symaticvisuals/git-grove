@@ -12,7 +12,7 @@ import { timeAgo } from "./time-ago.js";
 export type SidebarInput = { route: Route; projects: Load<WireProject[]>; repo: WireRepoView | null; live: LiveState; now: number };
 
 function nav(href: string, on: boolean, icon: SafeHtml, label: string, count: SafeHtml | string = ""): SafeHtml {
-  return html`<a class="nav${on ? " on" : ""}" href="${href}"${on ? html` aria-current="page"` : ""}>${icon}${label}${count}</a>`;
+  return html`<a class="nav${on ? " on" : ""}" href="${href}" data-key="nav:${href}"${on ? html` aria-current="page"` : ""}>${icon}${label}${count}</a>`;
 }
 
 function footer(projects: WireProject[], live: LiveState, now: number): SafeHtml {
@@ -26,7 +26,7 @@ function repoNav(project: WireProject, input: SidebarInput): SafeHtml {
   const current = input.route.view === "repo" && input.route.repo === project.id;
   const link = nav(`#/r/${project.id}`, current, ICONS.repoDot(project.health), project.name, html`<span class="count">${project.worktrees}</span>`);
   if (!current || input.repo === null || input.repo.project.id !== project.id) return link;
-  const jumps = groupsOf(input.repo).map((group) => html`<button class="nav" data-ui="jump" data-group="${group.key}">${group.name}</button>`);
+  const jumps = groupsOf(input.repo).map((group) => html`<button class="nav" data-ui="jump" data-group="${group.key}" data-key="jump:${group.key}">${group.name}</button>`);
   return html`${link}<div class="repo-sub">${jumps}</div>`;
 }
 
@@ -41,12 +41,12 @@ export function sidebar(input: SidebarInput): SafeHtml {
   const pins = data.reduce((total, project) => total + project.pins, 0);
   const repos = loadView(input.projects, "projects", (projects) => html`${projects.map((project) => repoNav(project, input))}`);
   return html`<div class="ws">${ICONS.logo}<b>git grove</b><span class="local">local</span></div>
-<button class="search" data-action="palette">${ICONS.search}<span>Do or find anything</span><kbd>⌘K</kbd></button>
-<button class="newbtn" data-action="new">${ICONS.plus}New feature<kbd>N</kbd></button>
+<button class="search" data-action="palette" data-key="side:palette">${ICONS.search}<span>Do or find anything</span><kbd>⌘K</kbd></button>
+<button class="newbtn" data-action="new" data-key="side:new">${ICONS.plus}New feature<kbd>N</kbd></button>
 ${nav("#/needs", route.view === "needs", ICONS.needs, "Needs you", html`<span class="count${needs > 0 ? " hot" : ""}">${needs}</span>`)}
 ${nav("#/activity", route.view === "activity", ICONS.activity, "Activity")}
 ${nav("#/pins", route.view === "pins", ICONS.pin, "Pins", html`<span class="count">${pins}</span>`)}
-<a class="sec${route.view === "projects" ? " on" : ""}" href="#/">Repos<span>All</span></a>
+<a class="sec${route.view === "projects" ? " on" : ""}" href="#/" data-key="nav:#/">Repos<span>All</span></a>
 <div class="repos">${repos}</div>
 ${footer(data, input.live, input.now)}`;
 }

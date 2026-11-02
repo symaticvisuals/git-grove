@@ -1,5 +1,6 @@
 import { adoptToken, type TokenDeps } from "./adopt-token.js";
 import { ago } from "./ago.js";
+import { announcement } from "./announcement.js";
 import { type Api, createApi } from "./api.js";
 import { ApiError } from "./api.error.js";
 import { effectivePick } from "./effective-pick.js";
@@ -11,15 +12,18 @@ import { parseRoute, routeHash } from "./parse-route.js";
 import { detailPanel } from "./render/detail-panel.js";
 import { mainView } from "./render/main-view.js";
 import { sidebar } from "./render/sidebar.js";
+import { scanNow } from "./scan-now.js";
 import { SLICE_NAMES, type SliceName } from "./slice-names.js";
 import { sliceRequests } from "./slice-requests.js";
 import { initialState, reduce, type State, type Tab, type UiAction } from "./state.js";
+import { toast } from "./toast.js";
 
 declare const __GROVE_VERSION__: string;
 
 const PROJECTS_EVERY_MS = 1_000;
 const CLOCK_MS = 5_000;
 const TABS: readonly Tab[] = ["feature", "health", "activity"];
+const TIME_TEXT = /(<time\b[^>]*>)[^<]*(<\/time>)/g;
 
 function pageVersion(): string {
   const content = document.querySelector('meta[name="grove-version"]')?.getAttribute("content") ?? "";
@@ -34,12 +38,25 @@ let reveal = true;
 let projectsFetchedAt = 0;
 let projectsTimer = 0;
 const inFlight = new Map<SliceName, { key: string; again: boolean }>();
-const painted = new Map<string, { text: string; context: string }>();
+const painted = new Map<string, { stable: string; context: string }>();
+
+function announce(text: string): void {
+  const region = document.getElementById("announce");
+  if (region === null) return;
+  region.textContent = "";
+  window.setTimeout(() => {
+    region.textContent = text;
+  }, 50);
+}
 
 function dispatch(action: UiAction): void {
   if (action.type === "event" && action.event.type === "digest") for (const flight of inFlight.values()) flight.again = true;
   if (action.type === "route") reveal = true;
+  const before = state;
   state = reduce(state, action);
+  if (state === before) return;
+  const spoken = announcement(before, state, action);
+  if (spoken !== null) announce(spoken);
   schedule();
   load();
 }
@@ -91,32 +108,28 @@ function load(): void {
   }
 }
 
-function focusSelector(region: HTMLElement): string | null {
+function focusedKey(region: HTMLElement): string | null {
   const active = document.activeElement;
-  if (!(active instanceof HTMLElement) || !region.contains(active)) return null;
-  for (const name of ["href", "group", "tab", "action", "ui"]) {
-    const value = active.dataset[name];
-    if (value !== undefined) return `[data-${name}="${CSS.escape(value)}"]`;
-  }
-  return null;
+  return active instanceof HTMLElement && region.contains(active) ? (active.dataset["key"] ?? null) : null;
 }
 
 function put(id: string, content: SafeHtml, context: string): void {
   const region = document.getElementById(id);
+  const stable = content.text.replace(TIME_TEXT, "$1$2");
   const last = painted.get(id);
-  if (region === null || last?.text === content.text) return;
+  if (region === null || last?.stable === stable) return;
   const keep = last?.context === context;
   const list = region.querySelector<HTMLElement>(".list");
   const scroll = { region: region.scrollTop, list: list?.scrollTop ?? 0 };
-  const focus = focusSelector(region);
+  const focus = focusedKey(region);
   region.innerHTML = content.text;
-  painted.set(id, { text: content.text, context });
+  painted.set(id, { stable, context });
   if (keep) {
     region.scrollTop = scroll.region;
     const next = region.querySelector<HTMLElement>(".list");
     if (next !== null) next.scrollTop = scroll.list;
   }
-  if (focus !== null) region.querySelector<HTMLElement>(focus)?.focus({ preventScroll: true });
+  if (focus !== null) region.querySelector<HTMLElement>(`[data-key="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
 }
 
 function paint(): void {
@@ -151,22 +164,28 @@ function schedule(): void {
 function tick(): void {
   const now = Date.now();
   for (const element of document.querySelectorAll<HTMLElement>("time[data-at]")) {
-    const at = Number(element.dataset["at"]);
-    if (Number.isFinite(at)) element.textContent = ago(at, now, element.dataset["ago"] === "long" ? "long" : "short");
+    element.textContent = ago(Number(element.dataset["at"]), now, element.dataset["ago"] === "long" ? "long" : "short");
   }
+  dispatch({ type: "tick", now });
 }
 
 /** The git actions (restore, ack, restack, remove, copy-env, cleanup, new, add-level), opening in an editor or terminal, and the palette: Task 10's dialogs attach here. */
 function openAction(_name: string, _data: DOMStringMap): void {}
 
+function scan(element: HTMLElement): void {
+  const client = api;
+  if (client === null) return;
+  const repo = Number(element.dataset["repo"]);
+  scanNow({ api: client, repo: Number.isSafeInteger(repo) && repo > 0 ? repo : undefined, now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }).then(
+    (message) => toast(message),
+    (error: unknown) => toast(error instanceof ApiError ? error.message : MESSAGES.notRunning, false),
+  );
+}
+
 function runAction(element: HTMLElement): void {
   const name = element.dataset["action"] ?? "";
-  if (name === "scan") {
-    const repo = Number(element.dataset["repo"]);
-    void api?.scan(Number.isSafeInteger(repo) && repo > 0 ? repo : undefined).catch(() => undefined);
-    return;
-  }
-  openAction(name, element.dataset);
+  if (name === "scan") scan(element);
+  else openAction(name, element.dataset);
 }
 
 function isSlice(name: string | undefined): name is SliceName {
@@ -252,10 +271,6 @@ function tokenDeps(): TokenDeps {
   };
 }
 
-function holdsToken(hash: string): boolean {
-  return !hash.startsWith("#/") && new URLSearchParams(hash.slice(1)).has("token");
-}
-
 function bind(): void {
   document.addEventListener("click", (event) => {
     if (event.target instanceof Element && activate(event.target)) event.preventDefault();
@@ -266,7 +281,7 @@ function bind(): void {
     if (target.matches("[data-href], [data-ui]") && activate(target)) event.preventDefault();
   });
   window.addEventListener("hashchange", () => {
-    if (holdsToken(location.hash)) {
+    if (location.hash.includes("token=")) {
       void adoptToken(tokenDeps()).then(() => location.reload());
       return;
     }
@@ -288,7 +303,7 @@ async function boot(): Promise<void> {
     fetchImpl,
     token,
     onEvent: (event) => dispatch({ type: "event", event, at: Date.now() }),
-    onState: (live) => dispatch({ type: "live", state: live }),
+    onState: (live, problem) => dispatch(problem === undefined ? { type: "live", state: live } : { type: "live", state: live, problem }),
     onUnauthorized: () => dispatch({ type: "signed-out" }),
   });
   load();

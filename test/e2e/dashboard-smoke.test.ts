@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -83,4 +84,19 @@ test("the bundle has a linked source map and carries no token", async () => {
   expect(bundle).toContain("sourceMappingURL=app.js.map");
   expect(bundle).not.toContain(server.token);
   expect((await get("/app.js.map")).status).toBe(200);
+});
+
+test("the build empties dist/ui first, and refuses a custom folder that is not empty", async () => {
+  const run = (args: string[]) => promisify(execFile)(process.execPath, [join(ROOT, "scripts", "build-ui.mjs"), ...args], { cwd: ROOT });
+  const stale = join(ROOT, "dist", "ui", "stale-from-an-old-build.js");
+  await mkdir(join(ROOT, "dist", "ui"), { recursive: true });
+  await writeFile(stale, "old");
+  await run([]);
+  expect(existsSync(stale)).toBe(false);
+  expect(existsSync(join(ROOT, "dist", "ui", "app.js"))).toBe(true);
+  const used = await mkdtemp(join(tmpdir(), "git-grove-ui-used-"));
+  await writeFile(join(used, "keep.txt"), "mine");
+  await expect(run(["--out", used])).rejects.toThrow(/not empty/);
+  expect(await readFile(join(used, "keep.txt"), "utf8")).toBe("mine");
+  await rm(used, { recursive: true, force: true });
 });

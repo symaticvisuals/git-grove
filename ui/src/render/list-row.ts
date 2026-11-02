@@ -78,11 +78,13 @@ export function listRow(rows: readonly ListRow[], index: number, context: ListRo
   const ref = refOf(row);
   const shown = cells(row, context.now);
   const selected = sameRef(ref, context.pick);
+  const href = routeHash({ view: "repo", repo: context.repoId, pick: ref });
+  const key = `row:${href}`;
   const opens =
     shown.path === null
       ? html``
-      : html`<button class="ib" data-action="open-editor" data-path="${shown.path}" title="Open in editor" aria-label="Open in editor">${ICONS.editor}</button><button class="ib" data-action="open-terminal" data-path="${shown.path}" title="Open a terminal here" aria-label="Open a terminal here">${ICONS.terminal}</button>`;
-  const more = html`<button class="ib" data-action="palette" title="More actions" aria-label="More actions">${ICONS.more}</button>`;
-  return html`<div class="row h-${row.health}${selected ? " sel" : ""}" role="button" tabindex="0" data-href="${routeHash({ view: "repo", repo: context.repoId, pick: ref })}"${selected ? html` aria-current="true"` : ""}>
-${treeGutter(rows.map((entry) => ({ depth: entry.kind === "level" ? entry.depth : 0 })), index, ICONS.health(row.health))}<span class="br">${shown.name}</span><span class="state">${shown.state}<span class="sr">, ${HEALTH_LABEL[row.health]}</span></span><span class="pills">${shown.pills}</span><span class="num">${shown.num}</span><span class="when">${shown.when}</span><span class="racts">${quickAction(row)}${opens}${more}</span></div>`;
+      : html`<button class="ib" data-action="open-editor" data-path="${shown.path}" data-key="${key}:open-editor" title="Open in editor" aria-label="Open in editor">${ICONS.editor}</button><button class="ib" data-action="open-terminal" data-path="${shown.path}" data-key="${key}:open-terminal" title="Open a terminal here" aria-label="Open a terminal here">${ICONS.terminal}</button>`;
+  const more = html`<button class="ib" data-action="palette" data-key="${key}:palette" title="More actions" aria-label="More actions">${ICONS.more}</button>`;
+  return html`<div class="row h-${row.health}${selected ? " sel" : ""}" role="button" tabindex="0" data-href="${href}" data-key="${key}"${selected ? html` aria-current="true"` : ""}>
+${treeGutter(rows.map((entry) => ({ depth: entry.kind === "level" ? entry.depth : 0 })), index, ICONS.health(row.health))}<span class="br">${shown.name}</span><span class="state">${shown.state}<span class="sr">, ${HEALTH_LABEL[row.health]}</span></span><span class="pills">${shown.pills}</span><span class="num">${shown.num}</span><span class="when">${shown.when}</span><span class="racts">${quickAction(row, key)}${opens}${more}</span></div>`;
 }

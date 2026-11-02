@@ -124,3 +124,39 @@ test("the activity tab loads the repo's activity, and its events join it", () =>
   expect(joined.activity).toMatchObject({ status: "ready", data: [{ id: "a:1" }] });
   expect(ignored.activity).toMatchObject({ status: "ready", data: [] });
 });
+
+test("while live is up, a quiet project list reloads every 30 s, and the footer then shows a fresh scan", async () => {
+  const { sidebar } = await import("../../ui/src/render/sidebar.js");
+  const start = initialState({ view: "projects" }, "1.0.0");
+  const old = [project({ scannedAt: 0 })];
+  const shown = run(start, { type: "loaded", key: keyOf(start, "projects"), result: { slice: "projects", data: old } }, { type: "live", state: "up" });
+  const first = reduce(shown, { type: "tick", now: 1_000 });
+  expect(first.projects).toMatchObject({ stale: false });
+  expect(reduce(first, { type: "tick", now: 25_000 })).toBe(first);
+  const due = reduce(first, { type: "tick", now: 31_000 });
+  expect(due.projects).toMatchObject({ status: "ready", stale: true });
+  const fresh = reduce(due, { type: "loaded", key: keyOf(due, "projects"), result: { slice: "projects", data: [project({ scannedAt: 30_500 })] } });
+  const footer = sidebar({ route: fresh.route, projects: fresh.projects, repo: null, live: fresh.live, now: 31_200 }).text;
+  expect(footer).toContain("Watching 1 repo, ");
+  expect(footer).toContain(">0 s ago</time>");
+  const down = reduce(reduce(fresh, { type: "live", state: "down" }), { type: "tick", now: 90_000 });
+  expect(down.projects).toMatchObject({ stale: false });
+});
+
+test("a digest for the shown repo retries a slice that failed", () => {
+  const state = shownRepo();
+  const failed = reduce(state, { type: "failed", slice: "repo", key: keyOf(state, "repo"), status: 503, message: "scan failed" });
+  const after = reduce(failed, { type: "event", at: 4, event: { type: "digest", repoId: 1, digest: "x", at: 4 } });
+  expect(after.repo).toEqual({ status: "ready", data: repoView(), stale: true });
+  const empty = initialState({ view: "repo", repo: 1, pick: null }, "1.0.0");
+  const neverLoaded = reduce(empty, { type: "failed", slice: "repo", key: keyOf(empty, "repo"), status: 503, message: "scan failed" });
+  expect(reduce(neverLoaded, { type: "event", at: 4, event: { type: "digest", repoId: 1, digest: "x", at: 4 } }).repo).toEqual({ status: "loading" });
+});
+
+test("a 503 from the live stream is remembered as busy until it is back", () => {
+  const state = shownRepo();
+  const busy = reduce(state, { type: "live", state: "down", problem: "busy" });
+  expect(busy.liveProblem).toBe("busy");
+  expect(reduce(busy, { type: "live", state: "up" }).liveProblem).toBeNull();
+  expect(reduce(state, { type: "live", state: "down" }).liveProblem).toBe("unreachable");
+});

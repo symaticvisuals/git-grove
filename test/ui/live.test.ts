@@ -77,3 +77,61 @@ test("failed attempts back off, and a 401 stops for good", async () => {
   expect(unauthorized).toBe(1);
   expect(attempts).toBe(4);
 });
+
+type Step = { kind: "fail" } | { kind: "status"; status: number } | { kind: "stream"; body: string };
+
+function scripted(steps: Step[]): { run: Promise<{ events: ServerEvent[]; states: [LiveState, string | undefined][]; waits: number[] }> } {
+  const events: ServerEvent[] = [];
+  const states: [LiveState, string | undefined][] = [];
+  const waits: number[] = [];
+  let index = 0;
+  let stop = (): void => undefined;
+  const run = new Promise<{ events: ServerEvent[]; states: [LiveState, string | undefined][]; waits: number[] }>((resolve) => {
+    stop = connectLive({
+      fetchImpl: async () => {
+        const step = steps[index++];
+        if (step === undefined || step.kind === "fail") throw new TypeError("Failed to fetch");
+        if (step.kind === "status") return new Response("{}", { status: step.status });
+        return new Response(stream(step.body), { status: 200 });
+      },
+      token: TOKEN,
+      onEvent: (event) => events.push(event),
+      onState: (state, problem) => states.push([state, problem]),
+      onUnauthorized: () => undefined,
+      wait: async (ms) => {
+        waits.push(ms);
+        if (waits.length >= steps.length) {
+          stop();
+          resolve({ events, states, waits });
+        }
+      },
+    });
+  });
+  return { run };
+}
+
+test("a line cut off by a dropped stream is never joined to the next stream", async () => {
+  const { run } = scripted([
+    { kind: "stream", body: 'event: hello\ndata: {"type":"hello","ver' },
+    { kind: "stream", body: 'sion":"9.9.9"}\n\nevent: digest\ndata: {"type":"digest","repoId":1,"digest":"d","at":2}\n\n' },
+  ]);
+  const { events } = await run;
+  expect(events).toEqual([{ type: "digest", repoId: 1, digest: "d", at: 2 }]);
+});
+
+test("failures double the wait up to 30 s, and an open stream resets it", async () => {
+  const fail: Step = { kind: "fail" };
+  const { run } = scripted([fail, fail, fail, fail, fail, fail, { kind: "stream", body: ": ping\n\n" }, fail]);
+  const { waits } = await run;
+  expect(waits).toEqual([3000, 6000, 12000, 24000, 30000, 30000, 3000, 6000]);
+});
+
+test("a 503 is down as busy; a refused connection or another status is unreachable", async () => {
+  const { run } = scripted([{ kind: "status", status: 503 }, { kind: "fail" }, { kind: "status", status: 500 }]);
+  const { states } = await run;
+  expect(states.filter(([state]) => state === "down")).toEqual([
+    ["down", "busy"],
+    ["down", "unreachable"],
+    ["down", "unreachable"],
+  ]);
+});

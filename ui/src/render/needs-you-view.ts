@@ -20,9 +20,14 @@ function routeOf(item: NeedsYouItem): Route {
 export function needsYouView(needs: Load<NeedsYouItem[]> | null): SafeHtml {
   const list = loadView(needs, "needs", (items) => {
     if (items.length === 0) return empty("Nothing needs you");
+    const seen = new Map<string, number>();
     return html`${items.map((item) => {
+      const { rule, subject } = item.finding;
+      const base = `needs:${item.repoId}:${rule}:${subject.kind}:${subject.id}`;
+      const count = (seen.get(base) ?? 0) + 1;
+      seen.set(base, count);
       const health: Health = item.finding.severity === "loses-work" ? "loses" : "action";
-      return html`<div class="row nrow h-${health}" role="button" tabindex="0" data-href="${routeHash(routeOf(item))}"><span class="tcell">${ICONS.health(health)}</span><span class="br"><b>${item.finding.title}</b><span class="mono subject">${item.finding.subject.id}</span><span class="why">${sentence(item.finding.detail)}</span></span><span class="when">${item.repoName}</span></div>`;
+      return html`<div class="row nrow h-${health}" role="button" tabindex="0" data-href="${routeHash(routeOf(item))}" data-key="${base}:${count}"><span class="tcell">${ICONS.health(health)}</span><span class="br"><b>${item.finding.title}</b><span class="mono subject">${item.finding.subject.id}</span><span class="why">${sentence(item.finding.detail)}</span></span><span class="when">${item.repoName}</span></div>`;
     })}`;
   });
   return html`${viewBar(html`<b>Needs you</b>`)}<div class="list">${list}</div>`;
