@@ -10,7 +10,7 @@ export type LinkedRoot = { path: string; id: { dev: bigint; ino: bigint } | null
  * resolves is kept as git lists it, with no identity. Throws GitError when git cannot list them.
  */
 export async function readLinkedRoots(cwd: string): Promise<LinkedRoot[]> {
-  const { stdout } = await runGit(["worktree", "list", "--porcelain"], { cwd });
+  const { stdout } = await runGit(["worktree", "list", "--porcelain", "-z"], { cwd });
   return Promise.all(
     parseWorktreeList(stdout)
       .slice(1)

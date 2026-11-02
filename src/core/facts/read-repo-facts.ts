@@ -187,7 +187,7 @@ export async function readRepoFacts(cwd: string): Promise<RepoFacts> {
   if (commonDir === undefined) throw new NotARepoError(`git-grove: not inside a git repository (${cwd})`);
   if (bare === "true") throw new BareRepoError();
 
-  const raws = parseWorktreeList((await runGit(["worktree", "list", "--porcelain"], { cwd })).stdout);
+  const raws = parseWorktreeList((await runGit(["worktree", "list", "--porcelain", "-z"], { cwd })).stdout);
   if (raws[0]?.bare) throw new BareRepoError();
   const root = raws[0]?.path;
   if (root === undefined) throw new NotARepoError(`git-grove: not inside a git repository (${cwd})`);

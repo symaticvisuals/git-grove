@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { readConfig } from "../../config/read-config.js";
+import { parseWorktreeList } from "../../git/parse-worktree-list.js";
 import { runGit } from "../../git/run-git.js";
 import { appCommand } from "../../open/app-command.js";
 import { launchDetached } from "../../open/launch-detached.js";
@@ -40,8 +41,8 @@ async function branchExists(root: string, branch: string): Promise<boolean> {
 }
 
 async function isRegistered(root: string, folder: string): Promise<boolean> {
-  const { stdout } = await runGit(["worktree", "list", "--porcelain"], { cwd: root, allowFailure: true });
-  return stdout.split("\n").includes(`worktree ${folder}`);
+  const { stdout } = await runGit(["worktree", "list", "--porcelain", "-z"], { cwd: root, allowFailure: true });
+  return parseWorktreeList(stdout).some((worktree) => worktree.path === folder);
 }
 
 async function leftBehind(root: string, level: NewLevel, written: string[], title: string, error: unknown): Promise<ExecuteResult> {

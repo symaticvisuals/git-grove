@@ -20,7 +20,7 @@ const sample = [
   "branch refs/heads/feat/old-banner",
   "prunable gitdir file points to non-existent location",
   "",
-].join("\n");
+].join("\0");
 
 test("parses main, detached, locked and prunable worktrees", () => {
   expect(parseWorktreeList(sample)).toEqual([
@@ -32,11 +32,16 @@ test("parses main, detached, locked and prunable worktrees", () => {
 });
 
 test("parses a bare entry and bare flags without reasons", () => {
-  const [bare, locked] = parseWorktreeList(["worktree /repos/app.git", "bare", "", "worktree /x", "HEAD abc", "detached", "locked", ""].join("\n"));
+  const [bare, locked] = parseWorktreeList(["worktree /repos/app.git", "bare", "", "worktree /x", "HEAD abc", "detached", "locked", ""].join("\0"));
   expect(bare).toEqual({ path: "/repos/app.git", head: null, branch: null, bare: true, detached: false, locked: false, prunable: false });
   expect(locked?.locked).toBe(true);
 });
 
 test("returns an empty list for empty output", () => {
   expect(parseWorktreeList("")).toEqual([]);
+});
+
+test("keeps a path that holds a newline whole", () => {
+  const [odd] = parseWorktreeList(["worktree /repos/odd\nname", "HEAD abc", "branch refs/heads/odd", ""].join("\0"));
+  expect(odd).toEqual({ path: "/repos/odd\nname", head: "abc", branch: "odd", bare: false, detached: false, locked: false, prunable: false });
 });

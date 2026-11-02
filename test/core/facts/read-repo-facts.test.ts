@@ -152,3 +152,14 @@ test("untracked files count even when status.showUntrackedFiles is no", async ()
   const facts = await readRepoFacts(repo.path);
   expect(facts.worktrees.find((w) => w.branch === "feat/a")?.changes?.untracked).toBe(1);
 });
+
+test("a worktree whose path holds a newline is read at its real path, with its changes", async () => {
+  const odd = join(repo.path, ".worktrees", "odd\nname");
+  await repo.worktree(odd, "feat/odd");
+  await writeFile(join(odd, "f.txt"), "edited\n");
+  const facts = await readRepoFacts(repo.path);
+  const worktree = facts.worktrees.find((candidate) => candidate.branch === "feat/odd");
+  expect(worktree?.path).toBe(await realpath(odd));
+  expect(worktree?.prunable).toBe(false);
+  expect(worktree?.changes).toEqual({ staged: 0, unstaged: 1, untracked: 0 });
+});
