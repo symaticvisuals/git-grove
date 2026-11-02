@@ -24,9 +24,7 @@ const SHELL = [
 
 async function page(request: Request): Promise<Response> {
   try {
-    const response = await fetch(request);
-    if (response.ok) await (await caches.open(CACHE)).put("/", response.clone());
-    return response;
+    return await fetch(request);
   } catch {
     return (await (await caches.open(CACHE)).match("/")) ?? Response.error();
   }

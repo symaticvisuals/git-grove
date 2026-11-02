@@ -70,6 +70,21 @@ test("serve keeps one old log: a server.log over 5 MB moves to server.log.1 when
   expect(await exited).toBe(75);
 });
 
+test("serve rotates the log before it starts, so a serve that cannot start, retried by its service, still rotates it", async () => {
+  const running = await startServer({ port: 0, home, version: "1" });
+  try {
+    const big = 5 * 1024 * 1024 + 1;
+    await writeFile(join(home, "server.log"), Buffer.alloc(big, 120));
+    const cli = io();
+    expect(await serveCommand(cli.io, { port: 0 })).toBe(0);
+    expect(cli.out.join("")).toContain("already running");
+    expect((await stat(join(home, "server.log.1"))).size).toBe(big);
+    expect((await stat(join(home, "server.log"))).size).toBe(0);
+  } finally {
+    await running.close();
+  }
+});
+
 test("serve leaves a server.log of 5 MB or less alone", async () => {
   await writeFile(join(home, "server.log"), "started\n");
   const cli = io();

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { groveHome } from "../../core/grove-home.js";
-import type { ServiceManager } from "../../core/service/service-manager.js";
+import type { ServiceManager, ServiceStatus } from "../../core/service/service-manager.js";
+import type { ServiceProgram } from "../../core/service/service-program.types.js";
 import { readOrCreateToken } from "../../server/auth/read-or-create-token.js";
 import { privateHome } from "../../server/private-home.js";
 import { ServerRunningError } from "../../server/server-running.error.js";
@@ -15,6 +16,7 @@ import { findServer } from "../find-server.js";
 import { isEphemeralBin } from "../is-ephemeral-bin.js";
 import { packageVersion } from "../package-version.js";
 import { serviceProgramOf } from "../service-program-of.js";
+import { waitForExit } from "../wait-for-exit.js";
 
 export type UiDeps = {
   service: ServiceManager;
@@ -22,30 +24,51 @@ export type UiDeps = {
   serveForeground(): Promise<Pick<RunningServer, "port" | "token">>;
   /** The absolute path of this CLI's `dist/cli/bin.js`, which a login service runs. */
   bin: string;
-  /** How long to wait for a server after a restart, an install or a start; 5 s by default. */
+  /** How long to wait for a server after an install or a start; 5 s by default. */
   waitMs?: number;
+  /** How long to wait for an older server asked to exit: for its service to start this version, or for it to stop; 15 s by default. */
+  restartWaitMs?: number;
 };
 
 const WAIT_MS = 5000;
+const RESTART_WAIT_MS = 15_000;
 
 function firstLine(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   return text.split("\n")[0] ?? text;
 }
 
-async function handOver(io: CliIo, home: string, info: ServerInfo, waitMs: number): Promise<ServerInfo | null> {
+function runsWanted(program: ServiceStatus["program"], wanted: ServiceProgram): boolean {
+  return program !== null && program.nodeExists && program.node === wanted.node && program.bin === wanted.bin && program.groveHome === wanted.groveHome;
+}
+
+async function installedService(deps: UiDeps): Promise<ServiceStatus | null> {
+  if ((await deps.service.support()) === null) return null;
+  const status = await deps.service.status();
+  return status.installed ? status : null;
+}
+
+async function handOver(io: CliIo, deps: UiDeps, home: string, info: ServerInfo): Promise<ServerInfo | null> {
   const version = packageVersion();
   if (compareVersions(info.version, version) >= 0) return info;
+  const service = await installedService(deps);
+  if (service !== null && service.program?.bin !== serviceProgramOf(deps.bin).bin) {
+    io.out(`The login service runs git grove ${info.version}. Run npm i -g git-grove to update it.\n`);
+    return info;
+  }
   if (!(await askServerToExit(info.port, await readOrCreateToken(home)))) return info;
   io.out(`Restarting git grove ${info.version} as ${version}\n`);
-  return findServer(home, { waitMs, except: info.pid });
+  const waitMs = deps.restartWaitMs ?? RESTART_WAIT_MS;
+  if (service !== null) return findServer(home, { waitMs, except: info });
+  await waitForExit(home, info, waitMs);
+  return null;
 }
 
 async function alignService(io: CliIo, deps: UiDeps, home: string): Promise<boolean> {
   if (isEphemeralBin(deps.bin) || (await deps.service.support()) === null) return false;
   const { installed, program } = await deps.service.status();
   const wanted = serviceProgramOf(deps.bin);
-  if (!installed || (program !== null && program.nodeExists && program.node === wanted.node && program.bin === wanted.bin)) return false;
+  if (!installed || runsWanted(program, wanted)) return false;
   try {
     await privateHome(home);
     await deps.service.install(wanted);
@@ -96,9 +119,12 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
 
 /**
  * Runs `git grove ui`: registers the repository around the current folder, makes sure a dashboard server runs and
- * opens it at the current worktree's feature. An installed login service that runs another copy of git grove, or a
- * Node that is gone, is rewritten to run this one. A server older than this CLI is asked to exit, so its login service
- * starts this version. With no server, the login service is installed (and says how to remove it) or started; on a
+ * opens it at the current worktree's feature. An installed login service that runs another copy of git grove, another
+ * grove folder, or a Node that is gone, is rewritten to run this one. A server older than this CLI is asked to exit
+ * only when no service is installed or the service runs this copy: the service then has 15 s to start this version
+ * before it is started, and with no service this one starts as soon as the old one has stopped. A service that runs
+ * another copy keeps its server, and `ui` says how to update it. With no server, the login service is installed
+ * (and says how to remove it) or started; on a
  * machine without launchd or systemd, or from an npx cache, the server runs in this process instead, until Ctrl-C.
  * The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`, or when that fails, the address is printed.
  */
@@ -108,7 +134,7 @@ export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   const target = await dashboardTarget(io.cwd, home);
   const updated = await alignService(io, deps, home);
   let info = await findServer(home, { waitMs: updated ? waitMs : 0 });
-  if (info !== null) info = await handOver(io, home, info, waitMs);
+  if (info !== null) info = await handOver(io, deps, home, info);
   if (info === null) info = await startService(io, deps, home, waitMs);
   const server = info === null ? await serveHere(io, deps, home, waitMs) : { port: info.port, token: await readOrCreateToken(home), foreground: false };
   const url = dashboardUrl(server.port, server.token, target);

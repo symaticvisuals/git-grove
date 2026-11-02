@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type InstalledProgram, installedProgram } from "./installed-program.js";
@@ -15,7 +15,8 @@ import { systemdUnit } from "./systemd-unit.js";
 export type ServiceKind = "launchd" | "systemd";
 
 /**
- * `file` is where this platform's agent or unit goes, or null on a platform with neither. `program` is what the
+ * `file` is where this platform's agent or unit goes, or null on a platform with neither. `loaded` is what the manager
+ * reports: the launchd job is loaded (bootstrapped), or the systemd unit is active (running). `program` is what the
  * installed file runs, and whether that Node still exists; null when nothing is installed or the file is not grove's.
  */
 export type ServiceStatus = {
@@ -62,7 +63,8 @@ async function writeWhole(path: string, text: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.${process.pid}.${randomUUID()}`;
   try {
-    await writeFile(temp, text, { flag: "wx" });
+    await writeFile(temp, text, { flag: "wx", mode: 0o644 });
+    await chmod(temp, 0o644);
     await rename(temp, path);
   } finally {
     await rm(temp, { force: true });
@@ -74,8 +76,9 @@ async function writeWhole(path: string, text: string): Promise<void> {
  * (`~/Library/LaunchAgents/work.grove.server.plist`, in `gui/<uid>`) on macOS when `launchctl print gui/<uid>` works,
  * a systemd user unit (`~/.config/systemd/user/git-grove.service`) on Linux when `systemctl --user show-environment`
  * works. Without either, `install` and `start` throw ServiceUnsupportedError and write nothing. `install` unloads any
- * old copy first, tries loading twice, and removes its file again when that fails (ServiceFailedError). `uninstall` unloads before
- * deleting, and deletes only its own file.
+ * old copy first, writes the file 0644 and tries loading twice; when that fails (ServiceFailedError) it puts back the
+ * file it replaced and loads that again, or removes its own when there was none. `uninstall` unloads before deleting,
+ * and deletes only its own file.
  */
 export function createServiceManager(host: ServiceHost): ServiceManager {
   let detected: Promise<Support> | null = null;
@@ -98,7 +101,12 @@ export function createServiceManager(host: ServiceHost): ServiceManager {
   };
   const systemctl = (...args: string[]): Promise<CommandResult> => host.run("systemctl", ["--user", ...args]);
 
+  const putBack = async (file: string, previous: string | null): Promise<void> => {
+    if (previous === null) await rm(file, { force: true });
+    else await writeWhole(file, previous);
+  };
   const installLaunchd = async (program: ServiceProgram): Promise<string> => {
+    const previous = await readFile(plist, "utf8").catch(() => null);
     const unloaded = (await host.run("launchctl", ["bootout", job])).code === 0;
     await writeWhole(plist, launchdPlist(program));
     try {
@@ -106,21 +114,24 @@ export function createServiceManager(host: ServiceHost): ServiceManager {
       if (first.code !== 0 && unloaded) await sleep(BOOTSTRAP_RETRY_MS);
       if (first.code !== 0) await must("launchctl", ["bootstrap", domain, plist]);
     } catch (error) {
-      await rm(plist, { force: true });
+      await putBack(plist, previous);
+      if (previous !== null) await host.run("launchctl", ["bootstrap", domain, plist]);
       throw error;
     }
     return plist;
   };
   const installSystemd = async (program: ServiceProgram): Promise<string> => {
     const text = systemdUnit(program);
-    if (existsSync(unit)) await systemctl("disable", "--now", SERVICE_NAMES.unit);
+    const previous = await readFile(unit, "utf8").catch(() => null);
+    if (previous !== null) await systemctl("disable", "--now", SERVICE_NAMES.unit);
     await writeWhole(unit, text);
     try {
       await must("systemctl", ["--user", "daemon-reload"]);
       await must("systemctl", ["--user", "enable", "--now", SERVICE_NAMES.unit]);
     } catch (error) {
-      await rm(unit, { force: true });
+      await putBack(unit, previous);
       await systemctl("daemon-reload");
+      if (previous !== null) await systemctl("enable", "--now", SERVICE_NAMES.unit);
       throw error;
     }
     return unit;

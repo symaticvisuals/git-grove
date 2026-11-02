@@ -106,7 +106,7 @@ test("service status says what is installed and where the dashboard runs", async
   const server = await startServer({ port: 0, home: groveHome, version: "1.2.3" });
   try {
     const unit = join(userHome, ".config", "systemd", "user", "git-grove.service");
-    expect((await service("status", fake)).out).toBe(`Login service: systemd, not loaded, ${unit}\nDashboard: http://127.0.0.1:${server.port}/ (git grove 1.2.3)\n`);
+    expect((await service("status", fake)).out).toBe(`Login service: systemd, not running, ${unit}\nDashboard: http://127.0.0.1:${server.port}/ (git grove 1.2.3)\n`);
   } finally {
     await server.close();
   }
@@ -133,5 +133,22 @@ test("service status says when the service runs another copy of git grove", asyn
   await createServiceManager(fake).install({ node: process.execPath, bin: "/old/copy/dist/cli/bin.js", groveHome, path: "/usr/bin", logFile: join(groveHome, "server.log") });
   expect((await service("status", fake)).out).toContain(
     "  it runs another copy of git grove (/old/copy/dist/cli/bin.js); git grove ui or git grove service install points it at this one\n",
+  );
+});
+
+test("service status says loaded for a bootstrapped launchd job and running for an active systemd unit", async () => {
+  const mac = host("darwin");
+  await service("install", mac);
+  expect((await service("status", mac)).out).toMatch(/^Login service: launchd, loaded, /);
+  const linux = host("linux");
+  await service("install", linux);
+  expect((await service("status", linux)).out).toMatch(/^Login service: systemd, running, /);
+});
+
+test("service status says when the service uses another grove folder", async () => {
+  const fake = host("linux");
+  await createServiceManager(fake).install({ node: process.execPath, bin: BIN, groveHome: "/somewhere/else", path: "/usr/bin", logFile: "/somewhere/else/server.log" });
+  expect((await service("status", fake)).out).toContain(
+    "  it uses another grove folder (/somewhere/else); git grove ui or git grove service install points it at this one\n",
   );
 });

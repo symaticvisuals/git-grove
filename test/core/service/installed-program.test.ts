@@ -14,10 +14,11 @@ const PROGRAM: ServiceProgram = {
 
 const ODD: ServiceProgram = { ...PROGRAM, node: `/a b/"n'o&d<e>"/50%/node`, bin: '/x/\\$HOME/"it"/bin.js' };
 
-test("the node and bin a written agent or unit runs are read back exactly", () => {
-  for (const program of [PROGRAM, ODD]) {
-    expect(installedProgram("launchd", launchdPlist(program))).toEqual({ node: program.node, bin: program.bin });
-    expect(installedProgram("systemd", systemdUnit(program))).toEqual({ node: program.node, bin: program.bin });
+test("the node, bin and GIT_GROVE_HOME a written agent or unit runs with are read back exactly", () => {
+  for (const program of [PROGRAM, ODD, { ...ODD, groveHome: '/h o/"me"/50%/\\$grove&<x>' }]) {
+    const expected = { node: program.node, bin: program.bin, groveHome: program.groveHome };
+    expect(installedProgram("launchd", launchdPlist(program))).toEqual(expected);
+    expect(installedProgram("systemd", systemdUnit(program))).toEqual(expected);
   }
 });
 

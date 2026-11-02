@@ -38,8 +38,8 @@ The service runs `node <git-grove>/dist/cli/bin.js serve`, starts it again if it
 `~/.git-grove/server.log`, which moves to `server.log.1` when the server starts and finds it over 5 MB. `ui` prints
 the file it wrote; `git grove service uninstall` unloads it and deletes that file. `npm install` never installs it.
 When you update git grove, the next `git grove ui` asks the older server to exit, and the service starts the new
-version. When the service runs another copy of git grove, or a Node that is no longer there, `ui` rewrites it to run
-this one and says so.
+version. When the service runs another copy of git grove, another grove folder, or a Node that is no longer there,
+`ui` rewrites it to run this one and says so; run from `npx`, it leaves the service alone and opens its server.
 
 ```sh
 git grove service install     # write and load the login service

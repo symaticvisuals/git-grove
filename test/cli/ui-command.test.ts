@@ -80,7 +80,7 @@ function fakeService(options: { kind: ServiceKind | null; installed?: boolean; o
     async status() {
       calls.push("status");
       const installed = options.installed ?? false;
-      return { kind: options.kind, installed, loaded: false, file, program: installed ? { node: process.execPath, bin: BIN, nodeExists: true } : null };
+      return { kind: options.kind, installed, loaded: false, file, program: installed ? { node: process.execPath, bin: BIN, groveHome: home, nodeExists: true } : null };
     },
   };
 }
@@ -252,12 +252,14 @@ test("a service that fails to install says why and serves in the foreground", as
   expect(run.foreground).toHaveLength(1);
 });
 
-test("a running server older than this CLI is asked to exit", async () => {
+test("with no service, a running server older than this CLI is asked to exit, and ui starts as soon as it has", async () => {
   const codes: number[] = [];
   await serve("0.0.1", (code) => codes.push(code));
-  const run = harness(fakeService({ kind: null }));
+  const run = harness(fakeService({ kind: null }), { restartWaitMs: 20_000 });
+  const startedAt = Date.now();
   const result = await ui(run.deps, home);
-  await vi.waitFor(() => expect(codes).toEqual([75]));
+  expect(Date.now() - startedAt).toBeLessThan(5_000);
+  expect(codes).toEqual([75]);
   expect(result.out).toContain(`Restarting git grove 0.0.1 as ${packageVersion()}`);
   expect(run.foreground).toHaveLength(1);
 });
@@ -303,8 +305,20 @@ test("git grove with no arguments runs ui, and ui takes no arguments", async () 
   expect(run1.opened).toHaveLength(1);
 });
 
-/** A macOS host on a temp home whose runner records commands; unloading the agent stops its server and loading it starts one, as launchd would. */
-function launchdHost(calls: string[]): ServiceHost {
+/** What the fake launchd runs: the version its job starts, how many more bootstraps fail, and each exit code it saw. */
+type LaunchdState = { version: string; failBootstraps: number; exits: number[] };
+
+/**
+ * A macOS host on a temp home whose runner records commands and acts as launchd would: unloading the agent stops its
+ * server, loading it starts one at `state.version`, and a server that exits non-zero is started again (KeepAlive).
+ */
+function launchdHost(calls: string[], state: LaunchdState = { version: packageVersion(), failBootstraps: 0, exits: [] }): ServiceHost {
+  const start = async (): Promise<void> => {
+    await serve(state.version, (code) => {
+      state.exits.push(code);
+      if (code !== 0) void start();
+    });
+  };
   return {
     platform: "darwin",
     home,
@@ -314,7 +328,11 @@ function launchdHost(calls: string[]): ServiceHost {
       const line = [cmd, ...args].join(" ");
       calls.push(line);
       if (line.startsWith("launchctl bootout")) await Promise.all(servers.splice(0).map((server) => server.close()));
-      if (line.startsWith("launchctl bootstrap")) await serve();
+      if (line.startsWith("launchctl bootstrap") && state.failBootstraps > 0) {
+        state.failBootstraps -= 1;
+        return { code: 5, stdout: "", stderr: "Bootstrap failed: 5: Input/output error\n" };
+      }
+      if (line.startsWith("launchctl bootstrap")) await start();
       return { code: 0, stdout: "", stderr: "" };
     },
   };
@@ -377,4 +395,82 @@ test("from an npx cache, an installed service for another copy is left alone", a
   const result = await ui(harness(service, { bin: "/x/_npx/1/node_modules/git-grove/dist/cli/bin.js" }).deps, home);
   expect(result.out).not.toContain("Updated the login service");
   expect(calls.filter((call) => /bootout|bootstrap/.test(call))).toEqual([]);
+});
+
+const OTHER_COPY = "/old/copy/dist/cli/bin.js";
+
+test("from npx, with the service on another copy, an older server is opened, not asked to exit, and ui says how to update it", async () => {
+  const calls: string[] = [];
+  const state: LaunchdState = { version: "0.0.1", failBootstraps: 0, exits: [] };
+  const service = createServiceManager(launchdHost(calls, state));
+  await service.install({ node: process.execPath, bin: OTHER_COPY, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  const old = servers[0];
+  const run = harness(service, { bin: "/x/_npx/1/node_modules/git-grove/dist/cli/bin.js", restartWaitMs: 500 });
+  const result = await ui(run.deps, home);
+  expect(state.exits).toEqual([]);
+  expect(servers).toEqual([old]);
+  expect(routeOf(run.opened[0] ?? "").token).toBe(old?.token);
+  expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${old?.port ?? 0}/`));
+  expect(result.out).toContain("The login service runs git grove 0.0.1. Run npm i -g git-grove to update it.\n");
+  expect(result.out).not.toContain("Restarting");
+  expect(run.foreground).toHaveLength(0);
+});
+
+test("when rewriting the service fails, its old copy is put back and its older server is opened, not asked to exit", async () => {
+  const calls: string[] = [];
+  const state: LaunchdState = { version: "0.0.1", failBootstraps: 0, exits: [] };
+  const service = createServiceManager(launchdHost(calls, state));
+  await service.install({ node: process.execPath, bin: OTHER_COPY, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  state.failBootstraps = 2;
+  const run = harness(service, { restartWaitMs: 500, waitMs: 2_000 });
+  const result = await ui(run.deps, home);
+  expect(result.err).toContain("launchctl bootstrap");
+  expect(await readFile(PLIST(), "utf8")).toContain(`<string>${OTHER_COPY}</string>`);
+  expect(state.exits.filter((code) => code === 75)).toEqual([]);
+  expect(result.out).toContain("The login service runs git grove 0.0.1. Run npm i -g git-grove to update it.\n");
+  expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${servers.at(-1)?.port ?? 0}/`));
+});
+
+test("with the service on this copy, an older server is asked to exit and the restart launchd makes is opened", async () => {
+  const calls: string[] = [];
+  const state: LaunchdState = { version: "0.0.1", failBootstraps: 0, exits: [] };
+  const service = createServiceManager(launchdHost(calls, state));
+  await service.install({ node: process.execPath, bin: BIN, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  const old = servers[0];
+  state.version = packageVersion();
+  calls.length = 0;
+  const run = harness(service, { restartWaitMs: 5_000 });
+  const result = await ui(run.deps, home);
+  expect(state.exits).toEqual([75]);
+  expect(result.out).toContain(`Restarting git grove 0.0.1 as ${packageVersion()}\n`);
+  expect(calls.filter((call) => /bootout|bootstrap|kickstart/.test(call))).toEqual([]);
+  const restarted = servers.at(-1);
+  expect(restarted).not.toBe(old);
+  expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${restarted?.port ?? 0}/`));
+  expect(run.foreground).toHaveLength(0);
+});
+
+test("when the service has not restarted an older server in time, ui starts the service", async () => {
+  const calls: string[] = [];
+  const state: LaunchdState = { version: "0.0.1", failBootstraps: 0, exits: [] };
+  const service = createServiceManager(launchdHost(calls, state));
+  await service.install({ node: process.execPath, bin: BIN, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  servers[0]?.context.shutdown(0);
+  await vi.waitFor(() => expect(state.exits).toEqual([0]));
+  await serve("0.0.1");
+  state.version = packageVersion();
+  calls.length = 0;
+  const run = harness(service, { restartWaitMs: 300 });
+  const result = await ui(run.deps, home);
+  expect(result.out).toContain("Restarting git grove 0.0.1");
+  expect(calls).toContain("launchctl kickstart gui/501/work.grove.server");
+});
+
+test("an installed service that uses another grove folder is rewritten to this one", async () => {
+  const calls: string[] = [];
+  const service = createServiceManager(launchdHost(calls));
+  await service.install({ node: process.execPath, bin: BIN, groveHome: "/somewhere/else", path: "/usr/bin", logFile: "/somewhere/else/server.log" });
+  const result = await ui(harness(service).deps, home);
+  expect(result.out).toContain("Updated the login service to this copy of git grove\n");
+  expect(await readFile(PLIST(), "utf8")).toContain(`<key>GIT_GROVE_HOME</key>\n    <string>${home}</string>`);
 });

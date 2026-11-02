@@ -24,8 +24,9 @@ function exitCode(error: Error): number {
   return "code" in error && error.code === "ENOENT" ? 127 : 1;
 }
 
-/** This machine, as the current user sees it. */
+/** This machine, as the current user sees it. Throws under vitest (`VITEST` set), where only a fake host belongs. */
 export function realServiceHost(): ServiceHost {
+  if (process.env["VITEST"] !== undefined) throw new Error("realServiceHost refuses to run under vitest; give the code under test a fake ServiceHost");
   const path = process.env["PATH"] ?? "";
   return {
     platform: process.platform,

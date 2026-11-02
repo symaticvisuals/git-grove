@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -184,13 +184,57 @@ test.each(["darwin", "linux"] as const)("on %s, status reads back the Node and b
   await writeFile(node, "");
   const manager = createServiceManager(fakeHost(platform));
   await manager.install({ ...PROGRAM, node });
-  expect((await manager.status()).program).toEqual({ node, bin: PROGRAM.bin, nodeExists: true });
+  expect((await manager.status()).program).toEqual({ node, bin: PROGRAM.bin, groveHome: null, nodeExists: true });
   await rm(join(home, "node-24"), { recursive: true });
-  expect((await manager.status()).program).toEqual({ node, bin: PROGRAM.bin, nodeExists: false });
+  expect((await manager.status()).program).toEqual({ node, bin: PROGRAM.bin, groveHome: null, nodeExists: false });
 });
 
 test("a file at the service's path that grove did not write has no program", async () => {
   await mkdir(dirname(PLIST()), { recursive: true });
   await writeFile(PLIST(), "<plist>not grove's</plist>");
   expect(await createServiceManager(fakeHost("darwin")).status()).toMatchObject({ installed: true, program: null });
+});
+
+test.each([
+  ["darwin", PLIST],
+  ["linux", UNIT],
+] as const)("on %s, the service file is written 0644", async (platform, file) => {
+  await createServiceManager(fakeHost(platform)).install(PROGRAM);
+  expect((await stat(file())).mode & 0o777).toBe(0o644);
+});
+
+/** Like fakeHost, but the first `times` commands starting with `prefix` exit 1, and everything else exits 0. */
+function failingFirst(platform: NodeJS.Platform, prefix: string, times: number): FakeHost {
+  let failed = 0;
+  const host = fakeHost(platform);
+  const record = host.run.bind(host);
+  return {
+    ...host,
+    async run(cmd, args) {
+      await record(cmd, args);
+      if (![cmd, ...args].join(" ").startsWith(prefix) || failed >= times) return { code: 0, stdout: "", stderr: "" };
+      failed += 1;
+      return { code: 1, stdout: "", stderr: "load failed\n" };
+    },
+  };
+}
+
+test("a reinstall whose bootstrap fails puts the previous agent back and loads it again", async () => {
+  await createServiceManager(fakeHost("darwin")).install(PROGRAM);
+  const before = await readFile(PLIST(), "utf8");
+  const host = failingFirst("darwin", "launchctl bootstrap", 2);
+  await expect(createServiceManager(host).install({ ...PROGRAM, bin: "/new/copy/dist/cli/bin.js" })).rejects.toBeInstanceOf(ServiceFailedError);
+  expect(await readFile(PLIST(), "utf8")).toBe(before);
+  expect(host.calls.filter((call) => call.startsWith("launchctl bootstrap"))).toHaveLength(3);
+  expect(host.calls.at(-1)).toBe(`launchctl bootstrap gui/501 ${PLIST()}`);
+  expect((await stat(PLIST())).mode & 0o777).toBe(0o644);
+});
+
+test("a reinstall whose enable fails puts the previous unit back and enables it again", async () => {
+  await createServiceManager(fakeHost("linux")).install(PROGRAM);
+  const before = await readFile(UNIT(), "utf8");
+  const host = failingFirst("linux", "systemctl --user enable", 1);
+  await expect(createServiceManager(host).install({ ...PROGRAM, bin: "/new/copy/dist/cli/bin.js" })).rejects.toBeInstanceOf(ServiceFailedError);
+  expect(await readFile(UNIT(), "utf8")).toBe(before);
+  expect(host.calls.slice(-2)).toEqual(["systemctl --user daemon-reload", "systemctl --user enable --now git-grove.service"]);
 });

@@ -33,6 +33,9 @@ function drift(program: ServiceStatus["program"], bin: string): string | null {
   const wanted = serviceProgramOf(bin);
   if (program.bin !== wanted.bin) return `  it runs another copy of git grove (${program.bin}); git grove ui or git grove service install points it at this one`;
   if (program.node !== wanted.node) return `  it runs another Node (${program.node}); git grove ui or git grove service install points it at this one`;
+  if (program.groveHome !== wanted.groveHome) {
+    return `  it uses another grove folder (${program.groveHome ?? "~/.git-grove"}); git grove ui or git grove service install points it at this one`;
+  }
   return null;
 }
 
@@ -41,7 +44,8 @@ async function status(io: CliIo, service: ServiceManager, bin: string): Promise<
   if (kind === null) io.out("Login service: none; this machine has no launchd or systemd user session\n");
   else if (!installed) io.out(`Login service: not installed (${kind}); install it with: git grove service install\n`);
   else {
-    io.out(`Login service: ${kind}, ${loaded ? "loaded" : "not loaded"}, ${file ?? ""}\n`);
+    const state = kind === "launchd" ? (loaded ? "loaded" : "not loaded") : loaded ? "running" : "not running";
+    io.out(`Login service: ${kind}, ${state}, ${file ?? ""}\n`);
     const problem = drift(program, bin);
     if (problem !== null) io.out(`${problem}\n`);
   }
@@ -53,8 +57,9 @@ async function status(io: CliIo, service: ServiceManager, bin: string): Promise<
 /**
  * Runs `git grove service install | uninstall | status`. `install` writes and loads the login service for `bin` and
  * says how to remove it; it exits 1, writing nothing, on a machine without launchd or systemd, from an npx cache,
- * or when loading fails. `uninstall` unloads and removes it. `status` says whether it is installed and loaded, whether
- * it runs this copy of git grove with a Node that still exists, and where the dashboard runs.
+ * or when loading fails. `uninstall` unloads and removes it. `status` says whether it is installed, whether launchd has
+ * it loaded or systemd has it running, whether it runs this copy of git grove, this grove folder and a Node that still
+ * exists, and where the dashboard runs.
  */
 export async function serviceCommand(io: CliIo, sub: ServiceSubcommand, deps: { service: ServiceManager; bin: string }): Promise<number> {
   if (sub === "install") return install(io, deps.service, deps.bin);
