@@ -17,7 +17,8 @@ import { errorLine } from "./error-line.js";
 import { holderIn } from "../facts/holder-in.js";
 import { InvalidInputError } from "./invalid-input.error.js";
 import { listPaths } from "./list-paths.js";
-import { parseRestoreTargets, type RestoreTargetInput } from "./parse-restore-targets.js";
+import { parseRestoreTargets } from "./parse-restore-targets.js";
+import { pinChoicePlan, type Unnamed } from "./pin-choice-plan.js";
 import type { Check, Expectation, Plan, RestoreTarget } from "./plan.types.js";
 import { readDirtyPaths } from "./read-dirty-paths.js";
 import { readLane } from "./read-lane.js";
@@ -48,9 +49,7 @@ async function mergeBase(cwd: string, one: Sha, other: Sha): Promise<Sha> {
   return result.code === 0 ? result.stdout.trim() : other;
 }
 
-async function readTarget(ctx: ActionContext, facts: RepoFacts, { branch, pinRef }: RestoreTargetInput): Promise<Read> {
-  const pin = pinRef ?? alertPin(ctx.store, facts, branch) ?? (await listPins(facts.root, branch))[0]?.ref;
-  if (pin === undefined) throw new InvalidInputError(`no pin found for ${branch}`);
+async function readTarget(facts: RepoFacts, branch: string, pin: string): Promise<Read> {
   const to = await resolveCommit(facts.root, pin);
   if (to === null) throw new InvalidInputError(`cannot resolve ${pin}`);
   const from = facts.branches.find((candidate) => candidate.name === branch)?.tip ?? null;
@@ -249,8 +248,23 @@ async function verify(root: string, results: Moved[], total: number): Promise<st
 async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   const targets = parseRestoreTargets(raw);
   const facts = await readRepoFacts(ctx.root);
+  const named: { branch: string; pin: string }[] = [];
+  const unnamed: Unnamed[] = [];
+  for (const { branch, pinRef } of targets) {
+    const pin = pinRef ?? alertPin(ctx.store, facts, branch);
+    if (pin !== undefined) {
+      named.push({ branch, pin });
+      continue;
+    }
+    const pins = await listPins(facts.root, branch);
+    if (pins.length === 0) throw new InvalidInputError(`no pin found for ${branch}`);
+    unnamed.push({ branch, pins });
+  }
+  if (unnamed.length > 0) {
+    return { plan: pinChoicePlan(facts, unnamed), execute: () => Promise.reject(new InvalidInputError("name a pin to restore")) };
+  }
   const reads: Read[] = [];
-  for (const target of targets) reads.push(await readTarget(ctx, facts, target));
+  for (const { branch, pin } of named) reads.push(await readTarget(facts, branch, pin));
   const plan = planOf(facts, reads, await lanesOf(facts, reads));
   const total = reads.reduce((sum, read) => sum + read.back, 0);
   const where = reads.length === 1 ? (reads[0]?.branch ?? "") : `${reads.length} branches`;
@@ -302,7 +316,8 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
 
 /**
  * Restores branches to pins: `{ targets: [{ branch, pinRef? }] }`, at least one. A target without a pin takes the pin
- * of its newest open alert, else its newest pin. A branch that still exists is pinned and moved back; a deleted one
- * is created at the pin, with nothing to pin and nothing to undo.
+ * of its newest open alert; with no open alert the plan is blocked and lists the branch's pins, since grove never
+ * guesses which past state was meant. A branch that still exists is pinned and moved back; a deleted one is created
+ * at the pin, with nothing to pin and nothing to undo.
  */
 export const restoreAction: ActionDef = { name: "restore", prepare };

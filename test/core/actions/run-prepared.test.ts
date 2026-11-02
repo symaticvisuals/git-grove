@@ -434,6 +434,28 @@ test("ack of a branch with no open alert is blocked", async () => {
   expect(plan.blockers).toEqual(["Nothing to acknowledge on main"]);
 });
 
+test("with no open alert and no pin named, restore is blocked and lists the pins rather than taking the newest", async () => {
+  await runPrepared(ctx, await prepareAction("ack", ctx, { branch: "feat" }), ignore);
+  const newer = (await repo.git("rev-parse", "main")).trim();
+  await repo.git("update-ref", "refs/grove/pins/feat/29991231T235900Z", newer);
+
+  const { plan } = await prepareAction("restore", ctx, restoreFeat);
+  expect(plan.title).toBe("Choose a pin for feat");
+  expect(plan.blockers).toEqual([
+    "No open alert says which pin to restore feat to; name one: git grove restore feat <pin-ref>",
+    `refs/grove/pins/feat/29991231T235900Z at ${newer.slice(0, 7)}, pinned 2999-12-31 23:59 UTC`,
+    expect.stringMatching(new RegExp(`^${pinRef} at [0-9a-f]{7}, pinned \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} UTC$`)),
+  ]);
+  expect(plan.commands).toEqual([`git grove restore feat refs/grove/pins/feat/29991231T235900Z`, `git grove restore feat ${pinRef}`]);
+  const receipt = await runPrepared(ctx, await prepareAction("restore", ctx, restoreFeat), ignore);
+  expect(receipt).toMatchObject({ ok: false, refused: true, title: "Not run" });
+  expect(await tip("feat")).toBe(squashed);
+
+  const named = await runPrepared(ctx, await prepareAction("restore", ctx, { targets: [{ branch: "feat", pinRef }] }), ignore);
+  expect(named.ok).toBe(true);
+  expect((await repo.git("rev-list", "--count", "main..feat")).trim()).toBe("3");
+});
+
 test("a malformed input is invalid", async () => {
   await expect(prepareAction("restore", ctx, { targets: [] })).rejects.toThrow("at least one");
   await expect(prepareAction("ack", ctx, { branch: 3 })).rejects.toThrow("branch");

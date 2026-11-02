@@ -4,7 +4,6 @@ import { holderIn } from "../facts/holder-in.js";
 import { countCommits } from "../git/count-commits.js";
 import { resolveCommit } from "../git/resolve-commit.js";
 import { runGit } from "../git/run-git.js";
-import { listPins } from "./list-pins.js";
 import { pin } from "./pin.js";
 import { RefusedError } from "./refused.error.js";
 
@@ -24,7 +23,7 @@ export type RestoreResult =
   | { kind: "created"; to: Sha; pinRef: string; commitsBack: number };
 
 /**
- * Moves `branch` back to a pin (default: its newest), after pinning its current tip, or creates it at the pin
+ * Moves `branch` back to the pin `target`, after pinning its current tip, or creates it at the pin
  * when the branch no longer exists. The caller holds the repo lock and read `facts` under it. Refuses if the branch
  * tip changes before the move (`beforeMove` is a test seam). Refuses, before pinning anything, while any worktree has
  * a rebase, merge, cherry-pick or bisect of the branch in progress, when the worktree holding the branch has
@@ -34,11 +33,9 @@ export type RestoreResult =
 export async function restoreHeld(
   facts: RepoFacts,
   branch: string,
-  pinRef?: string,
+  target: string,
   beforeMove?: () => Promise<void>,
 ): Promise<RestoreResult> {
-  const target = pinRef ?? (await listPins(facts.root, branch))[0]?.ref;
-  if (target === undefined) throw new RefusedError(`git-grove: no pin found for ${branch}`);
   const to = await resolveCommit(facts.root, target);
   if (to === null) throw new RefusedError(`git-grove: cannot resolve ${target}`);
   refuseMidOperation(facts, branch);

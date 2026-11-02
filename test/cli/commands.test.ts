@@ -172,6 +172,34 @@ test("restore records its receipt in Activity, and a background read afterwards 
   }
 });
 
+test("restore with no pin named and no open alert is blocked and lists the pins, newest first, instead of guessing", async () => {
+  await grove(["status"]);
+  const original = (await repo.git("rev-parse", "feat")).trim();
+  await squash();
+  const squashed = (await repo.git("rev-parse", "feat")).trim();
+  await grove(["status"]);
+  expect((await grove(["restore", "feat"])).code).toBe(0);
+  const pins = (await repo.git("for-each-ref", "--sort=-refname", "--format=%(refname) %(objectname)", "refs/grove/pins/feat")).trim().split("\n");
+  expect(pins.map((line) => line.split(" ")[1])).toEqual([squashed, original]);
+
+  const result = await grove(["restore", "feat"]);
+  expect(result).toMatchObject({ code: 3, err: "" });
+  const [newest = "", oldest = ""] = pins.map((line) => line.split(" ")[0] ?? "");
+  const stamp = /\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/.source;
+  expect(result.out).toMatch(
+    new RegExp(
+      [
+        "\\nBlocked",
+        "  ✖ No open alert says which pin to restore feat to; name one: git grove restore feat <pin-ref>",
+        `  ✖ ${newest} at ${squashed.slice(0, 7)}, pinned ${stamp}`,
+        `  ✖ ${oldest} at ${original.slice(0, 7)}, pinned ${stamp}\\n`,
+      ].join("\\n"),
+    ),
+  );
+  expect(result.out).toContain(`\nCommands\n  git grove restore feat ${newest}\n  git grove restore feat ${oldest}\n`);
+  expect((await repo.git("rev-parse", "feat")).trim()).toBe(original);
+});
+
 test("restore of a branch already at its pin is blocked and exits 3, as in the dashboard", async () => {
   await grove(["status"]);
   const tip = (await repo.git("rev-parse", "feat")).trim();
