@@ -1,5 +1,5 @@
 import { writeFileSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir, uptime } from "node:os";
@@ -36,8 +36,11 @@ async function lock(): Promise<void> {
   releases.push(await lockServer(home));
 }
 
-async function inode(): Promise<number> {
-  return (await stat(lockFile())).ino;
+/** A live process other than this one, so a lock it holds reads differently from one this process took. */
+const holder = process.ppid;
+
+async function lockNames(): Promise<string> {
+  return readFile(lockFile(), "utf8");
 }
 
 function portOf(listener: Server): number {
@@ -79,104 +82,94 @@ test("a free lock is taken", async () => {
 });
 
 test("a lock held by a live process whose port refuses is taken over", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid, port: await closedPort(), version: "0.0.1" });
-  const before = await inode();
+  await writeFile(lockFile(), String(holder));
+  writeServerFile(home, { pid: holder, port: await closedPort(), version: "0.0.1" });
   await lock();
-  expect(await inode()).not.toBe(before);
+  expect(await lockNames()).toBe(String(process.pid));
 });
 
 test("a lock held by a live process whose port answers as another process is taken over", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid, port: await fakeHealth(process.pid + 1), version: "0.0.1" });
-  const before = await inode();
+  await writeFile(lockFile(), String(holder));
+  writeServerFile(home, { pid: holder, port: await fakeHealth(holder + 1), version: "0.0.1" });
   await lock();
-  expect(await inode()).not.toBe(before);
+  expect(await lockNames()).toBe(String(process.pid));
 });
 
 test("a lock whose server answers as its holder stands", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  const port = await fakeHealth(process.pid);
-  writeServerFile(home, { pid: process.pid, port, version: "0.0.1" });
-  const before = await inode();
-  await expect(lockServer(home)).rejects.toMatchObject({ name: "ServerRunningError", port, pid: process.pid });
-  expect(await inode()).toBe(before);
+  await writeFile(lockFile(), String(holder));
+  const port = await fakeHealth(holder);
+  writeServerFile(home, { pid: holder, port, version: "0.0.1" });
+  await expect(lockServer(home)).rejects.toMatchObject({ name: "ServerRunningError", port, pid: holder });
+  expect(await lockNames()).toBe(String(holder));
 });
 
 test("a holder whose server does not answer within 1 s keeps its lock, and the caller is told to retry", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid, port: await silentPort(), version: "0.0.1" });
-  const before = await inode();
+  await writeFile(lockFile(), String(holder));
+  writeServerFile(home, { pid: holder, port: await silentPort(), version: "0.0.1" });
   const refused = lockServer(home);
   await expect(refused).rejects.toBeInstanceOf(ServerUnresponsiveError);
   await expect(refused).rejects.toThrow(`if no git grove server is running, delete ${lockFile()} and start again`);
-  expect(await inode()).toBe(before);
+  expect(await lockNames()).toBe(String(holder));
 });
 
 test("a fresh lock held by a live process that writes no server.json is not taken over", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  const before = await inode();
+  await writeFile(lockFile(), String(holder));
   const startedAt = Date.now();
   await expect(lockServer(home)).rejects.toThrow(
-    `git-grove: process ${process.pid} holds the server lock, but it has written no server.json; ` +
+    `git-grove: process ${holder} holds the server lock, but it has written no server.json; ` +
       `if no git grove server is running, delete ${lockFile()} and start again`,
   );
   expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1900);
-  expect(await inode()).toBe(before);
+  expect(await lockNames()).toBe(String(holder));
 });
 
 test("a lock written before the last boot is taken over without waiting or probing", async () => {
-  await writeFile(lockFile(), String(process.pid));
+  await writeFile(lockFile(), String(holder));
   const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
   await utimes(lockFile(), beforeBoot, beforeBoot);
-  const before = await inode();
   const startedAt = Date.now();
   await lock();
   expect(Date.now() - startedAt).toBeLessThan(1000);
-  expect(await inode()).not.toBe(before);
+  expect(await lockNames()).toBe(String(process.pid));
 });
 
 test("a lock that looks older than boot still stands while server.json names its holder and that server answers as it", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  const port = await fakeHealth(process.pid);
-  writeServerFile(home, { pid: process.pid, port, version: "0.0.1" });
+  await writeFile(lockFile(), String(holder));
+  const port = await fakeHealth(holder);
+  writeServerFile(home, { pid: holder, port, version: "0.0.1" });
   const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
   await utimes(lockFile(), beforeBoot, beforeBoot);
-  const before = await inode();
-  await expect(lockServer(home)).rejects.toMatchObject({ name: "ServerRunningError", port, pid: process.pid });
-  expect(await inode()).toBe(before);
+  await expect(lockServer(home)).rejects.toMatchObject({ name: "ServerRunningError", port, pid: holder });
+  expect(await lockNames()).toBe(String(holder));
 });
 
 test("a lock older than boot whose holder's port refuses is taken over at once", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid, port: await closedPort(), version: "0.0.1" });
+  await writeFile(lockFile(), String(holder));
+  writeServerFile(home, { pid: holder, port: await closedPort(), version: "0.0.1" });
   const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
   await utimes(lockFile(), beforeBoot, beforeBoot);
-  const before = await inode();
   const startedAt = Date.now();
   await lock();
   expect(Date.now() - startedAt).toBeLessThan(1000);
-  expect(await inode()).not.toBe(before);
+  expect(await lockNames()).toBe(String(process.pid));
 });
 
 test("a lock older than boot whose holder's port answers as another process is taken over", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid, port: await fakeHealth(process.pid + 1), version: "0.0.1" });
+  await writeFile(lockFile(), String(holder));
+  writeServerFile(home, { pid: holder, port: await fakeHealth(holder + 1), version: "0.0.1" });
   const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
   await utimes(lockFile(), beforeBoot, beforeBoot);
-  const before = await inode();
   await lock();
-  expect(await inode()).not.toBe(before);
+  expect(await lockNames()).toBe(String(process.pid));
 });
 
 test("a server still starting is waited for, and then refused", async () => {
-  await writeFile(lockFile(), String(process.pid));
-  writeServerFile(home, { pid: process.pid + 1, port: await closedPort(), version: "0.0.0" });
-  const before = await inode();
-  const port = await fakeHealth(process.pid);
-  setTimeout(() => writeServerFile(home, { pid: process.pid, port, version: "0.0.1" }), 200);
-  await expect(lockServer(home)).rejects.toMatchObject({ name: "ServerRunningError", port, pid: process.pid });
-  expect(await inode()).toBe(before);
+  await writeFile(lockFile(), String(holder));
+  writeServerFile(home, { pid: holder + 1, port: await closedPort(), version: "0.0.0" });
+  const port = await fakeHealth(holder);
+  setTimeout(() => writeServerFile(home, { pid: holder, port, version: "0.0.1" }), 200);
+  await expect(lockServer(home)).rejects.toMatchObject({ name: "ServerRunningError", port, pid: holder });
+  expect(await lockNames()).toBe(String(holder));
 });
 
 test("a lock that changes hands while it is checked is put back, not taken over", async () => {
@@ -206,10 +199,8 @@ test.each([
   ["garbage", "not a pid\n"],
 ])("a lock still %s after the grace is taken over", async (_name, text) => {
   await writeFile(lockFile(), text);
-  const before = await inode();
   const startedAt = Date.now();
   await lock();
   expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1900);
-  expect(await inode()).not.toBe(before);
   expect(await readFile(lockFile(), "utf8")).toBe(String(process.pid));
 });

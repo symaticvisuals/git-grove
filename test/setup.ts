@@ -5,7 +5,8 @@ import { afterAll } from "vitest";
 
 const dir = mkdtempSync(join(tmpdir(), "git-grove-config-"));
 const globalConfig = join(dir, "gitconfig");
-writeFileSync(globalConfig, "");
+// A user's own config names who they are; without it git on Linux has no committer for the commits grove rebases.
+writeFileSync(globalConfig, "[user]\n\tname = Test Author\n\temail = author@example.com\n");
 
 process.env["GIT_CONFIG_GLOBAL"] = globalConfig;
 process.env["GIT_CONFIG_NOSYSTEM"] = "1";

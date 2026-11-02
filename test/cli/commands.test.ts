@@ -902,7 +902,8 @@ test("a detached worktree whose folder is gone with nothing of its own can be pr
 
 test("check remove of an orphan-history worktree with a local commit exits 3 with a reason", async () => {
   const path = join(repo.path, ".worktrees", "pages");
-  await repo.git("worktree", "add", "--orphan", "-b", "gh-pages", path);
+  await repo.git("worktree", "add", "--detach", path);
+  await repo.git("-C", path, "switch", "--orphan", "gh-pages");
   await write(join(path, "index.html"), "docs\n");
   await repo.git("-C", path, "add", "index.html");
   await repo.git("-C", path, "commit", "-m", "publish docs");
