@@ -6,13 +6,14 @@ import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import { renderReceipt } from "../../../src/cli/render-receipt.js";
 import type { ActionContext } from "../../../src/core/actions/action.types.js";
-import type { Receipt, StepEvent } from "../../../src/core/actions/plan.types.js";
+import type { Check, Receipt, StepEvent } from "../../../src/core/actions/plan.types.js";
 import { InvalidInputError } from "../../../src/core/actions/invalid-input.error.js";
 import { readDirtyPaths } from "../../../src/core/actions/read-dirty-paths.js";
 import { prepareAction } from "../../../src/core/actions/registry.js";
 import { runPrepared } from "../../../src/core/actions/run-prepared.js";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { isAncestor } from "../../../src/core/git/is-ancestor.js";
+import { parseGitVersion } from "../../../src/core/git/require-git-version.js";
 import { observe } from "../../../src/core/journal/observe.js";
 import { openStore } from "../../../src/core/journal/open-store.js";
 import type { Store } from "../../../src/core/journal/store.types.js";
@@ -105,6 +106,13 @@ function restack(stash = false): { feature: string; stash: boolean } {
 
 function ignore(): void {}
 
+const [gitMajor, gitMinor] = parseGitVersion(execFileSync("git", ["--version"], { encoding: "utf8" }));
+
+/** The check for a level whose conflicts are predicted: `check` itself from git 2.40, "not checked" before it. */
+function predicted(check: Check): Check {
+  return gitMajor > 2 || gitMinor >= 40 ? check : { ok: true, text: check.text, why: "Conflicts not checked (needs git 2.40)" };
+}
+
 test("plan moves ui then email and leaves admin alone", async () => {
   await fixture();
   const { plan } = await prepareAction("restack", ctx, restack());
@@ -130,7 +138,7 @@ test("plan moves ui then email and leaves admin alone", async () => {
 test("a level whose new base moves in this run has its conflicts checked when it runs", async () => {
   await fixture();
   const { plan } = await prepareAction("restack", ctx, restack());
-  expect(plan.checks).toContainEqual({ ok: true, text: "02 feat/ui onto 01 feat/model", why: "1 commit, no conflicts expected" });
+  expect(plan.checks).toContainEqual(predicted({ ok: true, text: "02 feat/ui onto 01 feat/model", why: "1 commit, no conflicts expected" }));
   expect(plan.checks).toContainEqual({
     ok: true,
     text: "03 feat/email onto 02 feat/ui",
@@ -144,8 +152,8 @@ test("a level whose sibling moves first still has its conflict with their parent
   await drift("shared.txt", "model\ntwo\nthree\n");
   const { plan } = await prepareAction("restack", ctx, restack());
   expect(plan.moves).toEqual(["feat/ui", "feat/admin", "feat/email"]);
-  expect(plan.checks).toContainEqual({ ok: true, text: "02 feat/ui onto 01 feat/model", why: "1 commit, no conflicts expected" });
-  expect(plan.checks).toContainEqual({ ok: false, text: "02 feat/admin onto 01 feat/model", why: "conflicts likely in shared.txt" });
+  expect(plan.checks).toContainEqual(predicted({ ok: true, text: "02 feat/ui onto 01 feat/model", why: "1 commit, no conflicts expected" }));
+  expect(plan.checks).toContainEqual(predicted({ ok: false, text: "02 feat/admin onto 01 feat/model", why: "conflicts likely in shared.txt" }));
   expect(plan.checks).toContainEqual({
     ok: true,
     text: "03 feat/email onto 02 feat/ui",
@@ -157,7 +165,7 @@ test("the plan predicts a conflict on the first level that moves", async () => {
   await commitIn(folder("feat/ui"), "shared.txt", "ui\ntwo\nthree\n", "ui edits shared");
   await drift("shared.txt", "model\ntwo\nthree\n");
   const { plan } = await prepareAction("restack", ctx, restack());
-  expect(plan.checks).toContainEqual({ ok: false, text: "02 feat/ui onto 01 feat/model", why: "conflicts likely in shared.txt" });
+  expect(plan.checks).toContainEqual(predicted({ ok: false, text: "02 feat/ui onto 01 feat/model", why: "conflicts likely in shared.txt" }));
 });
 
 async function openAlerts(): Promise<string[]> {
