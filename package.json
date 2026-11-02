@@ -1,5 +1,5 @@
 {
-  "name": "git-grove",
+  "name": "@deepanshugoel/git-grove",
   "version": "0.1.0",
   "description": "Watches git worktrees and stacked branches, pins every tip it sees replaced, and stops a worktree removal that would lose work",
   "keywords": [
@@ -28,10 +28,14 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=24"
   },
   "scripts": {
+    "prebuild": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "tsc -p tsconfig.json && node scripts/build-ui.mjs",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/bin.js', 0o755)\"",
     "test": "vitest run",

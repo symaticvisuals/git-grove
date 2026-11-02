@@ -13,7 +13,7 @@ tarball="$(npm pack --pack-destination "$work" --silent | tail -n 1)"
 
 npm install --prefix "$work/prefix" --silent "$work/$tarball"
 export PATH="$work/prefix/node_modules/.bin:$PATH"
-installed="$work/prefix/node_modules/git-grove"
+installed="$work/prefix/node_modules/$(node -p 'require("./package.json").name')"
 for file in dist/ui/index.html dist/ui/app.js dist/ui/sw.js dist/ui/manifest.webmanifest dist/ui/icons/icon-512.png; do
   [ -f "$installed/$file" ] || { echo "expected $file in the installed package" >&2; exit 1; }
 done

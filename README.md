@@ -24,15 +24,22 @@ and needs no network. At the end it prints how to open the dashboard on the same
 
 ## Install
 
-git-grove is not on npm yet. From a clone of this repository:
-
 ```sh
-pnpm install && pnpm build && npm link
+npm i -g @deepanshugoel/git-grove
 git grove status
 ```
 
-`npm link` puts the `git-grove` bin on your `PATH`, and git runs it as `git grove`. Once the package is published,
-`npx git-grove status` will run it without installing, and `npm i -g git-grove` will install it.
+The package installs one command, `git-grove`, which git runs as `git grove`. To try it without installing:
+
+```sh
+npx @deepanshugoel/git-grove status
+```
+
+From a clone of this repository instead:
+
+```sh
+pnpm install && pnpm build && npm link
+```
 
 ## How it works
 

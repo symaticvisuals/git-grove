@@ -36,5 +36,3 @@ jobs:
       - run: npm install -g npm@^11.15.0
       - name: Stage the release for a maintainer's 2FA approval
         run: npm stage publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

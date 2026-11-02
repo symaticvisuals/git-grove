@@ -53,7 +53,7 @@ async function handOver(io: CliIo, deps: UiDeps, home: string, info: ServerInfo)
   if (compareVersions(info.version, version) >= 0) return info;
   const service = await installedService(deps);
   if (service !== null && service.program?.bin !== serviceProgramOf(deps.bin).bin) {
-    io.out(`The login service runs git grove ${info.version}. Run npm i -g git-grove to update it.\n`);
+    io.out(`The login service runs git grove ${info.version}. Run npm i -g @deepanshugoel/git-grove to update it.\n`);
     return info;
   }
   if (!(await askServerToExit(info.port, await readOrCreateToken(home)))) return info;
@@ -89,7 +89,7 @@ async function alignService(io: CliIo, deps: UiDeps, home: string): Promise<bool
 
 async function startService(io: CliIo, deps: UiDeps, home: string, waitMs: number): Promise<ServerInfo | null> {
   if (isEphemeralBin(deps.bin)) {
-    io.out("This git grove runs from an npx cache, so it installs no login service; for one, install it: npm i -g git-grove\n");
+    io.out("This git grove runs from an npx cache, so it installs no login service; for one, install it: npm i -g @deepanshugoel/git-grove\n");
     return null;
   }
   if ((await deps.service.support()) === null) {

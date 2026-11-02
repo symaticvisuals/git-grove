@@ -12,7 +12,7 @@ export type ServiceSubcommand = "install" | "uninstall" | "status";
 
 async function install(io: CliIo, service: ServiceManager, bin: string): Promise<number> {
   if (isEphemeralBin(bin)) {
-    io.err("git-grove: this git grove runs from an npx cache, which npm may clear; install it first: npm i -g git-grove\n");
+    io.err("git-grove: this git grove runs from an npx cache, which npm may clear; install it first: npm i -g @deepanshugoel/git-grove\n");
     return 1;
   }
   try {

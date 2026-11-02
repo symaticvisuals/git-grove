@@ -238,7 +238,7 @@ test("a bin under an npx cache never installs the service", async () => {
   expect(service.calls).not.toContain("install");
   expect(service.calls).not.toContain("start");
   expect(run.foreground).toHaveLength(1);
-  expect(result.out).toContain("npm i -g git-grove");
+  expect(result.out).toContain("npm i -g @deepanshugoel/git-grove");
   expect(result.out).toContain("Serving in the foreground; press Ctrl-C to stop");
 });
 
@@ -456,7 +456,7 @@ test("from npx, with the service on another copy, an older server is opened, not
   expect(servers).toEqual([old]);
   expect(routeOf(run.opened[0] ?? "").token).toBe(old?.token);
   expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${old?.port ?? 0}/`));
-  expect(result.out).toContain("The login service runs git grove 0.0.1. Run npm i -g git-grove to update it.\n");
+  expect(result.out).toContain("The login service runs git grove 0.0.1. Run npm i -g @deepanshugoel/git-grove to update it.\n");
   expect(result.out).not.toContain("Restarting");
   expect(run.foreground).toHaveLength(0);
 });
@@ -472,7 +472,7 @@ test("when rewriting the service fails, its old copy is put back and its older s
   expect(result.err).toContain("launchctl bootstrap");
   expect(await readFile(PLIST(), "utf8")).toContain(`<string>${OTHER_COPY}</string>`);
   expect(state.exits.filter((code) => code === 75)).toEqual([]);
-  expect(result.out).toContain("The login service runs git grove 0.0.1. Run npm i -g git-grove to update it.\n");
+  expect(result.out).toContain("The login service runs git grove 0.0.1. Run npm i -g @deepanshugoel/git-grove to update it.\n");
   expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${servers.at(-1)?.port ?? 0}/`));
 });
 
