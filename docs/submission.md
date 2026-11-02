@@ -164,18 +164,21 @@ Claude Code runs a `PreToolUse` hook before each Bash command, with the command 
 1. Read the line. `splitShellLine` and `readSimpleCommands` (`src/core/guard/`) split it on `&&`, `||`, `;`, `|` and
    newlines outside quotes, drop comments, redirections and here-document bodies, strip `VAR=value` and `env`, and
    follow the folder through `cd` and subshells; `parseGitCall` follows `git -C`. The commands inside `$( … )` and
-   backticks are read too, and run first, so Claude Code's `"$(cat <<'EOF' … EOF)"` commit form is no obstacle. A
-   command whose own paths or folder come from a variable, a substitution, a glob `cd` or a `GIT_DIR`-style prefix
-   cannot be checked, nor can a whole line with `eval` or `bash -c` around `git` or `rm`; either is allowed, with one
-   line saying so.
+   backticks are read too, and run first, so Claude Code's `"$(cat <<'EOF' … EOF)"` commit form is no obstacle. The
+   exceptions are a `$( … )` inside `${…}`, a `$((…) )` subshell and a `$( … )` in an unquoted here-document body,
+   which are not read (section 4). A command whose own paths or folder come from a variable, a substitution, a glob
+   `cd` or a `GIT_DIR`-style prefix cannot be checked, nor can a whole line with `eval` or `bash -c` around `git` or
+   `rm`, or a `case` inside a substitution; either is allowed, with one line saying so.
 2. Classify each simple command from its words alone (`classifyCommand`): a worktree removal, a recursive `rm`, a
    discard of uncommitted changes, a `checkout` whose operands git must sort into a commit and paths, a command whose
    tips should be pinned, one of grove's people-only commands, or nothing.
 3. Judge them in order; the first block wins. A worktree removal names its worktree the way git does, by a unique
    trailing folder name first, then by path (`findWorktree`), and asks `removalVerdict` about every worktree it would
    delete. A discard counts `git status --porcelain=v2 --untracked-files=no --ignore-submodules=all` entries in the
-   paths it names; unmerged paths count only for a discard of the whole tree, so git's conflict tools stay usable,
-   and a block during a merge, rebase, cherry-pick or revert names its `--abort`. Nothing is pinned until the whole
+   paths it names; unmerged paths count only for a discard of the whole tree, so git's conflict tools stay usable on
+   conflicted paths while `--ours`, `--theirs`, `-m` and `--conflict` on any other path are checked like any discard.
+   During a merge, rebase, cherry-pick or revert, a whole-tree block names its `--abort`, and a path block says to
+   name only the conflicted paths. Nothing is pinned until the whole
    line is allowed. Pins are taken without the repo lock: a pin only adds a ref, and `pin()` already copes with two
    processes creating one.
 4. Fail open. Stdin that is not the hook's JSON, any error inside grove, and a check past 3 s allow the command, with
@@ -323,7 +326,9 @@ What it does not handle yet:
   - ref moves with no pin: `git branch -f`/`-M`, `git checkout -B`, `git switch -C`, `git rebase --update-refs`,
     `git pull --rebase`, `git update-ref -d`, `git reflog expire`, `git gc --prune=now`;
   - `rm -r` of a folder holding whole repositories, run from outside them, and `rm -rf .git`, which takes the pins
-    with it.
+    with it;
+  - commands bash runs from three places the reader skips: a `$((…) )` subshell, a `$( … )` inside `${…}` such as
+    `${x:-$(…)}`, and a `$( … )` in an unquoted here-document body.
 
   A force push is pinned but not compared with the remote, and a detached HEAD gets no pin.
 - Commits that only a detached HEAD held, once that HEAD moves on. The removal verdict and the prunable rule count
@@ -331,7 +336,7 @@ What it does not handle yet:
 
 ## 5. What's built and what's next
 
-Built, with 1018 tests in 111 files (vitest against real temporary git repositories):
+Built, with 1024 tests in 111 files (vitest against real temporary git repositories):
 
 - the CLI: `status`, `restore`, `ack`, `pins list`, `check remove`, `new`, `add-level`, `restack`, `stack plan`,
   `rm [--rescue]`, `ui`, `serve`, `service install|uninstall|status`, `install-guard` and `guard --claude`;

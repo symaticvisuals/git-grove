@@ -46,7 +46,8 @@ pnpm install && pnpm build && npm link
 
 AI coding agents run git in many worktrees at once, and the commands that lose work succeed quietly. The agent guard
 is a Claude Code `PreToolUse` hook that reads each Bash command before it runs, through `&&`, `;`, `|`, quotes, `cd`,
-`git -C`, and the commands inside `$( … )` and backticks:
+`git -C`, and the commands inside `$( … )` and backticks (except those inside `${…}`, a `$((…) )` subshell or an
+unquoted here-document body, listed under "Not yet"):
 
 - `git worktree remove [--force]` is blocked unless the worktree is safe to remove, whether it is named by path or,
   as git allows, by its folder name alone. That is the verdict `git grove check remove` prints. `rm -r` of a worktree,
@@ -55,8 +56,10 @@ is a Claude Code `PreToolUse` hook that reads each Bash command before it runs, 
 - `git reset --hard`, `git checkout -f`, `git switch -f` or `--discard-changes`, `git checkout [<commit>] <paths>`
   (with or without `--`), `git checkout .` and `git restore <paths>` are blocked while there are uncommitted changes
   they would discard. To keep them, run `git stash` (or `git stash push -- <paths>`) on its own first, then retry.
-  During a merge, rebase, cherry-pick or revert, the block names the `--abort` that keeps your own changes instead.
-  Git's conflict tools, `--ours`, `--theirs`, `-m` and `--conflict`, are allowed.
+  During a merge, rebase, cherry-pick or revert, a blocked `reset --hard` or `checkout -f` names the `--abort` that
+  keeps your own changes instead, and a blocked path discard says to name only the conflicted paths. Git's conflict
+  tools, `--ours`, `--theirs`, `-m` and `--conflict`, are allowed on conflicted paths; on other paths they are checked
+  like any discard.
 - `git grove ack`, `git grove pins prune` and `git grove rm --force` are blocked, because those decisions are for
   people, also when run through `npx`, `pnpm dlx`, `bunx` or `node <git-grove>/dist/cli/bin.js`.
   `git grove rm --rescue` runs.
@@ -88,7 +91,8 @@ The guard fails open. When grove cannot check a command (input it cannot read, a
 support, or a check that takes more than 3 s, whose git calls it then stops), it allows the command and prints one
 line saying why. A command whose own paths or folder the guard cannot know, because they come from a variable, a
 `$( … )`, a glob `cd` or a `GIT_DIR`-style prefix, is allowed with `git grove cannot check this command`, as is a whole
-line that runs `eval` or `bash -c` around `git` or `rm`, or leaves a `$(` unclosed. Blocks and the pins the guard
+line that runs `eval` or `bash -c` around `git` or `rm`, leaves a `$(` unclosed, or holds a `case` inside a
+`$( … )`. Blocks and the pins the guard
 takes appear in the dashboard's activity, for repositories grove already knows, the next time it loads the activity.
 
 So that agents know what the guard expects, add this to your `CLAUDE.md`:
@@ -253,6 +257,9 @@ branch is. Errors print one line on stderr and exit 1; an action blocked by what
   - recording branch tips on each guard call. The watcher and `status` still journal them;
   - writing settings files. `install-guard` prints the hook, and you add it;
   - other agents' hook formats. Only Claude Code's `PreToolUse` hook is read;
+  - three places where bash runs a command that the guard does not read: a `$((…) )` subshell, which bash tells from
+    arithmetic by its `) )` close; a `$( … )` inside `${…}`, such as `${x:-$(…)}`; and a `$( … )` in the body of an
+    unquoted here-document (`<<EOF`);
   - wrappers the guard does not follow, which run whatever they wrap unchecked: `xargs rm -r`, `find … -delete`,
     `find … -exec rm -r`, `sudo`, `timeout` and `nice`;
   - git aliases, including ones defined inline with `git -c alias.x=…`;
