@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -37,4 +37,15 @@ test("release leaves a lock that no longer names this process", async () => {
   await release();
   expect(existsSync(lock)).toBe(true);
   expect(await readFile(lock, "utf8")).toBe("1");
+});
+
+test("a lock from before the last boot is held unless staleBeforeBoot is asked for", async () => {
+  await writeFile(lock, "1");
+  const old = new Date("2025-01-01T00:00:00Z");
+  await utimes(lock, old, old);
+  await expect(acquirePidLock(lock)).rejects.toBeInstanceOf(LockHeldError);
+  const release = await acquirePidLock(lock, { staleBeforeBoot: true });
+  expect(await readFile(lock, "utf8")).toBe(String(process.pid));
+  await release();
+  expect(await readdir(folder)).toEqual([]);
 });

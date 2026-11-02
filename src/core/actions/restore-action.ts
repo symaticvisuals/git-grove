@@ -122,9 +122,10 @@ function effectsOf(facts: RepoFacts, read: Read): string[] {
 
 function expectsOf(read: Read): Expectation[] {
   const tip: Expectation = { kind: "tip", branch: read.branch, sha: read.from };
-  if (read.from === null || read.holder === undefined) return [tip];
+  const pin: Expectation = { kind: "ref", ref: read.pinRef, sha: read.to };
+  if (read.from === null || read.holder === undefined) return [tip, pin];
   const { path, head, operation } = read.holder;
-  return [tip, { kind: "worktree", path, head, dirty: read.dirty, operation }];
+  return [tip, { kind: "worktree", path, head, dirty: read.dirty, operation }, pin];
 }
 
 function verifyTitle(total: number): string {

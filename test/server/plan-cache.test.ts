@@ -78,3 +78,18 @@ test("past max, the oldest untaken plan is dropped and taken plans still say tak
   expect(cache.take(second)).not.toBe("expired");
   expect(cache.take(third)).not.toBe("expired");
 });
+
+test("peek reports a plan without taking it", () => {
+  let clock = 0;
+  const cache = createPlanCache({ ttlMs: 100, now: () => clock });
+  const one = prepared("one");
+  const id = cache.put(3, one);
+  expect(cache.peek(id)).toEqual({ repoId: 3, prepared: one });
+  expect(cache.peek(id)).toEqual({ repoId: 3, prepared: one });
+  expect(cache.take(id)).toEqual({ repoId: 3, prepared: one });
+  expect(cache.peek(id)).toBe("taken");
+  expect(cache.peek("nope")).toBe("expired");
+  const late = cache.put(3, one);
+  clock = 200;
+  expect(cache.peek(late)).toBe("expired");
+});

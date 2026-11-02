@@ -1,9 +1,8 @@
-import { stat } from "node:fs/promises";
-import { uptime } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LockHeldError } from "../core/runner/lock-held.error.js";
 import { acquirePidLock } from "../core/runner/pid-lock.js";
+import { predatesBoot } from "../core/runner/predates-boot.js";
 import { probeHealth } from "./probe-health.js";
 import { readLockPid } from "./read-lock-pid.js";
 import { readServerFile } from "./read-server-file.js";
@@ -34,11 +33,6 @@ async function within<T>(deadline: number, read: () => T | null): Promise<T | nu
     value = read();
   }
   return value;
-}
-
-async function predatesBoot(path: string): Promise<boolean> {
-  const written = await stat(path).then((s) => s.mtimeMs, () => null);
-  return written !== null && written < Date.now() - uptime() * 1000;
 }
 
 function granted(release: Release | null, home: string, path: string): Release {

@@ -139,7 +139,7 @@ export async function runCreateLevel(level: NewLevel, run: RunContext): Promise<
     } else {
       await run.step(index, async () => {
         try {
-          await launchDetached(appCommand("editor", level.folder, await readConfig(), process.platform));
+          await launchDetached(appCommand("editor", level.folder, await readConfig(run.home), process.platform));
           return "Opened";
         } catch (error) {
           const line = `could not open the editor: ${errorLine(error)}`;

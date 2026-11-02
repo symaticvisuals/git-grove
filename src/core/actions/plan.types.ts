@@ -20,9 +20,10 @@ export type Choice = {
   health: "loses" | "fine" | "idle";
 };
 
-/** What a plan read and relies on. A `tip` with `sha` null expects the branch not to exist. */
+/** What a plan read and relies on. A `tip` with `sha` null expects the branch not to exist; a `ref` resolves to commit `sha`. */
 export type Expectation =
   | { kind: "tip"; branch: string; sha: Sha | null }
+  | { kind: "ref"; ref: string; sha: Sha }
   | { kind: "worktree"; path: string; head: Sha | null; dirty: string[]; operation: Operation | null }
   | { kind: "absent"; path: string };
 

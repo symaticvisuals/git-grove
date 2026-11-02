@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { readRepoFacts } from "../facts/read-repo-facts.js";
+import { groveHome } from "../grove-home.js";
 import { runGit } from "../git/run-git.js";
 import { pin } from "../runner/pin.js";
 import { RefusedError } from "../runner/refused.error.js";
@@ -8,6 +9,7 @@ import { withRepoLock } from "../runner/with-repo-lock.js";
 import type { ActionContext, ExecuteResult, Prepared } from "./action.types.js";
 import { checkExpectations } from "./check-expectations.js";
 import { errorLine } from "./error-line.js";
+import { lockedRefusal } from "./locked-refusal.js";
 import type { Plan, Receipt, StepEvent } from "./plan.types.js";
 import { StalePlanError } from "./stale-plan.error.js";
 
@@ -90,15 +92,14 @@ export async function runPrepared(
       });
     }
     const firstStep = plan.moves.length > 0 ? 2 : 1;
-    return { ...(await prepared.execute({ facts, pins, firstStep, step, skip })), refused: false };
+    const home = ctx.home ?? groveHome();
+    return { ...(await prepared.execute({ facts, pins, firstStep, home, step, skip })), refused: false };
   };
 
   const outcomeOf = (error: unknown): Outcome => {
     if (error instanceof RepoLockedError) {
-      return refused("Another grove action is running in this repo", [
-        `${error.lockPath} is held. Wait for that action to finish, then try again.`,
-        `If no grove action is running, remove ${error.lockPath} and try again.`,
-      ]);
+      const { title, lines } = lockedRefusal(error.lockPath);
+      return refused(title, lines);
     }
     if (error instanceof StalePlanError) return refused("Changed since you looked", error.mismatches);
     if (error instanceof RefusedError) return refused(`Refused: ${stepTitle()}`, [errorLine(error)]);

@@ -55,8 +55,8 @@ async function privateHome(home: string): Promise<void> {
 /**
  * Starts the dashboard server: makes `<home>` private (0700), takes `<home>/server.lock` (`lockServer`), listens on
  * 127.0.0.1 and `[::1]` at `port` (default 47683) or the next of 20 free on both, and records `{ pid, port, version }`
- * in `<home>/server.json`. `close` refuses new runs and waits for those in progress, then stops it, giving open
- * connections a second, and removes server.json and the lock.
+ * in `<home>/server.json`. `close` refuses new runs and waits up to 60 s for those in progress, then stops it, giving
+ * open connections a second, and removes server.json and the lock.
  */
 export async function startServer(options: StartServerOptions): Promise<RunningServer> {
   const home = options.home ?? groveHome();
@@ -74,7 +74,7 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     const snapshots = createSnapshots(opened, options.now);
     const liveHub = createHub({ snapshots, store: opened, ...options.watch });
     hub = liveHub;
-    const runs = createRuns(liveHub, opened);
+    const runs = createRuns({ hub: liveHub, store: opened, snapshots, home });
     const close = (): Promise<void> => {
       closing ??= (async () => {
         try {

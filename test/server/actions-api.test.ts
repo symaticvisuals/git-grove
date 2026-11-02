@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -13,6 +13,7 @@ import { type RunningServer, startServer } from "../../src/server/start-server.j
 import { serverRequest } from "../support/server-request.js";
 import { squashedFixture, type SquashedFixture } from "../support/squashed-fixture.js";
 import { type UiFixture, uiFixture } from "../support/ui-fixture.js";
+import { lockBlocksScan } from "../../src/server/live/lock-blocks-scan.js";
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 30_000 });
 
@@ -344,7 +345,8 @@ test("open starts the configured command with the worktree as its last argument;
   });
 });
 
-test("closing the server waits for the run in progress, which still records its receipt", async () => {
+/** A prepared plan whose own step waits until `finish` is called. */
+function gatedPlan(): { prepared: Prepared; finish: () => void } {
   let finish = (): void => undefined;
   const gate = new Promise<void>((resolve) => (finish = resolve));
   const plan: Plan = {
@@ -381,10 +383,19 @@ test("closing the server waits for the run in progress, which still records its 
       return { ok: true, title: "Waited for the gate", lines: [], undo: null };
     },
   };
+  return { prepared, finish };
+}
+
+async function startGated(): Promise<{ root: string; prepared: Prepared; finish: () => void }> {
+  const { prepared, finish } = gatedPlan();
   const root = server.context.snapshots.cached(repoId)?.facts.root ?? fixture.repo.path;
   const runId = server.context.runs.start(repoId, root, prepared);
   await vi.waitFor(() => expect(server.context.runs.get(runId)?.events).toContainEqual(expect.objectContaining({ index: 1, state: "running" })), WAIT);
+  return { root, prepared, finish };
+}
 
+test("closing the server waits for the run in progress, which still records its receipt", async () => {
+  const { root, prepared, finish } = await startGated();
   let closed = false;
   const closing = server.close().then(() => {
     closed = true;
@@ -400,5 +411,78 @@ test("closing the server waits for the run in progress, which still records its 
     expect(store.activity(repoId, 5).map((row) => row.title)).toContain("Waited for the gate");
   } finally {
     store.close();
+  }
+});
+
+test("a run asked for while the server stops is 503 and does not use up its plan", async () => {
+  const { planId } = await preview();
+  const { finish } = await startGated();
+  const closing = server.close();
+  await vi.waitFor(() => expect(server.context.runs.stopping).toBe(true), WAIT);
+  const stopping = { status: 503, body: { error: "git grove is stopping" } };
+  expect(await post("/api/actions", { planId })).toEqual(stopping);
+  expect(await post("/api/actions", { planId })).toEqual(stopping);
+  expect(server.context.plans.peek(planId)).not.toBe("taken");
+  finish();
+  await closing;
+});
+
+test("close stops waiting after its timeout when a git hook holds a run, and says so", async () => {
+  const marker = join(home, "hook-may-finish");
+  const hook = join(fixture.repo.path, ".git", "hooks", "reference-transaction");
+  await mkdir(join(hook, ".."), { recursive: true });
+  await writeFile(hook, `#!/bin/sh\ni=0\nwhile [ ! -e '${marker}' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i + 1)); done\n`);
+  await chmod(hook, 0o755);
+  const stderr = vi.spyOn(process.stderr, "write");
+  try {
+    const runId = await run((await preview()).planId);
+    await vi.waitFor(() => expect(server.context.runs.get(runId)?.events).toContainEqual(expect.objectContaining({ index: 1, state: "running" })), WAIT);
+    const started = Date.now();
+    await server.context.runs.close({ timeoutMs: 300 });
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(stderr.mock.calls.map(([chunk]) => String(chunk))).toContain("git-grove: stopping with 1 run(s) still in progress\n");
+    await writeFile(marker, "");
+    expect(await receiptOf(runId)).toMatchObject({ ok: true });
+  } finally {
+    await writeFile(marker, "");
+    stderr.mockRestore();
+    await rm(hook, { force: true });
+  }
+});
+
+test("a lock from before the last boot naming pid 1 neither holds back scans nor refuses a run", async () => {
+  const lock = join(fixture.repo.path, ".git", "grove.lock");
+  await writeFile(lock, "1\n");
+  const old = new Date("2025-01-01T00:00:00Z");
+  await utimes(lock, old, old);
+  expect(await lockBlocksScan(lock)).toBe(false);
+  const before = server.context.snapshots.cached(repoId)?.readAt ?? 0;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await server.context.hub.scan(repoId);
+  expect(server.context.snapshots.cached(repoId)?.readAt).toBeGreaterThan(before);
+
+  const receipt = await receiptOf(await run((await preview()).planId));
+  expect(receipt).toMatchObject({ ok: true, refused: false });
+  expect(await tip(LEVEL1)).toBe(pinned);
+  expect(existsSync(lock)).toBe(false);
+});
+
+test("new with open reads the editor from the server's home, not the default one", async () => {
+  const elsewhere = await mkdtemp(join(tmpdir(), "git-grove-other-home-"));
+  const script = "require('node:fs').writeFileSync(process.argv[1], process.argv[2])";
+  const right = join(home, "opened.txt");
+  const wrong = join(elsewhere, "opened.txt");
+  await writeFile(join(home, "config.json"), JSON.stringify({ editor: [process.execPath, "-e", script, right] }));
+  await writeFile(join(elsewhere, "config.json"), JSON.stringify({ editor: [process.execPath, "-e", script, wrong] }));
+  process.env["GIT_GROVE_HOME"] = elsewhere;
+  try {
+    const reply = await post("/api/plans", { repo: repoId, action: "new", input: { feature: "gift cards", env: false, open: true } });
+    expect(reply.status).toBe(200);
+    const receipt = await receiptOf(await run(text(record(reply.body)["planId"])));
+    expect(receipt).toMatchObject({ ok: true });
+    await vi.waitFor(async () => expect(await readFile(right, "utf8")).toContain(join(".worktrees", "gift-cards")), WAIT);
+    expect(existsSync(wrong)).toBe(false);
+  } finally {
+    await rm(elsewhere, { recursive: true, force: true });
   }
 });

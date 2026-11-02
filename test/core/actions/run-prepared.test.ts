@@ -153,6 +153,19 @@ test("a branch that moves after the plan is refused and nothing changes", async 
   expect(await listPins(repo.path)).toHaveLength(pins);
 });
 
+test("a pin repointed after the plan is refused at the check, before anything is pinned", async () => {
+  const prepared = await prepareAction("restore", ctx, restoreFeat);
+  const pins = await listPins(repo.path);
+  const pinned = (await repo.git("rev-parse", pinRef)).trim();
+  await repo.git("update-ref", pinRef, "main");
+
+  const receipt = await runPrepared(ctx, prepared, ignore);
+  expect(receipt).toMatchObject({ ok: false, refused: true, title: "Changed since you looked", pins: [], undo: null });
+  expect(receipt.lines).toEqual([`${pinRef} no longer points at ${pinned.slice(0, 7)}`]);
+  expect(await tip("feat")).toBe(squashed);
+  expect((await listPins(repo.path)).map((pin) => pin.ref)).toEqual(pins.map((pin) => pin.ref));
+});
+
 test("a deleted branch is restored at its pin, with nothing to pin and nothing to undo", async () => {
   await repo.git("worktree", "remove", worktree);
   await repo.git("branch", "-D", "feat");

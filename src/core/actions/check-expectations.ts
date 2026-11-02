@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import type { RepoFacts, Sha } from "../facts/facts.types.js";
+import { runGit } from "../git/run-git.js";
 import { displayPath } from "./display-path.js";
 import type { Expectation } from "./plan.types.js";
 import { readDirtyPaths } from "./read-dirty-paths.js";
@@ -8,9 +9,15 @@ function short(sha: Sha | null): string {
   return sha === null ? "nothing" : sha.slice(0, 7);
 }
 
+async function commitOf(root: string, ref: string): Promise<Sha | null> {
+  const result = await runGit(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], { cwd: root, allowFailure: true });
+  return result.code === 0 ? result.stdout.trim() : null;
+}
+
 /**
  * Compares the repository with what a plan read and returns one line per difference, such as
- * `feat moved: was f01aa41, now 9c2e0b1`, `src/x.ts changed in .worktrees/a` or `.worktrees/b now exists`.
+ * `feat moved: was f01aa41, now 9c2e0b1`, `refs/grove/pins/feat/… no longer points at f01aa41`,
+ * `src/x.ts changed in .worktrees/a` or `.worktrees/b now exists`.
  * A worktree whose head moved with a branch already reported is not reported again.
  */
 export async function checkExpectations(facts: RepoFacts, expects: Expectation[]): Promise<string[]> {
@@ -29,6 +36,11 @@ export async function checkExpectations(facts: RepoFacts, expects: Expectation[]
       if (expect.sha === null) lines.push(`${expect.branch} now exists`);
       else if (now === null) lines.push(`${expect.branch} was deleted`);
       else lines.push(`${expect.branch} moved: was ${short(expect.sha)}, now ${short(now)}`);
+      continue;
+    }
+
+    if (expect.kind === "ref") {
+      if ((await commitOf(facts.root, expect.ref)) !== expect.sha) lines.push(`${expect.ref} no longer points at ${short(expect.sha)}`);
       continue;
     }
 

@@ -10,6 +10,8 @@ export type PlanCache = {
   put(repoId: number, prepared: Prepared): string;
   /** The plan, once. Then `"taken"` until its ttl ends; `"expired"` past the ttl, or for an id it does not hold. */
   take(planId: string): CachedPlan | "expired" | "taken";
+  /** What `take` would return, without taking the plan. */
+  peek(planId: string): CachedPlan | "expired" | "taken";
 };
 
 const TTL_MS = 600_000;
@@ -58,6 +60,12 @@ export function createPlanCache(options: PlanCacheOptions = {}): PlanCache {
       const { plan } = entry;
       entry.plan = null;
       return plan;
+    },
+    peek(planId) {
+      dropExpired();
+      const entry = entries.get(planId);
+      if (entry === undefined) return "expired";
+      return entry.plan ?? "taken";
     },
   };
 }

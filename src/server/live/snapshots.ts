@@ -21,6 +21,8 @@ export type Snapshots = {
    */
   refresh(repoId: number, options?: { force?: boolean }): Promise<Snapshot>;
   cached(repoId: number): Snapshot | null;
+  /** Resolves once no read of the repository is running or queued, whether it succeeded or not. */
+  idle(repoId: number): Promise<void>;
   /** Why the last scan of the repository failed, or null when it succeeded. */
   error(repoId: number): string | null;
   /**
@@ -152,6 +154,11 @@ export function createSnapshots(store: Store, now: () => number = Date.now, read
     },
     refresh,
     cached: (repoId) => snapshots.get(repoId) ?? null,
+    async idle(repoId) {
+      for (let flight = flights.get(repoId); flight !== undefined; flight = flights.get(repoId)) {
+        await (flight.queued ?? flight.running).catch(() => undefined);
+      }
+    },
     error: (repoId) => failures.get(repoId)?.message ?? null,
     onRefresh(listener) {
       listeners.add(listener);

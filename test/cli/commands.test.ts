@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "vitest";
 import { run } from "../../src/cli/main.js";
+import { readRepoFacts } from "../../src/core/facts/read-repo-facts.js";
 import { openStore } from "../../src/core/journal/open-store.js";
+import { withRepoLock } from "../../src/core/runner/with-repo-lock.js";
 import type { JournalEntry } from "../../src/core/journal/store.types.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
 
@@ -287,6 +289,28 @@ test("status outside a repository exits 1 with exactly one line on stderr", asyn
   } finally {
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+test("restore while another grove action holds the repo lock refuses with the receipt wording and exits 1", async () => {
+  await grove(["status"]);
+  await squash();
+  await grove(["status"]);
+  const squashed = (await repo.git("rev-parse", "feat")).trim();
+  const { commonDir } = await readRepoFacts(repo.path);
+  const lock = join(commonDir, "grove.lock");
+
+  const result = await withRepoLock(commonDir, () => grove(["restore", "feat"]));
+  expect(result).toEqual({
+    code: 1,
+    out: [
+      "✖ Another grove action is running in this repo",
+      `  ${lock} is held. Wait for that action to finish, then try again.`,
+      `  If no grove action is running, remove ${lock} and try again.`,
+      "",
+    ].join("\n"),
+    err: "",
+  });
+  expect((await repo.git("rev-parse", "feat")).trim()).toBe(squashed);
 });
 
 test("restore with no pin exits 1 with one line on stderr", async () => {

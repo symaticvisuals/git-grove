@@ -44,6 +44,11 @@ function isOpenRequest(value: unknown): value is OpenRequest {
   return isRepoId(value["repo"]) && typeof value["path"] === "string" && (app === "editor" || app === "terminal");
 }
 
+function planGone(state: "expired" | "taken"): never {
+  if (state === "expired") throw new HttpError(410, "This preview expired; preview it again");
+  throw new HttpError(409, "This plan already ran");
+}
+
 async function isFolder(path: string): Promise<boolean> {
   return (await stat(path).catch(() => null))?.isDirectory() ?? false;
 }
@@ -52,7 +57,7 @@ async function isFolder(path: string): Promise<boolean> {
  * Adds the action routes. `POST /api/plans` `{ repo, action, input }` previews an action: 200 `{ planId, plan }`, or
  * 400 for input the action refuses, including a path that is not a worktree.
  * `POST /api/actions` `{ planId }` runs that plan once in the background: 202 `{ runId }`, 409 when it already ran,
- * 410 when it expired. `GET /api/runs/:id` is the run's plan, step events and receipt. `POST /api/scan` `{ repo? }`
+ * 410 when it expired, and 503 while the server stops, which leaves the plan to run later. `GET /api/runs/:id` is the run's plan, step events and receipt. `POST /api/scan` `{ repo? }`
  * starts a scan: 202. `POST /api/open` `{ repo, path, app }` starts the editor or terminal, without a shell, in `path`,
  * which must be one of the repository's worktrees (400); a launch that fails is a 500 with its message.
  */
@@ -75,10 +80,12 @@ export function registerActionRoutes(router: Router): void {
   router.post("/api/actions", async (req, ctx) => {
     const body = req.body;
     if (!isRunRequest(body)) throw new InvalidInputError("a run takes { planId }");
+    if (ctx.runs.stopping) throw new HttpError(503, "git grove is stopping");
+    const peeked = ctx.plans.peek(body.planId);
+    if (typeof peeked === "string") planGone(peeked);
+    const repo = findRepo(ctx, String(peeked.repoId));
     const cached = ctx.plans.take(body.planId);
-    if (cached === "expired") throw new HttpError(410, "This preview expired; preview it again");
-    if (cached === "taken") throw new HttpError(409, "This plan already ran");
-    const repo = findRepo(ctx, String(cached.repoId));
+    if (typeof cached === "string") planGone(cached);
     return { status: 202, body: { runId: ctx.runs.start(repo.id, repo.root, cached.prepared) } };
   });
 
