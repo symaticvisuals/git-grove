@@ -1,102 +1,320 @@
-# git-grove: submission outline
+# git-grove: the written submission
 
-The video has a 10-minute cap, but the brief's section ranges add up to 12–15 minutes. This plan fits 10:00.
+The brief asked for a solution to a real problem I have had, explained in four parts: the problem, the system design,
+the tradeoffs and the failure modes. This file is that explanation. [`README.md`](../README.md) has the install, the
+two-minute demo and the commands. The full design spec, including the parts I cut, is
+[`superpowers/specs/2026-11-01-git-grove-design.md`](superpowers/specs/2026-11-01-git-grove-design.md). Where the spec
+and the code differ, the code is right, and this file describes the code.
 
-| Section | Brief asks | Planned | Rubric line it serves |
-|---|---|---|---|
-| Problem framing | 2–3 min | 2:00 | Problem identification |
-| System design | 5–6 min | 4:00 (includes 1:30 of live demo) | Technical understanding |
-| Tradeoffs | 3–4 min | 2:30 | Scoping, self-awareness |
-| Failure modes | 2 min | 1:30 | Self-awareness |
+## 1. Problem framing
 
-## 1. Problem framing (2:00)
+### What happened
 
-**The moment (40 s).** On a client project I keep 4–10 git worktrees open at once, several with AI coding agents working in them, and features shipped as stacks of small PRs. In two months, three things happened and nothing failed loudly:
+On a client project I keep 4–10 git worktrees open at once, several with AI coding agents working in them, and ship
+features as stacks of small PRs. In two months, three things happened and nothing failed loudly:
 
-- A stack branch went from 16 commits to 1 in a rebase nobody ran on purpose. Tests passed, the code was identical, and a reviewer only found it by reading the reflog.
-- An agent's "clean up merged worktrees" pass removed 16 worktrees that were clean, pushed and merged, and deleted gitignored work that existed only inside them.
-- A stacking tool was one command away from force-pushing branches from other features, because it saw every branch it had ever touched as one stack.
+- A stack branch went from 16 commits to 1 in a rebase nobody ran on purpose. Tests passed, the code was identical,
+  and a reviewer only found it by reading the reflog.
+- An agent's "clean up merged worktrees" pass removed 16 worktrees that were clean, pushed and merged, and deleted
+  gitignored work that existed only inside them.
+- A stacking tool was one command away from force-pushing branches from other features, because it saw every branch
+  it had ever touched as one stack.
 
-A fourth, reproduced while designing this: put one stack level's worktree inside another's folder, leave an uncommitted file in the inner one, and a plain `git worktree remove` of the outer one (no `--force`) deletes both. Git only refuses on changed or untracked files, and the inner folder is ignored.
+A fourth, reproduced while designing this: put one stack level's worktree inside another's folder, leave an
+uncommitted file in the inner one, and a plain `git worktree remove` of the outer one (no `--force`) deletes both. Git
+only refuses on changed or untracked files, and the inner folder is ignored.
 
-**Why it's hard (60 s).**
+### Why it is hard
 
 1. Nothing fails. Git accepts every one of these operations. The signal is something missing, not an error.
-2. The state is scattered: worktrees, refs, reflogs, stack metadata in git config, ignored files, stashes, PRs. No single command shows it.
+2. The state is scattered: worktrees, refs, reflogs, stack metadata in git config, ignored files, stashes, PRs. No
+   single command shows it.
 3. "Clean" lies. `git status` says clean while the only copy of a seed file sits in an ignored folder.
-4. Normal work looks like damage. Rebases and amends rewrite history too. Alarm on every rewrite and people stop reading. Telling a rebase from a squash is the real problem.
-5. Agents act fast and in parallel, so protection has to sit in the agent's path, before the command runs, not in a report afterwards.
+4. Normal work looks like damage. Rebases and amends rewrite history too. Alarm on every rewrite and people stop
+   reading. Telling a rebase from a squash is the real problem.
+5. Agents act fast and in parallel. Full protection has to sit in the agent's path, before the command runs. git-grove
+   today catches the damage afterwards and keeps it recoverable; the guard that sits in the agent's path is next.
 
-**What it is and isn't (20 s).** Tools like Conductor and Claude Squad help you start parallel work in worktrees. Nothing I found watches whether that work is still intact. git-grove is a seatbelt, not an orchestrator: it watches automatically and acts only when asked.
+### What it is and is not
 
-## 2. System design (4:00)
+Tools like Conductor and Claude Squad help you start parallel work in worktrees. Nothing I found watches whether that
+work is still intact. git-grove is a seatbelt, not an orchestrator: it watches on its own and changes git only when
+you confirm a plan.
 
-**Shape (30 s).** Show the architecture diagram: four ways in (watcher, agent guard, CLI, dashboard server), one shared core, two places state lives (pins as git refs; a local SQLite journal). "Every door calls the same core, so the dashboard and the guard can never disagree about what's safe."
+## 2. System design
 
-**How it decides (1:00).**
+### The parts
 
-- Facts: what git says, in three tiers by cost. About four git processes per scan for the whole repo; per-worktree status only when that worktree changed. That's what makes 100 worktrees cheap.
-- Classifier: when a tip moves backwards, pin it first, compare only the branch's own commits, match by patch ID then by author, date and subject, then decide advanced, amended, rebased or rewritten. Show the measured table: rebase, conflict rebase and restack after a squash merge all read "rebased"; a 3-into-1 squash reads "rewritten (3)"; plain `git cherry` would have reported 2 lost changes on the restack.
-- Predicates and rules: predicates answer yes or no with reasons; rules turn them into findings with a severity and one action; the guard uses the same predicates.
+| Path | What it does |
+|---|---|
+| `src/core/git/run-git.ts` | The only code that runs git. Reads add `--no-optional-locks`; writes must say `write: true`. |
+| `src/core/facts/` | What git says, with no judgment: `read-repo-facts.ts` for the whole repository and each worktree, `read-removal-facts.ts` for what deleting one worktree could lose. |
+| `src/core/journal/` | `observe.ts` journals every branch tip change; `classify-tip-change.ts` decides what kind of change it was. |
+| `src/core/stacks/` | Stacks read from gh-stack's git config (`stackparent`, `stackforkpoint`, plus grove's `grovefeature`); `is-merged.ts` decides "merged". |
+| `src/core/rules/` | Ten rules in `registry.ts` turn facts and the journal into findings; `safe-to-remove.ts` is the removal verdict. |
+| `src/core/runner/` | Pins (`pin.ts`), the per-repo lock (`with-repo-lock.ts`) and the restore that moves a branch back. |
+| `src/core/actions/` | Eight actions (restore, ack, restack, new, add-level, copy-env, remove, cleanup) and `run-prepared.ts`, which runs any of them. |
+| `src/server/` | The local server: the gate (`auth/check-request.ts`), the watcher (`live/watch-repo.ts`), cached scans (`live/snapshots.ts`), live events (`live/hub.ts`) and previewed plans (`actions/plan-cache.ts`). |
+| `ui/src/` | The dashboard: plain TypeScript, bundled by esbuild, with no runtime dependencies. |
+| `src/cli/` | The commands. |
 
-**Three paths, live (1:30).** On the `git grove demo` repo:
+State lives in two places. Pins are git refs (`refs/grove/pins/<branch>/<UTC time>`). The journal of tip changes,
+acknowledgements and activity are in SQLite (`~/.git-grove/grove.db`, WAL mode, so the server and a CLI command can
+write at once). Everything on screen is recomputed from git on each scan.
 
-1. Squash a stack level. The dashboard shows "rewritten: 14 changes no longer present" within seconds; `git grove restore` brings them back.
-2. Ask a Claude Code agent to clean up merged worktrees. The guard blocks `git worktree remove --force` and tells the agent why; the agent runs `git grove rm --rescue`, and the seed file lands in the main checkout.
-3. Walk Projects → Features → the stack tree; point at drift, the parent-merged level, and the activity feed naming which agent session did what.
+### One core behind every door
 
-**Where state lives (30 s).** Git is the truth: everything on screen is recomputed from git on each scan. The database is memory: tip history and guard decisions. Pins are git refs, so deleting grove's database loses nothing.
+Every change grove makes goes through the same steps, whether it starts in the CLI or the dashboard:
 
-**Code moment (30 s).** Open one rule file (about 15 lines) and its test. "A new rule shows up in the CLI, the dashboard and the guard at once."
+```mermaid
+flowchart TD
+  cli["CLI: git grove restore, restack, rm ..."] --> prepare
+  dash["Dashboard: POST /api/plans"] --> prepare
+  prepare["prepare: read git and build a Plan<br/>checks, effects, exact commands,<br/>expectations, branches it will move, blockers"] --> review["You review it<br/>the CLI prints it, the dashboard opens a dialog"]
+  review --> lock["take grove.lock in the common git dir"]
+  lock --> check["step 0: read git again and check every expectation<br/>refuse with 'Changed since you looked' on any difference"]
+  check --> pin["step 1: pin the tip of every branch it will move"]
+  pin --> run["run the action's own steps, each reported live"]
+  run --> receipt["receipt, with an undo where one exists<br/>a partial receipt when it stops"]
+```
 
-## 3. Tradeoffs (2:30)
+An action is an `ActionDef` (`src/core/actions/action.types.ts`) whose `prepare` returns a `Plan` and an `execute`
+closure. `runPrepared` (`src/core/actions/run-prepared.ts`) does the rest:
 
-Each as: chose X over Y, because Z; I'd change my mind if W. Use the first five on video; the rest go in the README.
+- a plan with blockers runs nothing and says "Not run";
+- step 0 re-reads the repository under the lock and compares it with the plan's expectations: branch tips, pin refs,
+  each worktree's HEAD, uncommitted files and any operation in progress;
+- step 1 pins every branch in `moves`;
+- the action's steps run; a step that fails stops the run, and steps never reached are reported as skipped;
+- the receipt is recorded as activity. A run that stopped after moving something names what moved and offers undo
+  for it.
+
+The CLI runs the plan in its own process and exits 0 when done, 3 when the plan was blocked and 1 when it was refused
+or stopped. The dashboard previews with `POST /api/plans`, runs with `POST /api/actions`, and streams the steps over
+Server-Sent Events.
+
+Every door shares this core so that the CLI and the dashboard cannot disagree about what is safe, and a fix to a
+check lands everywhere at once. The same holds for findings: `status` and the dashboard's "Needs you" read the same
+`readSnapshot` and the same rules. The guard, when it is built, is meant to call the same removal verdict that
+`git grove check remove` exposes today.
+
+### How grove tells a rebase from a squash
+
+Every scan compares each branch tip with the last one it journaled (`src/core/journal/observe.ts`). A fast-forward is
+"advanced" and needs nothing more. Any other move pins the old tip first, then `classifyTipChange` compares only the
+branch's own commits:
+
+1. Own range. The old commits are `<old base>..<old tip>` and the new ones `<new base>..<new tip>`, where the base is
+   the merge base with the stack parent's tip, or with the trunk. Commits that belonged to the parent are never
+   counted, so a child restacked after its parent was squash-merged is not a rewrite.
+2. Patch ID. Each old commit is matched to a new one by `git patch-id --stable`. Every patch match is taken before any
+   other kind.
+3. Metadata. A commit still unmatched is matched by author email, author date and subject. This covers a rebase that
+   resolved a conflict, where the patch changed.
+4. A commit still unmatched is not lost when the new base gained a commit with its patch ID (it reached the trunk
+   another way), or when it is a `fixup!` or `squash!` commit whose target matched only by metadata (it was folded in).
+
+The result is amended (the base did not move, and only the tip commit changed), rebased (nothing lost) or rewritten
+(the commits that are lost, with the pin that keeps them). Only a rewrite alerts. These tests pin it, in
+`test/core/journal/classify-tip-change.test.ts`:
+
+- "rebase onto moved main is rebased, every commit matched by patch"
+- "rebase that resolved a conflict is rebased, the resolved commit matched by metadata"
+- "a child restacked after its parent was squash-merged is rebased"
+- "a commit cherry-picked to main and then dropped by a rebase onto main is rebased"
+- "fixup! and squash! commits folded by --autosquash are not lost"
+- "amending the tip with its message edited is amended"
+- "squashing three commits into one is rewritten with all three lost"
+- "dropping the middle commit is rewritten with that commit lost"
+- "a fixup! commit dropped by rebase -i while its target stays is lost"
+
+and, through the journal, "a squash after the baseline is one rewritten entry with three commits lost and a pin at
+the old tip" in `test/core/journal/observe.test.ts`. While designing this I checked plain `git cherry` on a throwaway
+repository: it reports a child restacked after its parent's squash merge as 2 changes lost. That check is recorded in
+the spec (6.3), not in a test.
+
+Deciding that a branch is merged, which drives "Parent merged", restack onto the trunk and the removal verdict, is a
+separate check (`src/core/stacks/is-merged.ts`). A branch is merged when it is an ancestor of the trunk, or when
+merging it into the trunk would leave the trunk's tree unchanged (`git merge-tree --write-tree`). Failing both, a
+trunk commit must carry, byte for byte, the patch of all the branch's changes since the merge base
+(`git patch-id --verbatim`, so whitespace counts), with no later trunk commit carrying its exact inverse. Tests in
+`test/core/stacks/read-stack-facts.test.ts`: "a squash-merged branch stays merged after the trunk edits the same
+lines", "a squash merge the trunk has since reverted is not merged", "a squash merge reverted, landed again and then
+edited by the trunk is merged", "a whitespace-only change that differs from the trunk's is not merged".
+
+### The removal verdict fails closed
+
+`git grove check remove`, `rm` and the dashboard's cleanup all use `safeToRemove` (`src/core/rules/safe-to-remove.ts`).
+A worktree is not safe when it has uncommitted or untracked files, commits that are neither pushed nor merged, commits
+only its detached HEAD reaches, stashes for its branch, another worktree or git repository inside it, or an ignored
+file with no byte-identical copy at the same path in the main worktree. A folder in main that leads back into a
+worktree, through a symlink or a firmlink, is not a copy: folders are compared by `(dev, ino)`
+(`src/core/facts/resolves-outside.ts`). A read that fails makes the verdict "unreadable", never "nothing found", and
+more than 2,000 ignored files make it refuse as too many to check. Tests in `test/core/rules/safe-to-remove.test.ts`,
+among them "a clean merged worktree holding .local/seed.sql is not safe", "a failed read is unreadable, never zero" and
+"a main folder that is a symlink into the worktree is the same file seen twice, not a copy".
+
+### What makes a dashboard action safe to click
+
+- The review shows the checks grove ran, what it will also do and the exact git commands.
+- The confirm button arms 400 ms after the plan is painted (`ui/src/dialogs/dialog-host.ts`), it confirms only the
+  plan id painted on it, and a repeated key event never confirms. Background re-previews pause while a dialog is open,
+  so the plan on screen is the one that runs.
+- The server keeps each previewed plan for 10 minutes under a random id, and a plan runs once: a second run is 409,
+  an expired one 410, which makes the dialog preview again and show the new plan without running it.
+- When it runs, step 0 refuses if anything the plan read has moved, step 1 pins first, and each ref move is a
+  compare-and-swap: `git update-ref <ref> <new> <old>`, or, for a checked-out branch, a re-read of the tip just
+  before `git reset --keep`.
+- The dashboard and the CLI take the same `grove.lock`, so they cannot act on one repository at once. Background scans
+  wait while it is held.
+- Undo in a receipt prepares the undo as a new plan and opens it for review. It never runs anything you have not seen.
+
+Tests: "a confirm before the arming delay is ignored, and a plan that replaces an armed one starts unarmed" and "a
+confirm whose painted plan id is not the dialog's plan is ignored" (`test/ui/dialog-state.test.ts`); "a held Enter,
+confirming again and again as the plan arrives, never runs a plan that was not armed"
+(`test/ui/dialog-effects.test.ts`); "the same plan cannot run twice; an unknown plan is expired", "two tabs running
+the same preview at once move the branch once", "a branch moved after the preview refuses the run and git is
+unchanged" and "with the CLI holding the repo lock, the dashboard run is refused" (`test/server/actions-api.test.ts`).
+
+### Why loopback and a header token, with no cookie
+
+The server listens on `127.0.0.1` and `[::1]` only, answers only a `Host` of `127.0.0.1`, `[::1]` or `localhost` with
+its port (which stops DNS rebinding), and needs the token from `~/.git-grove/token` in an `X-Grove-Token` header on
+every API and event request. A POST also needs a same-origin `Origin` and `Sec-Fetch-Site` when the browser sends
+them, and a JSON body. No response carries CORS headers, so a page on another origin cannot send that header.
+
+The first version used a cookie. Cookies are scoped by host, not by port, so a cookie for `127.0.0.1` would be sent to
+every server on `127.0.0.1:<any port>`, and holding it gave full control. So there is no cookie. `git grove ui` opens
+`http://127.0.0.1:<port>/#token=<token>`; a fragment is never sent to any server. The page checks that the token is 64
+lowercase hex characters, confirms it with one request, stores it in `localStorage` (scoped to the origin, port
+included), and removes it from the address. A link carrying a bad token cannot sign the page out. Live updates are read
+with `fetch` and a streaming body, because `EventSource` cannot send a header.
+
+The accepted cost: a program that later listens on a port grove has served on can read that port's `localStorage`.
+On a single-user machine that is accepted, and it is listed in the README. Tests: "no response sets a cookie", "a
+rebound Host is 421, even with the token header" and "no response carries Access-Control-Allow-Origin"
+(`test/server/start-server.test.ts`); "a token in the query string does not stand in for the header"
+(`test/server/check-request.test.ts`); "a token the server refuses leaves the stored one in place"
+(`test/ui/adopt-token.test.ts`).
+
+### Finding out quickly
+
+The dashboard server (`git grove serve`, kept running at login by a launchd agent or a systemd user unit) watches each
+repository's git folder with `fs.watch`: refs, packed-refs, reflogs, each worktree's HEAD and index. It scans 300 ms
+after the last change, or 2 s into a continuous burst, and every 30 s regardless. A scan journals, re-reads the
+repository and evaluates the rules; the server then pushes a digest and any new activity to every open dashboard
+over Server-Sent Events. A page asking for a view gets the cached scan, and a cache older than 2 s starts one
+background refresh.
+
+## 3. Tradeoffs
+
+Each row: what I chose, over what, why, and what would change my mind.
 
 | Decision | Instead of | Because | I'd change my mind if |
 |---|---|---|---|
-| Call the git CLI | a library (isomorphic-git, libgit2 bindings) | behaves exactly like the user's git, worktrees and config included; no native module, so `npx` just works | a full scan passed 1 s at 100 worktrees; then a long-lived `git cat-file --batch` process |
-| Pins as git refs | storing old tips in grove's DB | the safety net survives grove's own bugs and a deleted DB | refs grew into the thousands and slowed git; then pack them or expire sooner |
-| Own commit range + patch ID + metadata | plain ancestry, or `git cherry` | ancestry alarms on every rebase; `git cherry` alarms on restacks (measured) | "mark as intended" was needed more than a few times a week |
-| Watch automatically, act only when asked | auto-restack and auto-clean | every incident was a tool acting on its own | plans ran clean dozens of times; then offer one-click runs for the boring ones |
-| Guard fails open | failing closed | a grove bug must never stop an agent's ordinary work | the guard proved reliable; then fail closed for `worktree remove --force` and `push --force` only |
-| A login service (launchd/systemd), installed by the first `git grove ui` | a server that runs only while the dashboard is open | rewrites happen while nobody is looking; the watcher and notifications only help if they are already running | people objected to something running at login; then fall back to on-demand `git grove ui` plus reflog catch-up |
-| No network in the guard | fetching remote state | it runs before every agent command and must answer in 200 ms | stale remote data caused a wrong verdict |
-| `node:sqlite` | JSON files, or better-sqlite3 | several writers at once need WAL; built in, so no native build | Node's SQLite API changed under us |
+| Call the git CLI | a library (isomorphic-git, libgit2 bindings) | it behaves exactly like the user's git, worktrees and config included, and there is no native module to build | a scan of 100 worktrees took more than a second; then a long-lived `git cat-file --batch` and status cached by HEAD and index mtime |
+| Pins as git refs | old tips stored in grove's database | the safety net survives grove's own bugs and a deleted database, and plain git can see it | pins grew into the thousands and slowed git; then `pins prune` (next) |
+| Own commit range, then patch ID, then metadata | plain ancestry, or `git cherry` | ancestry alarms on every rebase; `git cherry` reported a restack as lost work | "Keep the squash" was needed more than a few times a week |
+| Verbatim, revert-aware squash check | `merge-tree` alone | a squash merge the trunk later edited no longer merges cleanly, and a reverted one is not merged | wrong "merged" verdicts appeared; then also ask GitHub for the PR's state |
+| Watch on its own, change git only on a confirmed plan | auto-restack and auto-clean | every incident was a tool acting on its own | plans ran clean dozens of times; then offer one-click runs for the boring ones |
+| Re-check the plan when it runs, and refuse on any difference | run what was previewed | what you confirmed is what runs | refusals on harmless differences became common; then re-plan and show what changed |
+| A login service, installed by the first `git grove ui` | a server only while the dashboard is open | rewrites happen while nobody is looking, and the watcher only helps if it is running | people objected to something running at login; then on-demand `ui` plus reflog catch-up |
+| No cookie: token in the URL fragment, then `localStorage`, sent as a header | a session cookie | a cookie for `127.0.0.1` reaches every local server, whatever its port | the machine had several users; then a per-launch token and a fresh port |
+| `fs.watch` with a debounce, plus a 30 s poll | polling only | a squash shows within a second or two, and the poll covers missed events and folders that cannot be watched | `fs.watch` proved unreliable on a platform; then a shorter poll there |
+| `node:sqlite` in WAL mode | JSON files, or better-sqlite3 | the server and the CLI write at once; it is built in, so no native build | Node's SQLite API changed under us |
+| Plain TypeScript and esbuild for the dashboard | React and Vite, as the spec suggested | zero runtime dependencies, one small bundle, and a CSP with no inline script or style | the dashboard grew past what hand-written rendering keeps tidy |
+| The guard fails open (next) | failing closed | a grove bug must never stop an agent's ordinary work | the guard proved reliable; then fail closed for `worktree remove --force` and `push --force` only |
 
-## 4. Failure modes (1:30)
+Smaller calls, each with its cost:
 
-Pick four for the video.
+- `rm` re-checks the worktree right before `git worktree remove`. An ignored file written in the milliseconds between
+  the two is lost.
+- Repositories inside dependency and build folders (`node_modules`, `.venv` and the like) are not looked for, because
+  walking them would blow the 2,000-file cap. An edited `pip install -e` clone under `.venv/src` can be removed with
+  its local commits.
+- `serve` takes over a server lock whose holder does not answer its health check within 1 s. If the holder is only
+  slow, two servers run for about a second.
+- `ui` rewrites the service file at grove's own path even when grove did not write it. A hand-edited unit there is
+  replaced.
+- Every scan runs `git status` in every worktree. It is simple and correct, and it is the first thing to cache when a
+  repository has a hundred worktrees.
 
-| What breaks | What grove does |
-|---|---|
-| Grove wasn't running when history was rewritten | Reads reflogs on startup, classifies, pins, marks the finding "found later" |
-| Grove's database is deleted or corrupt | Nothing is lost: pins are git refs. Grove rebuilds from git and starts a new journal |
-| An agent is mid-rebase while grove scans or you click an action | Scans are read-only with `--no-optional-locks`; actions refuse that worktree and say why |
-| The guard itself crashes | Allows the command, prints a one-line warning, logs the failure |
-| The classifier is wrong (split commits, reworded during a conflict) | Raises a rewrite; you mark it as intended; nothing is changed |
-| A plan stops halfway | The worktree shows "rebase in progress" with continue and abort; grove never guesses |
-| `gh` missing or rate-limited | PR columns say unavailable or show their age; everything else works |
+## 4. Failure modes
 
-## 5. The repo reviewers will open
+What grove does today when something goes wrong, and the test that shows it.
 
-- `README.md`: the problem in four lines, a 30-second GIF of the guard blocking an agent, install (`npx git-grove`), how it works (the diagram), limitations, what's next.
-- `docs/superpowers/specs/2026-11-01-git-grove-design.md`: the full design.
-- `git grove demo`: lets a reviewer reproduce both incidents in two minutes without a real repo.
-- Tests named after behaviour: "a rebase that resolved a conflict is not a rewrite", "a merged worktree with a precious ignored file is not safe to remove".
-- Every name and file in fixtures and demo is invented.
+| What breaks | What grove does | Shown by |
+|---|---|---|
+| `grove.db` is deleted | No commit is lost: pins are refs, and `pins list` reads them from git. The journal starts again, so the next scan only records tips and open alerts are gone. `restore <branch>` without a pin ref then takes the branch's newest pin, which may not be the one you meant; name the pin from `pins list`. | `test/core/runner/pin.test.ts`, "listPins returns newest first and filters by branch". No test deletes the database; I checked the rest by hand on the demo repository. |
+| `grove.db` is corrupt, or grove's folder is unusable | Every command prints one line and exits 1, before it changes anything in git. | `test/cli/commands.test.ts`, "an unusable grove home or a corrupt grove.db exits 1 with one line" and "restore opens the store before it moves the branch" |
+| A branch moved after you looked at the plan | The run refuses with "Changed since you looked". Nothing is pinned or moved. | `test/core/actions/run-prepared.test.ts`, "a branch that moves after the plan is refused and nothing changes" and "a branch that moves between the check and the move is refused and left where it is" |
+| A plan stops halfway | A partial receipt names what moved and offers undo for it; steps never reached are shown as skipped. A restack keeps the levels it finished. | `test/core/actions/run-prepared.test.ts`, "a target that fails after an earlier one moved stops, names what moved and offers it as undo"; `test/core/actions/restack-action.test.ts`, "a conflict on level 03 stops there and keeps level 02 done" |
+| A lock is left by a crash or a reboot | A repo lock naming a dead process, or written before the last boot, is taken over. Scans stop honouring a lock older than 15 minutes. | `test/core/runner/with-repo-lock.test.ts`, "a lock whose pid no longer runs is taken over" and "a lock written before the last boot is taken over even when its pid answers, as pid 1 does"; `test/server/lock-blocks-scan.test.ts`, "a lock older than 15 minutes does not block" |
+| The server is down | A dashboard opened before loads from the service worker's cache and says "git grove isn't running. Start it with git grove ui." | `test/ui/sw-route.test.ts`, "a navigation to / is the page; other navigations go straight to the network"; `test/ui/api.test.ts`, "a rejected fetch becomes status 0 with "git grove isn't running"" |
+| A key is held down on a review | Nothing confirms. Repeated key events are ignored, and confirm needs the plan armed. | `test/ui/keys.test.ts`, "a held key repeats no shortcut and no Enter; the palette's arrows still repeat"; `test/ui/dialog-effects.test.ts`, "a held Enter, confirming again and again as the plan arrives, never runs a plan that was not armed" |
+| Two tabs, or the CLI and a tab, act at once | One plan runs once; the second actor is refused by the repo lock. | `test/server/actions-api.test.ts`, "two tabs running the same preview at once move the branch once" and "with the CLI holding the repo lock, the dashboard run is refused" |
+| An agent is mid-rebase while grove scans or you act | Scans only read, with `--no-optional-locks`. Actions on that branch or worktree refuse and say why. | `test/core/git/run-git.test.ts`, "reads carry --no-optional-locks and writes do not"; `test/core/runner/restore.test.ts`, "restore refuses when the worktree holding the branch is mid-merge, and pins nothing" |
+| A squash was deliberate, or the classifier is wrong | The alert stays until you restore the branch or keep the squash (`ack`); nothing changes in git. | `test/cli/commands.test.ts`, "ack dismisses a deliberate squash" |
+| grove cannot read part of a worktree | The removal verdict says unreadable and refuses. | `test/core/rules/safe-to-remove.test.ts`, "a failed read is unreadable, never zero" and "an ignored file grove cannot inspect is unreadable, not skipped" |
+| A rescued file changes after its copy was checked | The removal stops and the folder stays. | `test/core/actions/remove-actions.test.ts`, "E2: a rescued file edited after its copy was checked stops the removal, and the folder stays" |
+| A watched repository's folder is deleted | It stays listed with its error; the other repositories carry on. | `test/server/hub.test.ts`, "a deleted repo folder publishes one scan-error and keeps the project listed" |
+
+What it does not handle yet:
+
+- Rewrites while grove was off, beyond the tip diff. The server scans every repository when it starts, so with the
+  login service such a change is found at login, or at the next `status`. That scan sees one move, from the last tip
+  grove saved to the current one, and pins and classifies it. It does not read the reflog, so the steps in between
+  are not seen, a branch it never saw has nothing to compare, the entry carries the time grove saw it rather than
+  when it happened, and an old tip git has already pruned is replaced without an entry ("a last tip git no longer
+  has is replaced without an entry", `test/core/journal/observe.test.ts`).
+- Agents acting directly with `--force`. `git worktree remove --force`, `rm -rf` on a worktree, `git reset --hard`
+  and `git clean -fdx` destroy uncommitted and ignored files before any scan can see them, and pins only cover
+  commits on branch tips. Force pushes to a remote are not watched, because grove journals local branches only. The
+  guard is the answer, and it is next.
+- Commits that only a detached HEAD held, once that HEAD moves on. The removal verdict and the prunable rule count
+  them, but the journal follows branches only.
+
+## 5. What's built and what's next
+
+Built, with 873 tests in 95 files (vitest against real temporary git repositories):
+
+- the CLI: `status`, `restore`, `ack`, `pins list`, `check remove`, `new`, `add-level`, `restack`, `stack plan`,
+  `rm [--rescue]`, `ui`, `serve` and `service install|uninstall|status`;
+- the core: git facts in three tiers by cost (the whole repository, each worktree, and the removal checks), the
+  journal and classifier, pins, restore, stacks from gh-stack config, the fail-closed removal verdict, ten rules and
+  `ack`;
+- eight actions on one plan, check, pin, run and receipt path;
+- the local server with its watcher, live events and plan cache;
+- the dashboard, with review dialogs, the ⌘K palette, live steps, receipts and Undo;
+- the login service (launchd or systemd) and an installable web app;
+- `scripts/demo.sh`, which reproduces the squash and the unsafe worktree in a temp folder.
+
+Next, in order:
+
+1. The agent guard: a Claude Code `PreToolUse` hook calling the removal verdict before `git worktree remove`, `rm -rf`
+   on a worktree, `git branch -D`, `git reset --hard` and `git clean`.
+2. Reflog catch-up at startup, marking what it finds as found later.
+3. Status cached by each worktree's HEAD and index mtime, for repositories with a hundred worktrees.
+4. GitHub data through `gh`: PR state and review threads.
+5. `pins prune`, `rm --force`, `stack adopt`, `log`, and Windows.
 
 ## 6. Live round
 
-**Engineer track: "add a small feature while sharing your screen".** Rehearse adding a rule end to end (rule file, test, shows up in CLI and dashboard) in under 10 minutes. Candidates:
+**Engineer track: "add a small feature while sharing your screen".** Rehearse adding a rule end to end in under 10
+minutes: a file in `src/core/rules/v1/`, one line in `src/core/rules/registry.ts`, a test in
+`test/core/rules/rules.test.ts`. A finding at needs-action or worse shows in `status` and in the dashboard's Needs
+you list with no other change. Candidates:
 
 - `stale-stash`: a stash older than 7 days on a branch that has since merged.
 - `no-upstream`: a branch with commits but no remote after 24 hours.
-- A new guard pattern: `git stash drop` / `git stash clear` blocked when the stash holds the only copy of changes.
+- `pins prune`: remove pins older than 30 days whose commits a branch or remote still reaches.
 
 **"Why X instead of Y?"** Section 3 is the answer sheet.
 
-**Tech-lead track, if that's the one:**
+**Tech-lead track, if that is the one:**
 
-- "The client added a requirement" (say, Windows, or a team-wide view): show where it lands (git adapter paths and process lookup for Windows; a read-only shared view would need the journal to leave the machine, which reopens the privacy decision).
-- "The budget is cut in half": the cut line already orders it. Keep the guard, classifier and pins; drop GitHub data, the dashboard's Projects screen, then the dashboard itself in favour of `status --json`.
+- "The client added a requirement" (say, Windows, or a team-wide view): show where it lands. Windows touches the git
+  adapter's paths, process lookup for the locks and the login service. A read-only shared view would need the journal
+  to leave the machine, which reopens the privacy decision.
+- "The budget is cut in half": keep the classifier, pins, the removal verdict and the CLI; drop the dashboard in
+  favour of `status --json`, then the login service.

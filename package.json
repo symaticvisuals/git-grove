@@ -2,6 +2,8 @@
   "name": "git-grove",
   "version": "0.1.0",
   "description": "Watches git worktrees and stacked branches",
+  "license": "MIT",
+  "author": "symaticvisuals",
   "type": "module",
   "bin": {
     "git-grove": "dist/cli/bin.js"
@@ -17,6 +19,7 @@
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/bin.js', 0o755)\"",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.test.json && tsc -p ui/tsconfig.json && tsc -p ui/sw.tsconfig.json",
+    "demo": "bash scripts/demo.sh",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {
