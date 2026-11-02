@@ -1,6 +1,7 @@
 import type { Router } from "../http/router.js";
 import { registerEventsRoute } from "../live/events-route.js";
 import { registerActionRoutes } from "./action-routes.js";
+import { registerGuardRoutes } from "./guard-routes.js";
 import { registerReadRoutes } from "./read-routes.js";
 
 const RESTART_EXIT_CODE = 75;
@@ -8,11 +9,13 @@ const RESTART_EXIT_CODE = 75;
 /**
  * Adds every API route to `router`: `GET /api/health` (no token needed; `{ ok, version, pid }`) and `POST /api/shutdown`,
  * which answers 202 and then stops the server with exit code 75, so a login service starts it again,
- * the read routes (`registerReadRoutes`), the action routes (`registerActionRoutes`) and `GET /events` (`registerEventsRoute`).
+ * the read routes (`registerReadRoutes`), the action routes (`registerActionRoutes`), the agent guard's routes
+ * (`registerGuardRoutes`) and `GET /events` (`registerEventsRoute`).
  */
 export function registerApi(router: Router): void {
   registerReadRoutes(router);
   registerActionRoutes(router);
+  registerGuardRoutes(router);
   registerEventsRoute(router);
   router.get("/api/health", async (_req, ctx) => ({ status: 200, body: { ok: true, version: ctx.version, pid: process.pid } }));
   router.post("/api/shutdown", async (_req, ctx) => {

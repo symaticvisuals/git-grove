@@ -1,10 +1,12 @@
 import type { Plan } from "../../src/core/actions/plan.types.js";
+import type { GuardState } from "../../src/core/guard-install/guard-install.types.js";
 import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { activityQuery } from "./activity-query.js";
 import { effectivePick } from "./effective-pick.js";
 import { groupKeyOf } from "./render/group-key-of.js";
 import { type DialogAction, type DialogSlices, type DialogState, type PaletteState, reduceDialog, type RunSlice } from "./dialogs/reduce-dialog.js";
+import { type GuardAction, type GuardDialogState, type GuardSlices, reduceGuard } from "./guard/reduce-guard.js";
 import type { LiveProblem, LiveState } from "./live.js";
 import type { Route } from "./parse-route.js";
 import { SLICE_NAMES, type SliceName } from "./slice-names.js";
@@ -26,6 +28,8 @@ export type State = {
   activity: Load<ActivityItem[]> | null;
   pins: Load<RepoPins[]> | null;
   needs: Load<NeedsYouItem[]> | null;
+  /** Where the agent guard stands in Claude Code's settings. */
+  guard: Load<GuardState> | null;
   tab: Tab;
   needsOnly: boolean;
   /** Keys of the list groups that are folded. */
@@ -45,6 +49,9 @@ export type State = {
   palette: PaletteState | null;
   /** The id the last dialog opened got; each open takes the next one. */
   dialogSeq: number;
+  guardDialog: GuardDialogState | null;
+  /** The agent guard card was put off with "Not now". */
+  guardDismissed: boolean;
 };
 
 export type UiAction =
@@ -59,7 +66,8 @@ export type UiAction =
   | { type: "needs-only"; on: boolean }
   | { type: "toggle-group"; key: string }
   | { type: "signed-out" }
-  | DialogAction;
+  | DialogAction
+  | GuardAction;
 
 type Change = <T>(load: Load<T> | null) => Load<T> | null;
 
@@ -87,6 +95,8 @@ function update(state: State, slice: SliceName, change: Change): State {
       return { ...state, pins: change(state.pins) };
     case "needs":
       return { ...state, needs: change(state.needs) };
+    case "guard":
+      return { ...state, guard: change(state.guard) };
   }
 }
 
@@ -107,6 +117,8 @@ function settle(state: State, result: SliceResult): State {
       return { ...state, pins: ready(result.data) };
     case "needs":
       return { ...state, needs: ready(result.data) };
+    case "guard":
+      return { ...state, guard: ready(result.data) };
   }
 }
 
@@ -124,6 +136,12 @@ function everySlice(state: State, change: Change): State {
 function withDialogs(state: State, action: DialogAction): State {
   const slices: DialogSlices = { dialog: state.dialog, run: state.run, palette: state.palette, dialogSeq: state.dialogSeq };
   const next = reduceDialog(slices, action);
+  return next === slices ? state : { ...state, ...next };
+}
+
+function withGuard(state: State, action: GuardAction): State {
+  const slices: GuardSlices = { guardDialog: state.guardDialog, guardDismissed: state.guardDismissed, dialog: state.dialog, palette: state.palette, dialogSeq: state.dialogSeq };
+  const next = reduceGuard(slices, action);
   return next === slices ? state : { ...state, ...next };
 }
 
@@ -165,7 +183,7 @@ function onTick(state: State, now: number): State {
   if (state.live !== "up" || state.projects.status === "loading") return state;
   if (state.projectsCheckedAt === null) return { ...state, projectsCheckedAt: now };
   if (now - state.projectsCheckedAt < PROJECTS_EVERY_MS) return state;
-  return { ...update(state, "projects", invalidate), projectsCheckedAt: now };
+  return { ...update(update(state, "projects", invalidate), "guard", invalidate), projectsCheckedAt: now };
 }
 
 function onEvent(state: State, event: ServerEvent, at: number): State {
@@ -221,6 +239,20 @@ function step(state: State, action: UiAction): State {
       return { ...state, closed: state.closed.includes(action.key) ? state.closed.filter((key) => key !== action.key) : [...state.closed, action.key] };
     case "signed-out":
       return { ...state, signedOut: true };
+    case "guard-open":
+    case "guard-planned":
+    case "guard-plan-failed":
+    case "guard-armed":
+    case "guard-confirm":
+    case "guard-ran":
+    case "guard-run-failed":
+    case "guard-again":
+    case "guard-undo":
+    case "guard-close":
+    case "guard-dismiss":
+      return withGuard(state, action);
+    case "palette-open":
+      return state.guardDialog === null ? withDialogs(state, action) : state;
     default:
       return withDialogs(state, action);
   }
@@ -249,6 +281,7 @@ export function initialState(route: Route, pageVersion: string): State {
     activity: null,
     pins: null,
     needs: null,
+    guard: null,
     tab: "feature",
     needsOnly: false,
     closed: [],
@@ -263,6 +296,8 @@ export function initialState(route: Route, pageVersion: string): State {
     run: null,
     palette: null,
     dialogSeq: 0,
+    guardDialog: null,
+    guardDismissed: false,
   };
   const wanted = sliceRequests(blank);
   return SLICE_NAMES.reduce((state, slice) => (wanted[slice] === null ? state : update(state, slice, () => LOADING)), blank);
@@ -272,9 +307,10 @@ export function initialState(route: Route, pageVersion: string): State {
  * The next state; pure. A reply is kept only for the slice and key the state still asks for. A digest reloads the
  * slices it concerns, failed ones included, among them an activity list that shows its repository, so activity another
  * process recorded, such as a CLI receipt, appears; an activity event joins the lists it belongs to; while live, the project
- * list reloads every 30 s; and once the live stream is back after dropping, every slice is reloaded. A slice the
+ * list reloads every 30 s, and the agent guard's state with it; and once the live stream is back after dropping, every slice is reloaded. A slice the
  * route no longer needs is cleared; one it newly needs starts loading. A route to a row in a folded group unfolds it. Dialog, run and palette actions, and the
  * step and receipt events, go to `reduceDialog`; a stream that is back after dropping reads the current run again.
+ * The agent guard's dialog and card actions go to `reduceGuard`, and the palette does not open over its dialog.
  */
 export function reduce(state: State, action: UiAction): State {
   const next = step(state, action);

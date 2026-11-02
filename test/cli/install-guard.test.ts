@@ -41,10 +41,11 @@ function hookCommand(out: string): unknown {
 }
 
 /** Runs the built bin's install-guard with a temp HOME and `nodes`, holding a link to this Node, first on PATH. */
-async function installGuard(): Promise<{ code: number; stdout: string; stderr: string }> {
+async function installGuard(configDir?: string): Promise<{ code: number; stdout: string; stderr: string }> {
   const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, PATH: `${nodes}${delimiter}${process.env["PATH"] ?? ""}` };
   delete env["GIT_GROVE_HOME"];
   delete env["CLAUDE_CONFIG_DIR"];
+  if (configDir !== undefined) env["CLAUDE_CONFIG_DIR"] = configDir;
   try {
     const { stdout, stderr } = await execFileAsync(process.execPath, [BIN, "install-guard"], { cwd: home, env, encoding: "utf8" });
     return { code: 0, stdout, stderr };
@@ -57,7 +58,7 @@ async function installGuard(): Promise<{ code: number; stdout: string; stderr: s
 function install(node: string, bin: string): { code: number; out: string; err: string } {
   const out: string[] = [];
   const err: string[] = [];
-  const code = installGuardCommand({ out: (s) => out.push(s), err: (s) => err.push(s), cwd: "/" }, { node, bin, home: "/Users/robin" });
+  const code = installGuardCommand({ out: (s) => out.push(s), err: (s) => err.push(s), cwd: "/" }, { node, bin, settingsPath: "/Users/robin/.claude/settings.json" });
   return { code, out: out.join(""), err: err.join("") };
 }
 
@@ -82,6 +83,12 @@ test("install-guard prints a valid hook block that runs the node on PATH and thi
   expect(hookCommand(result.stdout)).toBe(`${join(nodes, "node")} ${BIN} guard --claude`);
   expect(result.stdout).toContain("Run install-guard again after you change Node versions.");
   expect(result.stdout).toContain("To check it works");
+  expect(result.stdout).toContain("Or install it from the dashboard: git grove ui\n");
+});
+
+test("install-guard names the settings file under CLAUDE_CONFIG_DIR when it is set", async () => {
+  const result = await installGuard(join(home, ".claude-work"));
+  expect(result.stdout).toContain(`Add this to ${join(home, ".claude-work", "settings.json")}.`);
 });
 
 test("install-guard writes nothing under HOME", async () => {

@@ -1,4 +1,5 @@
 import type { ActionName, Plan } from "../../src/core/actions/plan.types.js";
+import type { GuardChange, GuardPlan, GuardReceipt, GuardState } from "../../src/core/guard-install/guard-install.types.js";
 import type { PinEntry } from "../../src/core/runner/list-pins.js";
 import type { RunState } from "../../src/server/actions/runs.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
@@ -25,6 +26,9 @@ export type Api = {
   runState(runId: string): Promise<RunState>;
   scan(repo?: number): Promise<void>;
   open(request: OpenRequest): Promise<void>;
+  guard(): Promise<GuardState>;
+  guardPlan(change: GuardChange): Promise<{ planId: string; plan: GuardPlan }>;
+  guardRun(planId: string): Promise<{ receipt: GuardReceipt }>;
 };
 
 type Guard<T> = (value: unknown) => value is T;
@@ -131,6 +135,57 @@ function isRunState(value: unknown): value is RunState {
   return isRecord(value) && isPlan(value["plan"]) && Array.isArray(value["events"]) && value["events"].every(isStepEvent) && (value["receipt"] === null || isReceipt(value["receipt"]));
 }
 
+function isStrings(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function isGuardChange(value: unknown): value is GuardChange {
+  return value === "install" || value === "uninstall";
+}
+
+function isGuardState(value: unknown): value is GuardState {
+  return (
+    isRecord(value) &&
+    ["absent", "installed", "stale", "unreadable"].includes(String(value["status"])) &&
+    ["settingsPath", "command"].every((key) => typeof value[key] === "string") &&
+    typeof value["hooksDisabled"] === "boolean" &&
+    isNullableString(value["refusal"])
+  );
+}
+
+function isGuardPlan(value: unknown): value is GuardPlan {
+  return (
+    isRecord(value) &&
+    isGuardChange(value["change"]) &&
+    ["title", "summary", "confirm", "settingsPath"].every((key) => typeof value[key] === "string") &&
+    isNullableString(value["backupPath"]) &&
+    isNullableString(value["adds"]) &&
+    ["removes", "lines", "warnings", "blockers"].every((key) => isStrings(value[key])) &&
+    typeof value["readAt"] === "number"
+  );
+}
+
+function isGuardPlanReply(value: unknown): value is { planId: string; plan: GuardPlan } {
+  return isRecord(value) && typeof value["planId"] === "string" && isGuardPlan(value["plan"]);
+}
+
+function isGuardReceipt(value: unknown): value is GuardReceipt {
+  return (
+    isRecord(value) &&
+    isGuardChange(value["change"]) &&
+    typeof value["ok"] === "boolean" &&
+    typeof value["refused"] === "boolean" &&
+    typeof value["title"] === "string" &&
+    isStrings(value["lines"]) &&
+    (value["undo"] === null || isGuardChange(value["undo"])) &&
+    typeof value["at"] === "number"
+  );
+}
+
+function isGuardRunReply(value: unknown): value is { receipt: GuardReceipt } {
+  return isRecord(value) && isGuardReceipt(value["receipt"]);
+}
+
 function isOk(value: unknown): value is { ok: true } {
   return isRecord(value) && value["ok"] === true;
 }
@@ -184,5 +239,8 @@ export function createApi(fetchImpl: typeof fetch, token: string): Api {
     open: async (request) => {
       await post("/api/open", request, isOk);
     },
+    guard: () => get("/api/guard", isGuardState),
+    guardPlan: (change) => post("/api/guard/plans", { change }, isGuardPlanReply),
+    guardRun: (planId) => post("/api/guard/actions", { planId }, isGuardRunReply),
   };
 }

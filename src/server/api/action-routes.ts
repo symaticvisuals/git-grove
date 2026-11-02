@@ -83,7 +83,7 @@ export function registerActionRoutes(router: Router): void {
         throw refusalOf(error);
       },
     );
-    return { status: 200, body: { planId: ctx.plans.put(repo.id, prepared), plan: prepared.plan } };
+    return { status: 200, body: { planId: ctx.plans.put({ repoId: repo.id, prepared }), plan: prepared.plan } };
   });
 
   router.post("/api/actions", async (req, ctx) => {

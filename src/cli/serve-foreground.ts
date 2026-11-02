@@ -1,5 +1,6 @@
 import { type RunningServer, startServer } from "../server/start-server.js";
 import { packageVersion } from "./package-version.js";
+import { realGuardSetup } from "./real-guard-setup.js";
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 
@@ -14,6 +15,7 @@ export async function serveForeground(): Promise<RunningServer> {
   };
   const server = await startServer({
     version: packageVersion(),
+    guard: realGuardSetup,
     onShutdown: (code) => {
       for (const signal of SIGNALS) process.off(signal, stop);
       process.exitCode = code;

@@ -1,11 +1,11 @@
 import { groveHome } from "../../core/grove-home.js";
+import { isEphemeralBin } from "../../core/is-ephemeral-bin.js";
 import { ServiceFailedError } from "../../core/service/service-failed.error.js";
 import type { ServiceManager, ServiceStatus } from "../../core/service/service-manager.js";
 import { ServiceUnsupportedError } from "../../core/service/service-unsupported.error.js";
 import { privateHome } from "../../server/private-home.js";
 import type { CliIo } from "../cli-io.types.js";
 import { findServer } from "../find-server.js";
-import { isEphemeralBin } from "../is-ephemeral-bin.js";
 import { serviceProgramOf } from "../service-program-of.js";
 
 export type ServiceSubcommand = "install" | "uninstall" | "status";

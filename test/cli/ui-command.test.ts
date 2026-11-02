@@ -211,6 +211,25 @@ test("with no server and an uninstalled service, ui installs it and prints the f
   expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${started[0]?.port ?? 0}/`));
 });
 
+const OFFER_GUARD = "Protect your worktrees from Claude Code: use Install on the dashboard, or run git grove install-guard.\n";
+
+test("the run that installs the login service, with the agent guard absent, prints one line pointing to the dashboard's Install", async () => {
+  const service = fakeService({ kind: "launchd", onInstall: async () => void (await serve()) });
+  const result = await ui(harness(service, { guardStatus: async () => "absent" }).deps, home);
+  expect(result.out).toContain(`Remove it with: git grove service uninstall\n${OFFER_GUARD}`);
+  expect(result.out.split(OFFER_GUARD)).toHaveLength(2);
+});
+
+test("the guard line is not printed when the guard is installed, stale or unreadable, or when the service was already installed", async () => {
+  for (const status of ["installed", "stale", "unreadable"] as const) {
+    const service = fakeService({ kind: "launchd", onInstall: async () => void (await serve()) });
+    expect((await ui(harness(service, { guardStatus: async () => status }).deps, home)).out, status).not.toContain(OFFER_GUARD);
+    await Promise.all(servers.splice(0).map((server) => server.close()));
+  }
+  const started = fakeService({ kind: "launchd", installed: true, onStart: async () => void (await serve()) });
+  expect((await ui(harness(started, { guardStatus: async () => "absent" }).deps, home)).out).not.toContain(OFFER_GUARD);
+});
+
 test("with no server and an installed service that is not running, ui starts it", async () => {
   const service = fakeService({ kind: "systemd", installed: true, onStart: async () => void (await serve()) });
   const run = harness(service);

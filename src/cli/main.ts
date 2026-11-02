@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { InvalidInputError } from "../core/actions/invalid-input.error.js";
 import { requireGitVersion } from "../core/git/require-git-version.js";
+import { claudeSettingsPath } from "../core/guard-install/claude-settings-path.js";
 import { binPath } from "./bin-path.js";
 import type { CliIo } from "./cli-io.types.js";
 import { checkCommand } from "./commands/check.js";
@@ -81,6 +82,7 @@ const USAGE = `Usage: git grove [<command>] [options]
                                     server running (launchd or systemd)
   install-guard                     print the Claude Code hook that runs the agent
                                     guard, for ~/.claude/settings.json; writes nothing
+                                    (the dashboard installs it after a review)
   guard --claude                    the agent guard itself, run by that hook
 `;
 
@@ -173,7 +175,7 @@ function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command
   if (name === "status") return first === undefined ? (io) => statusCommand(io, { json }) : null;
   if (name === "pins") return first === "list" && extra === undefined && !json ? (io) => pinsCommand(io, second) : null;
   if (name === "install-guard") {
-    return first === undefined && !json ? async (io) => installGuardCommand(io, { node: stableNodePath(), bin: binPath(), home: homedir() }) : null;
+    return first === undefined && !json ? async (io) => installGuardCommand(io, { node: stableNodePath(), bin: binPath(), settingsPath: claudeSettingsPath(process.env, homedir()) }) : null;
   }
   if (name === "check") {
     return first === "remove" && second !== undefined && extra === undefined

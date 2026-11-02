@@ -4,6 +4,7 @@ import { ServerRunningError } from "../../server/server-running.error.js";
 import { startServer } from "../../server/start-server.js";
 import type { CliIo } from "../cli-io.types.js";
 import { packageVersion } from "../package-version.js";
+import { realGuardSetup } from "../real-guard-setup.js";
 import { rotateLog } from "../rotate-log.js";
 
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
@@ -25,7 +26,7 @@ export async function serveCommand(io: CliIo, options: { port?: number }): Promi
   );
   let finish: (code: number) => void = () => undefined;
   const finished = new Promise<number>((resolve) => (finish = resolve));
-  const server = await startServer({ port: options.port, version: packageVersion(), onShutdown: (code) => finish(code) }).catch(
+  const server = await startServer({ port: options.port, version: packageVersion(), onShutdown: (code) => finish(code), guard: realGuardSetup }).catch(
     (error: unknown) => {
       if (error instanceof ServerRunningError) return error;
       throw error;

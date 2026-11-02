@@ -1,4 +1,5 @@
 import type { ActionName } from "../../../src/core/actions/plan.types.js";
+import type { GuardChange } from "../../../src/core/guard-install/guard-install.types.js";
 import type { WireFeature, WireLevel, WireRepoView } from "../../../src/server/wire/wire.types.js";
 import { type ActionData, dialogContext } from "../dialogs/dialog-context.js";
 import type { DialogContext } from "../dialogs/dialog-specs.js";
@@ -7,7 +8,7 @@ import { plural } from "../plural.js";
 import type { State } from "../state.js";
 import { worstFinding } from "../worst-finding.js";
 
-export type PaletteRun = { open: ActionName; ctx: DialogContext } | { route: Route } | { scan: number };
+export type PaletteRun = { open: ActionName; ctx: DialogContext } | { route: Route } | { scan: number } | { guard: GuardChange };
 
 export type PaletteItem = { kind: "Actions" | "Go to"; text: string; hint: string | null; run: PaletteRun };
 
@@ -63,6 +64,15 @@ function actions(repo: WireRepoView): PaletteItem[] {
   return items;
 }
 
+function guardActions(state: State): PaletteItem[] {
+  const guard = state.guard === null || state.guard.status === "loading" ? null : state.guard.data;
+  if (guard === null) return [];
+  const items: PaletteItem[] = [];
+  if (guard.status !== "installed") items.push({ kind: "Actions", text: "Install agent guard", hint: null, run: { guard: "install" } });
+  if (guard.status === "installed" || guard.status === "stale") items.push({ kind: "Actions", text: "Uninstall agent guard", hint: null, run: { guard: "uninstall" } });
+  return items;
+}
+
 function goTo(text: string, hint: string | null, route: Route): PaletteItem {
   return { kind: "Go to", text, hint, run: { route } };
 }
@@ -86,12 +96,12 @@ function places(state: State, repo: WireRepoView | null): PaletteItem[] {
 
 /**
  * What the palette offers for `query`: on a repo, its actions (new feature, each fix a level or deleted branch
- * needs, restack where a stack needs it, add a level, clean up, scan), then every row to go to; everywhere, the
- * views and the other repos. `query` matches anywhere in an item's text, ignoring case; Actions come before Go to.
+ * needs, restack where a stack needs it, add a level, clean up, scan), then every row to go to; everywhere, Install
+ * agent guard unless it is installed and Uninstall agent guard while it is in, the views and the other repos. `query` matches anywhere in an item's text, ignoring case; Actions come before Go to.
  */
 export function paletteItems(state: State, query: string): PaletteItem[] {
   const repo = shownRepo(state);
-  const all = [...(repo === null ? [] : actions(repo)), ...(repo === null ? [] : rows(repo)), ...places(state, repo)];
+  const all = [...(repo === null ? [] : actions(repo)), ...guardActions(state), ...(repo === null ? [] : rows(repo)), ...places(state, repo)];
   const wanted = query.trim().toLowerCase();
   return wanted === "" ? all : all.filter((item) => item.text.toLowerCase().includes(wanted));
 }
