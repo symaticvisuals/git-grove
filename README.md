@@ -35,9 +35,11 @@ The first time, `ui` installs a login service, so the dashboard is there wheneve
 - Linux: a systemd user unit, `~/.config/systemd/user/git-grove.service`
 
 The service runs `node <git-grove>/dist/cli/bin.js serve`, starts it again if it fails, and appends its output to
-`~/.git-grove/server.log`. `ui` prints the file it wrote; `git grove service uninstall` unloads it and deletes that
-file. `npm install` never installs it. When you update git grove, the next `git grove ui` asks the older server to
-exit, and the service starts the new version.
+`~/.git-grove/server.log`, which moves to `server.log.1` when the server starts and finds it over 5 MB. `ui` prints
+the file it wrote; `git grove service uninstall` unloads it and deletes that file. `npm install` never installs it.
+When you update git grove, the next `git grove ui` asks the older server to exit, and the service starts the new
+version. When the service runs another copy of git grove, or a Node that is no longer there, `ui` rewrites it to run
+this one and says so.
 
 ```sh
 git grove service install     # write and load the login service
@@ -59,7 +61,11 @@ Chrome and Edge offer "Install git grove" in the address bar, which gives the da
 
 - The server listens only on `127.0.0.1` and `[::1]`, and answers only a `Host` of `127.0.0.1`, `[::1]` or `localhost` with its port.
 - Every API and event request needs the token in `~/.git-grove/token` as an `X-Grove-Token` header. `ui` hands it to the page in the URL's fragment, which is never sent over the network, and the page keeps it in that port's `localStorage`. There is no cookie and no CORS.
-- Known limit: a program that later listens on a port git grove has served on can read that port's `localStorage`, and with it the token; that is every port grove has served on, up to 20 (47683 to 47702). This is accepted on a single-user machine.
+- Known limits, accepted on a single-user machine:
+  - a program that later listens on a port git grove has served on can read that port's `localStorage`, and with it the token; that is every port grove has served on, up to 20 (47683 to 47702);
+  - while the browser opens, the dashboard's address, token included, is briefly visible in the process list to other local users;
+  - an installed dashboard app is tied to the port it was installed on, so if git grove moved to another port, run `git grove ui` again;
+  - notifications need an open dashboard tab or window.
 
 ## Commands
 

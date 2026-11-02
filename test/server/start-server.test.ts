@@ -79,10 +79,18 @@ function canBind(port: number, host: string): Promise<boolean> {
   });
 }
 
+/** The lowest port of any default ephemeral range (Linux 32768, macOS 49152), which `listen(0)` and outgoing connections draw from. */
+const EPHEMERAL_FLOOR = 32_768;
+
+/**
+ * Occupies a port on `host` whose next port is free on 127.0.0.1 and ::1. Both sit below every default ephemeral
+ * range, so no `listen(0)` or outgoing connection in a parallel suite can take the neighbour before the server does.
+ */
 async function occupyPortWithFreeNext(host = "127.0.0.1"): Promise<number> {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const port = await occupyFreePort(host);
-    if ((await canBind(port + 1, "127.0.0.1")) && (!ipv6 || (await canBind(port + 1, "::1")))) return port;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const port = 20_000 + Math.floor(Math.random() * (EPHEMERAL_FLOOR - 20_002));
+    if (!(await canBind(port + 1, "127.0.0.1")) || (ipv6 && !(await canBind(port + 1, "::1")))) continue;
+    if ((await occupy(port, host)) !== null) return port;
   }
   throw new Error("no port with a free neighbour");
 }

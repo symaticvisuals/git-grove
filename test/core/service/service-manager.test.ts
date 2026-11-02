@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import type { ServiceHost } from "../../../src/core/service/service-host.js";
 import { createServiceManager } from "../../../src/core/service/service-manager.js";
@@ -169,11 +169,28 @@ test("start runs systemctl --user start on Linux", async () => {
 test("status says which manager, whether the file is there and whether it is loaded", async () => {
   const host = fakeHost("darwin", { "launchctl print gui/501/work.grove.server": { code: 113 } });
   const manager = createServiceManager(host);
-  expect(await manager.status()).toEqual({ kind: "launchd", installed: false, loaded: false, file: PLIST() });
+  expect(await manager.status()).toEqual({ kind: "launchd", installed: false, loaded: false, file: PLIST(), program: null });
   await manager.install(PROGRAM);
-  expect(await manager.status()).toEqual({ kind: "launchd", installed: true, loaded: false, file: PLIST() });
+  expect(await manager.status()).toMatchObject({ kind: "launchd", installed: true, loaded: false, file: PLIST() });
   const loaded = createServiceManager(fakeHost("darwin"));
-  expect(await loaded.status()).toEqual({ kind: "launchd", installed: true, loaded: true, file: PLIST() });
+  expect(await loaded.status()).toMatchObject({ kind: "launchd", installed: true, loaded: true, file: PLIST() });
   const nowhere = createServiceManager(fakeHost("linux", { "systemctl --user show-environment": { code: 1 } }));
-  expect(await nowhere.status()).toEqual({ kind: null, installed: false, loaded: false, file: UNIT() });
+  expect(await nowhere.status()).toEqual({ kind: null, installed: false, loaded: false, file: UNIT(), program: null });
+});
+
+test.each(["darwin", "linux"] as const)("on %s, status reads back the Node and bin the service runs, and whether that Node still exists", async (platform) => {
+  const node = join(home, "node-24", "bin", "node");
+  await mkdir(dirname(node), { recursive: true });
+  await writeFile(node, "");
+  const manager = createServiceManager(fakeHost(platform));
+  await manager.install({ ...PROGRAM, node });
+  expect((await manager.status()).program).toEqual({ node, bin: PROGRAM.bin, nodeExists: true });
+  await rm(join(home, "node-24"), { recursive: true });
+  expect((await manager.status()).program).toEqual({ node, bin: PROGRAM.bin, nodeExists: false });
+});
+
+test("a file at the service's path that grove did not write has no program", async () => {
+  await mkdir(dirname(PLIST()), { recursive: true });
+  await writeFile(PLIST(), "<plist>not grove's</plist>");
+  expect(await createServiceManager(fakeHost("darwin")).status()).toMatchObject({ installed: true, program: null });
 });

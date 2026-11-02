@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { type InstalledProgram, installedProgram } from "./installed-program.js";
 import { launchdPlist } from "./launchd-plist.js";
 import { ServiceFailedError } from "./service-failed.error.js";
 import type { CommandResult, ServiceHost } from "./service-host.js";
@@ -13,8 +14,17 @@ import { systemdUnit } from "./systemd-unit.js";
 
 export type ServiceKind = "launchd" | "systemd";
 
-/** `file` is where this platform's agent or unit goes, or null on a platform with neither. */
-export type ServiceStatus = { kind: ServiceKind | null; installed: boolean; loaded: boolean; file: string | null };
+/**
+ * `file` is where this platform's agent or unit goes, or null on a platform with neither. `program` is what the
+ * installed file runs, and whether that Node still exists; null when nothing is installed or the file is not grove's.
+ */
+export type ServiceStatus = {
+  kind: ServiceKind | null;
+  installed: boolean;
+  loaded: boolean;
+  file: string | null;
+  program: (InstalledProgram & { nodeExists: boolean }) | null;
+};
 
 export type ServiceManager = {
   support(): Promise<ServiceKind | null>;
@@ -148,11 +158,14 @@ export function createServiceManager(host: ServiceHost): ServiceManager {
       const { kind } = await probe();
       const file = fileFor(host.platform);
       const installed = file !== null && existsSync(file);
+      const text = installed && file !== null ? await readFile(file, "utf8").catch(() => null) : null;
+      const read = text === null ? null : installedProgram(host.platform === "darwin" ? "launchd" : "systemd", text);
+      const program = read === null ? null : { ...read, nodeExists: existsSync(read.node) };
       const loaded =
         kind === "launchd"
           ? (await host.run("launchctl", ["print", job])).code === 0
           : kind === "systemd" && (await systemctl("is-active", "--quiet", SERVICE_NAMES.unit)).code === 0;
-      return { kind, installed, loaded, file };
+      return { kind, installed, loaded, file, program };
     },
   };
 }

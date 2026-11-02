@@ -1,13 +1,14 @@
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { type UiDeps, uiCommand } from "../../src/cli/commands/ui.js";
 import { run } from "../../src/cli/main.js";
 import { packageVersion } from "../../src/cli/package-version.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import { ServiceFailedError } from "../../src/core/service/service-failed.error.js";
-import type { ServiceKind, ServiceManager } from "../../src/core/service/service-manager.js";
+import type { ServiceHost } from "../../src/core/service/service-host.js";
+import { createServiceManager, type ServiceKind, type ServiceManager } from "../../src/core/service/service-manager.js";
 import type { ServiceProgram } from "../../src/core/service/service-program.types.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
 import { featureId } from "../../src/server/wire/feature-id.js";
@@ -78,7 +79,8 @@ function fakeService(options: { kind: ServiceKind | null; installed?: boolean; o
     },
     async status() {
       calls.push("status");
-      return { kind: options.kind, installed: options.installed ?? false, loaded: false, file };
+      const installed = options.installed ?? false;
+      return { kind: options.kind, installed, loaded: false, file, program: installed ? { node: process.execPath, bin: BIN, nodeExists: true } : null };
     },
   };
 }
@@ -299,4 +301,80 @@ test("git grove with no arguments runs ui, and ui takes no arguments", async () 
     expect(err.join(""), argv.join(" ")).toContain("Usage: git grove");
   }
   expect(run1.opened).toHaveLength(1);
+});
+
+/** A macOS host on a temp home whose runner records commands; unloading the agent stops its server and loading it starts one, as launchd would. */
+function launchdHost(calls: string[]): ServiceHost {
+  return {
+    platform: "darwin",
+    home,
+    uid: 501,
+    path: "/usr/bin:/bin",
+    async run(cmd, args) {
+      const line = [cmd, ...args].join(" ");
+      calls.push(line);
+      if (line.startsWith("launchctl bootout")) await Promise.all(servers.splice(0).map((server) => server.close()));
+      if (line.startsWith("launchctl bootstrap")) await serve();
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  };
+}
+
+const PLIST = (): string => join(home, "Library", "LaunchAgents", "work.grove.server.plist");
+
+test("an installed service that runs another copy of git grove is rewritten to this one and reloaded", async () => {
+  const calls: string[] = [];
+  const service = createServiceManager(launchdHost(calls));
+  await service.install({ node: process.execPath, bin: "/old/copy/dist/cli/bin.js", groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  const old = servers[0];
+  calls.length = 0;
+  const run = harness(service);
+  const result = await ui(run.deps, home);
+  expect(result.out).toContain("Updated the login service to this copy of git grove\n");
+  expect(await readFile(PLIST(), "utf8")).toContain(`<string>${BIN}</string>`);
+  expect(calls).toContain("launchctl bootout gui/501/work.grove.server");
+  expect(calls).toContain(`launchctl bootstrap gui/501 ${PLIST()}`);
+  expect(run.foreground).toHaveLength(0);
+  expect(servers).toHaveLength(1);
+  expect(servers[0]).not.toBe(old);
+  expect(run.opened[0]).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${servers[0]?.port ?? 0}/`));
+  expect(result.err).toBe("");
+});
+
+test("an installed service whose Node is gone is rewritten to this Node", async () => {
+  const calls: string[] = [];
+  const service = createServiceManager(launchdHost(calls));
+  const gone = join(home, "node-gone", "node");
+  await mkdir(dirname(gone), { recursive: true });
+  await writeFile(gone, "");
+  await service.install({ node: gone, bin: BIN, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  await rm(dirname(gone), { recursive: true });
+  calls.length = 0;
+  const result = await ui(harness(service).deps, home);
+  expect(result.err).toBe("");
+  expect(result.out).toContain("Updated the login service to this copy of git grove\n");
+  expect(await readFile(PLIST(), "utf8")).toContain(`<string>${process.execPath}</string>`);
+  expect(calls).toContain(`launchctl bootstrap gui/501 ${PLIST()}`);
+});
+
+test("an installed service that runs this copy and this Node is left alone", async () => {
+  const calls: string[] = [];
+  const service = createServiceManager(launchdHost(calls));
+  await service.install({ node: process.execPath, bin: BIN, groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  const before = await readFile(PLIST(), "utf8");
+  calls.length = 0;
+  const result = await ui(harness(service).deps, home);
+  expect(result.out).not.toContain("Updated the login service");
+  expect(calls.filter((call) => /bootout|bootstrap/.test(call))).toEqual([]);
+  expect(await readFile(PLIST(), "utf8")).toBe(before);
+});
+
+test("from an npx cache, an installed service for another copy is left alone", async () => {
+  const calls: string[] = [];
+  const service = createServiceManager(launchdHost(calls));
+  await service.install({ node: process.execPath, bin: "/old/copy/dist/cli/bin.js", groveHome: home, path: "/usr/bin", logFile: join(home, "server.log") });
+  calls.length = 0;
+  const result = await ui(harness(service, { bin: "/x/_npx/1/node_modules/git-grove/dist/cli/bin.js" }).deps, home);
+  expect(result.out).not.toContain("Updated the login service");
+  expect(calls.filter((call) => /bootout|bootstrap/.test(call))).toEqual([]);
 });

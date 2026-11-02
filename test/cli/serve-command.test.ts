@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { serveCommand } from "../../src/cli/commands/serve.js";
 import { run } from "../../src/cli/main.js";
 import { readServerFile } from "../../src/server/read-server-file.js";
@@ -55,6 +55,31 @@ test("serveCommand --port 0 exits 75 after /api/shutdown", async () => {
   expect(cli.out.join("")).toContain(`http://127.0.0.1:${info.port}/`);
   expect(cli.out.join("")).not.toContain(token);
   expect(existsSync(join(home, "server.json"))).toBe(false);
+});
+
+test("serve keeps one old log: a server.log over 5 MB moves to server.log.1 when it starts", async () => {
+  const big = 5 * 1024 * 1024 + 1;
+  await writeFile(join(home, "server.log"), Buffer.alloc(big, 120));
+  const cli = io();
+  const exited = run(["serve", "--port", "0"], cli.io);
+  const info = await waitForServer();
+  await vi.waitFor(async () => expect((await stat(join(home, "server.log.1"))).size).toBe(big));
+  expect((await stat(join(home, "server.log"))).size).toBe(0);
+  const token = await readFile(join(home, "token"), "utf8");
+  await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, { method: "POST", headers: { "x-grove-token": token, "content-type": "application/json" } });
+  expect(await exited).toBe(75);
+});
+
+test("serve leaves a server.log of 5 MB or less alone", async () => {
+  await writeFile(join(home, "server.log"), "started\n");
+  const cli = io();
+  const exited = run(["serve", "--port", "0"], cli.io);
+  const info = await waitForServer();
+  expect(await readFile(join(home, "server.log"), "utf8")).toBe("started\n");
+  expect(existsSync(join(home, "server.log.1"))).toBe(false);
+  const token = await readFile(join(home, "token"), "utf8");
+  await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, { method: "POST", headers: { "x-grove-token": token, "content-type": "application/json" } });
+  expect(await exited).toBe(75);
 });
 
 async function closedPort(): Promise<number> {

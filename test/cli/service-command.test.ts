@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { type ServiceSubcommand, serviceCommand } from "../../src/cli/commands/service.js";
 import type { ServiceHost } from "../../src/core/service/service-host.js";
@@ -112,4 +112,26 @@ test("service status says what is installed and where the dashboard runs", async
   }
   const nowhere = host("linux", ["systemctl --user show-environment"]);
   expect((await service("status", nowhere)).out).toBe("Login service: none; this machine has no launchd or systemd user session\nDashboard: not running\n");
+});
+
+test("service status says when the Node the service was installed with is gone", async () => {
+  const fake = host("darwin", ["launchctl print gui/501/"]);
+  const manager = createServiceManager(fake);
+  const node = join(userHome, "node-gone", "node");
+  await mkdir(dirname(node), { recursive: true });
+  await writeFile(node, "");
+  await manager.install({ node, bin: BIN, groveHome, path: "/usr/bin", logFile: join(groveHome, "server.log") });
+  await rm(dirname(node), { recursive: true });
+  const plist = join(userHome, "Library", "LaunchAgents", "work.grove.server.plist");
+  expect((await service("status", fake)).out).toBe(
+    `Login service: launchd, not loaded, ${plist}\n  the Node it was installed with is gone; run git grove service install\nDashboard: not running\n`,
+  );
+});
+
+test("service status says when the service runs another copy of git grove", async () => {
+  const fake = host("linux");
+  await createServiceManager(fake).install({ node: process.execPath, bin: "/old/copy/dist/cli/bin.js", groveHome, path: "/usr/bin", logFile: join(groveHome, "server.log") });
+  expect((await service("status", fake)).out).toContain(
+    "  it runs another copy of git grove (/old/copy/dist/cli/bin.js); git grove ui or git grove service install points it at this one\n",
+  );
 });
