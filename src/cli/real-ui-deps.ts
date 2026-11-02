@@ -1,6 +1,6 @@
-import { fileURLToPath } from "node:url";
 import { realServiceHost } from "../core/service/service-host.js";
 import { createServiceManager } from "../core/service/service-manager.js";
+import { binPath } from "./bin-path.js";
 import type { UiDeps } from "./commands/ui.js";
 import { openUrl } from "./open-url.js";
 import { serveForeground } from "./serve-foreground.js";
@@ -11,6 +11,6 @@ export function realUiDeps(): UiDeps {
     service: createServiceManager(realServiceHost()),
     openUrl: (url) => openUrl(url),
     serveForeground,
-    bin: fileURLToPath(new URL("./bin.js", import.meta.url)),
+    bin: binPath(),
   };
 }

@@ -90,13 +90,23 @@ echo "$report"
 grep -q "History rewritten" <<< "$report" || fail "expected status to report the rewrite"
 grep -q "Merged, but not safe to remove" <<< "$report" || fail "expected status to report the unsafe worktree"
 
-step "6/7 Is the merged worktree safe to remove? grove says no, exit 3, and names the file"
+step "6/7 Is the merged worktree safe to remove? grove says no, exit 3, names the file, and the guard stops an agent"
 code=0
 check="$(grove check remove .worktrees/old-onboarding)" || code=$?
 echo "$check"
 echo "(exit $code)"
 [ "$code" = 3 ] || fail "expected check remove to exit 3, got $code"
 grep -q ".local/seed.sql" <<< "$check" || fail "expected check remove to name .local/seed.sql"
+echo
+echo "An agent tries anyway. Claude Code's PreToolUse hook hands the command to the guard, which blocks it (exit 2):"
+echo "\$ git worktree remove --force .worktrees/old-onboarding   (seen by: git grove guard --claude)"
+hook="{\"session_id\":\"demo\",\"cwd\":\"$repo\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git worktree remove --force .worktrees/old-onboarding\"}}"
+code=0
+guarded="$(node "$bin" guard --claude <<< "$hook" 2>&1)" || code=$?
+echo "$guarded"
+echo "(exit $code)"
+[ "$code" = 2 ] || fail "expected the guard to exit 2, got $code"
+grep -q "git grove rm --rescue .worktrees/old-onboarding" <<< "$guarded" || fail "expected the guard to offer rm --rescue"
 
 step "7/7 Put things right: restore the branch, rescue the file, remove the worktree"
 grove restore feat/coupons-ui

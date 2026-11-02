@@ -55,6 +55,19 @@ echo "$report"
 grep -qi "history rewritten" <<< "$report" || { echo "expected: history rewritten" >&2; exit 1; }
 [ ! -s "$work/stderr" ] || { echo "expected no stderr, got:" >&2; cat "$work/stderr" >&2; exit 1; }
 
+# The installed guard blocks a worktree removal that would lose an ignored file, and install-guard names the installed bin.
+echo ".local/" >> "$(git rev-parse --git-common-dir)/info/exclude"
+git worktree add --quiet "$work/seeded" -b seeded main
+mkdir "$work/seeded/.local" && echo "insert;" > "$work/seeded/.local/seed.sql"
+hook="{\"session_id\":\"smoke\",\"cwd\":\"$repo\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"git worktree remove --force $work/seeded\"}}"
+code=0
+git-grove guard --claude <<< "$hook" > "$work/guard.out" 2> "$work/guard.err" || code=$?
+[ "$code" = 2 ] || { echo "expected the guard to exit 2, got $code:" >&2; cat "$work/guard.err" >&2; exit 1; }
+[ ! -s "$work/guard.out" ] || { echo "expected no stdout from the guard" >&2; exit 1; }
+grep -q ".local/seed.sql" "$work/guard.err" || { echo "expected the guard to name .local/seed.sql" >&2; exit 1; }
+git grove install-guard | grep -qF "$(cd "$installed" && pwd -P)/dist/cli/bin.js guard --claude" || { echo "expected install-guard to print the installed bin" >&2; exit 1; }
+echo "guard: ok"
+
 # serve: answers its health, guards the API, shows in status, and exits by itself: 0 on SIGTERM, 75 on /api/shutdown.
 # It runs as git-grove, not through git, so the signal and the exit code are the server's own.
 start_serve() {
