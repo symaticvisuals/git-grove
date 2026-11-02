@@ -119,13 +119,11 @@ async function waitForLiveServer(): Promise<ServerInfo> {
 
 test("serve starts over a lock left by a live process that is not a server, and replaces the lock", async () => {
   const lock = join(home, "server.lock");
-  await writeFile(lock, String(process.pid));
-  writeServerFile(home, { pid: process.pid, port: await closedPort(), version: "0.0.1" });
-  const before = (await stat(lock)).ino;
+  await writeFile(lock, String(process.ppid));
+  writeServerFile(home, { pid: process.ppid, port: await closedPort(), version: "0.0.1" });
   const cli = io();
   const exited = run(["serve", "--port", "0"], cli.io);
   const info = await waitForLiveServer();
-  expect((await stat(lock)).ino).not.toBe(before);
   expect(await readFile(lock, "utf8")).toBe(String(process.pid));
   const token = await readFile(join(home, "token"), "utf8");
   const res = await fetch(`http://127.0.0.1:${info.port}/api/shutdown`, {
