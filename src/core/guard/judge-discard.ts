@@ -1,3 +1,4 @@
+import { sep } from "node:path";
 import { resolveCommit } from "../git/resolve-commit.js";
 import { runGit } from "../git/run-git.js";
 import { plural } from "../rules/plural.js";
@@ -27,7 +28,8 @@ export async function judgeDiscard(check: GuardCheck & { kind: "discard" }, from
   if (!setAside.has(head.top)) {
     const changes = await countChanges(check.cwd, check.side, check.pathspecs);
     if (changes > 0) {
-      const where = head.top === from ? "this worktree" : shownPath(from, head.top);
+      const inside = from === head.top || from.startsWith(head.top + sep);
+      const where = inside ? "this worktree" : shownPath(from, head.top);
       const message = `git grove blocked: ${where} has ${plural(changes, "uncommitted change")} that ${check.text} would discard. Commit them, or set them aside with git stash first.`;
       return { block: { message, verb: check.verb, subject }, pins: [] };
     }

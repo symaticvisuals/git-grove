@@ -112,6 +112,12 @@ test("git reset --hard with uncommitted changes is blocked", async () => {
   );
 });
 
+test("from a folder inside the worktree, the block still names this worktree", async () => {
+  await writeFile(join(root, "base.txt"), "edited\n");
+  await mkdir(join(root, "src"));
+  expect(await expectBlocked("git reset --hard", join(root, "src"))).toMatch(/^git grove blocked: this worktree has 1 uncommitted change/);
+});
+
 test("git stash before git reset --hard in the same line lets it through", async () => {
   await writeFile(join(root, "base.txt"), "edited\n");
   await expectAllowed("git stash && git reset --hard");
