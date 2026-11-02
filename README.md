@@ -127,13 +127,16 @@ Chrome and Edge offer "Install git grove" in the address bar, which gives the da
   - a program that later listens on a port git grove has served on can read that port's `localStorage`, and with it the token; that is every port grove has served on, up to 20 (47683 to 47702);
   - while the browser opens, the dashboard's address, token included, is briefly visible in the process list to other local users;
   - an installed dashboard app is tied to the port it was installed on, so if git grove moved to another port, run `git grove ui` again;
-  - notifications need an open dashboard tab or window.
+  - notifications need an open dashboard tab or window;
+  - the first address `ui` opens carries the token in its fragment, which may stay in the browser's history;
+  - `new --install` keeps the repository's lock while dependencies install, so other actions in that repository
+    wait and the dashboard pauses its scans of it until the install ends.
 
 ## Commands
 
 ```sh
 git grove status [--json]                    # what needs you, then one line per worktree
-git grove restore <branch> [<pin-ref>]       # move a branch back to a pin, pinning its current tip first
+git grove restore <branch> [<pin-ref>]       # move a branch back to the pin its alert names, pinning its current tip first
 git grove ack <branch>                       # mark a branch's rewrite or deletion as intended
 git grove pins list [<branch>]               # list pins, newest first
 git grove check remove <worktree> [--json]   # exit 0 when safe to delete, 3 when not
@@ -147,7 +150,9 @@ git grove rm <worktree> [--rescue]           # remove a worktree's folder when n
 `new` and `add-level` copy the main worktree's env files into the new level (`--skip-env` to skip), and take
 `--install` to install dependencies and `--open` to open it in your editor. `rm --rescue` first copies the ignored
 files only that worktree has into the main worktree, and checks the copies. `new`, `add-level`, `restack` and `rm`
-show their plan and change nothing with `--dry-run`, and print JSON with `--json`. No command pushes.
+show their plan and change nothing with `--dry-run`, and print JSON with `--json`. `restore` and `ack` print their
+plan, each step and the receipt too, through the same core the dashboard uses. With no open alert to say which pin
+you mean, `restore` lists the branch's pins and asks you to name one. No command pushes.
 
 For example, after an agent squashes `feat/coupons-ui` into one commit:
 
