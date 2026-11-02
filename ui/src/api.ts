@@ -4,7 +4,9 @@ import type { RunState } from "../../src/server/actions/runs.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { ApiError } from "./api.error.js";
 import { isActivityItem } from "./is-activity-item.js";
+import { isReceipt } from "./is-receipt.js";
 import { isRecord } from "./is-record.js";
+import { isStepEvent } from "./is-step-event.js";
 import { MESSAGES } from "./messages.js";
 
 export type PlanRequest = { repo: number; action: ActionName; input: unknown };
@@ -93,15 +95,25 @@ function isNeedsYouItem(value: unknown): value is NeedsYouItem {
   );
 }
 
+function isRecordOrNull(value: unknown): boolean {
+  return value === null || isRecord(value);
+}
+
+function isListOrNull(value: unknown): boolean {
+  return value === null || Array.isArray(value);
+}
+
 function isPlan(value: unknown): value is Plan {
   return (
     isRecord(value) &&
-    typeof value["action"] === "string" &&
-    typeof value["title"] === "string" &&
-    Array.isArray(value["checks"]) &&
-    Array.isArray(value["steps"]) &&
-    Array.isArray(value["blockers"]) &&
-    Array.isArray(value["commands"]) &&
+    ["action", "context", "title", "summary", "confirm"].every((key) => typeof value[key] === "string") &&
+    isRecordOrNull(value["before"]) &&
+    isRecordOrNull(value["after"]) &&
+    isListOrNull(value["folders"]) &&
+    isListOrNull(value["choices"]) &&
+    ["checks", "effects", "commands", "steps", "blockers", "moves", "expects"].every((key) => Array.isArray(value[key])) &&
+    isNullableString(value["note"]) &&
+    typeof value["undoable"] === "boolean" &&
     typeof value["readAt"] === "number"
   );
 }
@@ -115,7 +127,7 @@ function isRunReply(value: unknown): value is { runId: string } {
 }
 
 function isRunState(value: unknown): value is RunState {
-  return isRecord(value) && isPlan(value["plan"]) && Array.isArray(value["events"]) && (value["receipt"] === null || isRecord(value["receipt"]));
+  return isRecord(value) && isPlan(value["plan"]) && Array.isArray(value["events"]) && value["events"].every(isStepEvent) && (value["receipt"] === null || isReceipt(value["receipt"]));
 }
 
 function isOk(value: unknown): value is { ok: true } {

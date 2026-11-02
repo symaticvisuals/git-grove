@@ -2,6 +2,7 @@ import type { Plan } from "../../src/core/actions/plan.types.js";
 import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { activityQuery } from "./activity-query.js";
+import { type DialogAction, type DialogSlices, type DialogState, type PaletteState, reduceDialog, type RunSlice } from "./dialogs/reduce-dialog.js";
 import type { LiveProblem, LiveState } from "./live.js";
 import type { Route } from "./parse-route.js";
 import { SLICE_NAMES, type SliceName } from "./slice-names.js";
@@ -37,6 +38,11 @@ export type State = {
   lastEventAt: number | null;
   updateAvailable: boolean;
   signedOut: boolean;
+  dialog: DialogState | null;
+  run: RunSlice | null;
+  palette: PaletteState | null;
+  /** The id the last dialog opened got; each open takes the next one. */
+  dialogSeq: number;
 };
 
 export type UiAction =
@@ -50,7 +56,8 @@ export type UiAction =
   | { type: "tab"; tab: Tab }
   | { type: "needs-only"; on: boolean }
   | { type: "toggle-group"; key: string }
-  | { type: "signed-out" };
+  | { type: "signed-out" }
+  | DialogAction;
 
 type Change = <T>(load: Load<T> | null) => Load<T> | null;
 
@@ -112,9 +119,15 @@ function everySlice(state: State, change: Change): State {
   return SLICE_NAMES.reduce((next, slice) => update(next, slice, change), state);
 }
 
+function withDialogs(state: State, action: DialogAction): State {
+  const slices: DialogSlices = { dialog: state.dialog, run: state.run, palette: state.palette, dialogSeq: state.dialogSeq };
+  const next = reduceDialog(slices, action);
+  return next === slices ? state : { ...state, ...next };
+}
+
 function comeBack(state: State): State {
   const up: State = { ...state, live: "up", liveProblem: null };
-  return state.liveDropped ? { ...everySlice(up, invalidate), liveDropped: false } : up;
+  return state.liveDropped ? withDialogs({ ...everySlice(up, invalidate), liveDropped: false }, { type: "run-resync" }) : up;
 }
 
 function joined(items: readonly ActivityItem[], item: ActivityItem, limit: number): ActivityItem[] | null {
@@ -161,8 +174,9 @@ function onEvent(state: State, event: ServerEvent, at: number): State {
     case "activity":
       return onActivity(next, event.item);
     case "step":
+      return withDialogs(next, { type: "run-step", runId: event.runId, event: event.event });
     case "receipt":
-      return next;
+      return withDialogs(next, { type: "run-receipt", runId: event.runId, receipt: event.receipt });
   }
 }
 
@@ -195,6 +209,8 @@ function step(state: State, action: UiAction): State {
       return { ...state, closed: state.closed.includes(action.key) ? state.closed.filter((key) => key !== action.key) : [...state.closed, action.key] };
     case "signed-out":
       return { ...state, signedOut: true };
+    default:
+      return withDialogs(state, action);
   }
 }
 
@@ -231,6 +247,10 @@ export function initialState(route: Route, pageVersion: string): State {
     lastEventAt: null,
     updateAvailable: false,
     signedOut: false,
+    dialog: null,
+    run: null,
+    palette: null,
+    dialogSeq: 0,
   };
   const wanted = sliceRequests(blank);
   return SLICE_NAMES.reduce((state, slice) => (wanted[slice] === null ? state : update(state, slice, () => LOADING)), blank);
@@ -240,7 +260,8 @@ export function initialState(route: Route, pageVersion: string): State {
  * The next state; pure. A reply is kept only for the slice and key the state still asks for. A digest reloads the
  * slices it concerns, failed ones included; an activity event joins the lists it belongs to; while live, the project
  * list reloads every 30 s; and once the live stream is back after dropping, every slice is reloaded. A slice the
- * route no longer needs is cleared; one it newly needs starts loading.
+ * route no longer needs is cleared; one it newly needs starts loading. Dialog, run and palette actions, and the
+ * step and receipt events, go to `reduceDialog`; a stream that is back after dropping reads the current run again.
  */
 export function reduce(state: State, action: UiAction): State {
   const next = step(state, action);

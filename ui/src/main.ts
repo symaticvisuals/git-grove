@@ -1,17 +1,30 @@
+import type { ActionName } from "../../src/core/actions/plan.types.js";
+import type { WireRepoView } from "../../src/server/wire/wire.types.js";
+import { adjacentRow } from "./adjacent-row.js";
 import { adoptToken, type TokenDeps } from "./adopt-token.js";
 import { announcement } from "./announcement.js";
 import { type Api, createApi } from "./api.js";
 import { ApiError } from "./api.error.js";
+import { type ActionData, dialogContext } from "./dialogs/dialog-context.js";
+import { createDialogEffects } from "./dialogs/dialog-effects.js";
+import { createDialogHost } from "./dialogs/dialog-host.js";
+import { DIALOGS } from "./dialogs/dialog-specs.js";
 import { effectivePick } from "./effective-pick.js";
-import { html, type SafeHtml } from "./html.js";
+import { html } from "./html.js";
 import { ICONS } from "./icons.js";
+import { keyCommand, type KeyCommand, type KeyMode } from "./keys.js";
 import { connectLive } from "./live.js";
+import { loadable } from "./loadable.js";
 import { MESSAGES } from "./messages.js";
+import { createPalette } from "./palette/palette.js";
+import { type PaletteItem, paletteItems } from "./palette/palette-items.js";
 import { parseRoute, routeHash } from "./parse-route.js";
+import { createRegionPainter } from "./region-painter.js";
 import { detailPanel } from "./render/detail-panel.js";
 import { mainView } from "./render/main-view.js";
 import { sidebar } from "./render/sidebar.js";
 import { scanNow } from "./scan-now.js";
+import { shortcutTarget, type ShortcutKey } from "./shortcut-target.js";
 import { SLICE_NAMES, type SliceName } from "./slice-names.js";
 import { sliceRequests } from "./slice-requests.js";
 import { initialState, reduce, type State, type Tab, type UiAction } from "./state.js";
@@ -22,8 +35,9 @@ declare const __GROVE_VERSION__: string;
 
 const PROJECTS_EVERY_MS = 1_000;
 const CLOCK_MS = 5_000;
+const FOCUS_WAIT_MS = 2_000;
 const TABS: readonly Tab[] = ["feature", "health", "activity"];
-const TIME_TEXT = /(<time\b[^>]*>)[^<]*(<\/time>)/g;
+const ACTION_NAMES = Object.keys(DIALOGS);
 
 function pageVersion(): string {
   const content = document.querySelector('meta[name="grove-version"]')?.getAttribute("content") ?? "";
@@ -37,8 +51,12 @@ let frame = 0;
 let reveal = true;
 let projectsFetchedAt = 0;
 let projectsTimer = 0;
+let scrimOwner: "dialog" | "palette" | null = null;
+let returnFocus: string | null = null;
+let focusAfterPaint: { key: string; until: number } | null = null;
 const inFlight = new Map<SliceName, { key: string; again: boolean }>();
-const painted = new Map<string, { stable: string; context: string }>();
+const paintRegion = createRegionPainter();
+const scrim = document.getElementById("scrim") ?? document.body;
 
 function announce(text: string): void {
   const region = document.getElementById("announce");
@@ -49,6 +67,8 @@ function announce(text: string): void {
   }, 50);
 }
 
+const effects = createDialogEffects({ api: () => api, state: () => state, dispatch: (action) => dispatch(action), toast });
+
 function dispatch(action: UiAction): void {
   if (action.type === "event" && action.event.type === "digest") for (const flight of inFlight.values()) flight.again = true;
   if (action.type === "route") reveal = true;
@@ -57,6 +77,7 @@ function dispatch(action: UiAction): void {
   if (state === before) return;
   const spoken = announcement(before, state, action);
   if (spoken !== null) announce(spoken);
+  effects.after(before, state, action);
   schedule();
   load();
 }
@@ -88,9 +109,7 @@ function load(): void {
   const requests = sliceRequests(state);
   for (const slice of SLICE_NAMES) {
     const request = requests[slice];
-    const current = state[slice];
-    if (request === null || inFlight.get(slice)?.key === request.key) continue;
-    if (current !== null && !(current.status === "loading" || (current.status === "ready" && current.stale))) continue;
+    if (request === null || inFlight.get(slice)?.key === request.key || !loadable(state, slice)) continue;
     if (slice === "projects" && projectsThrottled()) continue;
     const flight = { key: request.key, again: false };
     inFlight.set(slice, flight);
@@ -108,48 +127,65 @@ function load(): void {
   }
 }
 
-function focusedKey(region: HTMLElement): string | null {
-  const active = document.activeElement;
-  return active instanceof HTMLElement && region.contains(active) ? (active.dataset["key"] ?? null) : null;
+function shownRepo(): WireRepoView | null {
+  const { route, repo } = state;
+  if (route.view !== "repo" || repo === null || repo.status === "loading" || repo.data === null) return null;
+  return repo.data.project.id === route.repo ? repo.data : null;
 }
 
-function put(id: string, content: SafeHtml, context: string): void {
-  const region = document.getElementById(id);
-  const stable = content.text.replace(TIME_TEXT, "$1$2");
-  const last = painted.get(id);
-  if (region === null || last?.stable === stable) return;
-  const keep = last?.context === context;
-  const list = region.querySelector<HTMLElement>(".list");
-  const scroll = { region: region.scrollTop, list: list?.scrollTop ?? 0 };
-  const focus = focusedKey(region);
-  region.innerHTML = content.text;
-  painted.set(id, { stable, context });
-  if (keep) {
-    region.scrollTop = scroll.region;
-    const next = region.querySelector<HTMLElement>(".list");
-    if (next !== null) next.scrollTop = scroll.list;
+function focusKey(key: string | null): boolean {
+  const target = key === null ? null : document.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
+  target?.focus({ preventScroll: true });
+  return target !== null && document.activeElement === target;
+}
+
+const dialogHost = createDialogHost({ root: scrim, dispatch, paint: paintRegion });
+
+const palette = createPalette({ root: scrim, dispatch, state: () => state, run: (item) => runPaletteItem(item) });
+
+function paintScrim(now: number): void {
+  const owner = state.palette !== null ? "palette" : state.dialog !== null ? "dialog" : null;
+  if (owner !== null && scrimOwner === null) {
+    const active = document.activeElement;
+    returnFocus = active instanceof HTMLElement ? (active.dataset["key"] ?? null) : null;
   }
-  if (focus !== null) region.querySelector<HTMLElement>(`[data-key="${CSS.escape(focus)}"]`)?.focus({ preventScroll: true });
+  const app = document.querySelector<HTMLElement>(".app");
+  if (app !== null) app.inert = owner !== null;
+  scrim.classList.toggle("on", owner !== null);
+  if (owner !== "dialog") dialogHost.reset();
+  if (owner !== "palette") palette.reset();
+  if (owner === "dialog") dialogHost.paint(state, now);
+  if (owner === "palette") palette.paint(state);
+  if (owner === null && scrimOwner !== null) {
+    scrim.innerHTML = "";
+    if (!focusKey(returnFocus)) document.querySelector<HTMLElement>("#view .row.sel")?.focus({ preventScroll: true });
+    returnFocus = null;
+  }
+  scrimOwner = owner;
 }
 
 function paint(): void {
   const now = Date.now();
   const { route } = state;
-  const loaded = state.repo !== null && state.repo.status !== "loading" ? state.repo.data : null;
-  const view = route.view === "repo" && loaded !== null && loaded.project.id === route.repo ? loaded : null;
+  const view = shownRepo();
   const onRepo = route.view === "repo" && !state.signedOut;
   const pick = effectivePick(route, view);
   const header = html`<div class="ws">${ICONS.logo}<b>git grove</b><span class="local">local</span></div>`;
   const side = state.signedOut ? header : sidebar({ route, projects: state.projects, repo: view, live: state.live, now });
-  put("side", side, "side");
-  put("view", mainView(state, now), `${route.view}:${route.view === "repo" ? route.repo : ""}:${state.tab}`);
+  paintRegion(document.getElementById("side"), side, "side");
+  paintRegion(document.getElementById("view"), mainView(state, now), `${route.view}:${route.view === "repo" ? route.repo : ""}:${state.tab}`);
   const detail = onRepo ? detailPanel({ repo: state.repo, pick, feature: state.feature, preview: state.preview, now }) : html``;
-  put("detail", detail, pick === null || route.view !== "repo" ? "" : routeHash({ ...route, pick }));
+  paintRegion(document.getElementById("detail"), detail, pick === null || route.view !== "repo" ? "" : routeHash({ ...route, pick }));
   document.getElementById("main")?.classList.toggle("wide", !onRepo);
   document.title = view === null ? "git grove" : `${view.project.name} · git grove`;
+  paintScrim(now);
   if (reveal && (route.view !== "repo" || view !== null)) {
     reveal = false;
     document.querySelector(".row.sel")?.scrollIntoView({ block: "nearest" });
+  }
+  if (focusAfterPaint !== null && (now > focusAfterPaint.until || focusKey(focusAfterPaint.key))) {
+    if (now <= focusAfterPaint.until) document.activeElement?.scrollIntoView({ block: "nearest" });
+    focusAfterPaint = null;
   }
 }
 
@@ -169,23 +205,82 @@ function tick(): void {
   dispatch({ type: "tick", now });
 }
 
-/** The git actions (restore, ack, restack, remove, copy-env, cleanup, new, add-level), opening in an editor or terminal, and the palette: Task 10's dialogs attach here. */
-function openAction(_name: string, _data: DOMStringMap): void {}
+function isActionName(name: string): name is ActionName {
+  return ACTION_NAMES.includes(name);
+}
 
-function scan(element: HTMLElement): void {
+function failure(error: unknown): string {
+  return error instanceof ApiError ? error.message : MESSAGES.notRunning;
+}
+
+function withRepo(then: (repo: WireRepoView) => void): void {
+  const shown = shownRepo();
+  if (shown !== null) {
+    then(shown);
+    return;
+  }
+  const projects = state.projects.status === "loading" ? [] : (state.projects.data ?? []);
+  const [only] = projects;
+  if (api === null || only === undefined || projects.length > 1) {
+    toast(projects.length > 1 ? "Open a repo first, then start it there." : "No repo to start it in yet.", false);
+    return;
+  }
+  api.repo(only.id).then(then, (error: unknown) => toast(failure(error), false));
+}
+
+function openIn(app: "editor" | "terminal", path: string | undefined): void {
   const client = api;
-  if (client === null) return;
-  const repo = Number(element.dataset["repo"]);
-  scanNow({ api: client, repo: Number.isSafeInteger(repo) && repo > 0 ? repo : undefined, now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }).then(
-    (result) => toast(result.text, result.ok),
-    (error: unknown) => toast(error instanceof ApiError ? error.message : MESSAGES.notRunning, false),
+  const repo = state.route.view === "repo" ? state.route.repo : null;
+  if (client === null || repo === null || path === undefined) return;
+  client.open({ repo, path, app }).then(
+    () => toast(app === "editor" ? "Opened in your editor" : "Opened a terminal in that worktree"),
+    (error: unknown) => toast(failure(error), false),
   );
 }
 
+/** A git action (restore, ack, restack, remove, copy-env, cleanup, new, add-level) opens its dialog; editor and terminal open; the palette opens. */
+function openAction(name: string, data: ActionData): void {
+  if (name === "palette") {
+    dispatch({ type: "palette-open" });
+    return;
+  }
+  if (name === "open-editor" || name === "open-terminal") {
+    openIn(name === "open-editor" ? "editor" : "terminal", data.path);
+    return;
+  }
+  if (!isActionName(name) || state.signedOut) return;
+  withRepo((repo) => dispatch({ type: "dialog-open", action: name, ctx: dialogContext(repo, data) }));
+}
+
+function scan(repo: number | undefined): void {
+  const client = api;
+  if (client === null) return;
+  scanNow({ api: client, repo, now: Date.now, sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }).then(
+    (result) => toast(result.text, result.ok),
+    (error: unknown) => toast(failure(error), false),
+  );
+}
+
+function runPaletteItem(item: PaletteItem): void {
+  dispatch({ type: "palette-close" });
+  const { run } = item;
+  if ("open" in run) dispatch({ type: "dialog-open", action: run.open, ctx: run.ctx });
+  else if ("route" in run) {
+    const hash = routeHash(run.route);
+    if (run.route.view === "repo" && run.route.pick !== null) focusAfterPaint = { key: `row:${hash}`, until: Date.now() + FOCUS_WAIT_MS };
+    location.hash = hash;
+  } else scan(run.scan);
+}
+
 function runAction(element: HTMLElement): void {
-  const name = element.dataset["action"] ?? "";
-  if (name === "scan") scan(element);
-  else openAction(name, element.dataset);
+  const data = element.dataset;
+  const name = data["action"] ?? "";
+  if (name === "scan") {
+    const repo = Number(data["repo"]);
+    scan(Number.isSafeInteger(repo) && repo > 0 ? repo : undefined);
+    return;
+  }
+  openAction(name, { feature: data["feature"], branch: data["branch"], pin: data["pin"], path: data["path"] });
 }
 
 function isSlice(name: string | undefined): name is SliceName {
@@ -240,6 +335,79 @@ function activate(target: Element): boolean {
   return false;
 }
 
+function moveSelection(delta: 1 | -1): void {
+  const rows = [...document.querySelectorAll<HTMLElement>("#view .rows:not(.closed) > .row[data-href]")];
+  const hrefs = rows.map((row) => row.dataset["href"] ?? "");
+  const current = rows.find((row) => row.classList.contains("sel"))?.dataset["href"] ?? null;
+  const next = adjacentRow(hrefs, current, delta);
+  if (next === null) return;
+  focusAfterPaint = { key: `row:${next}`, until: Date.now() + FOCUS_WAIT_MS };
+  if (next === current) schedule();
+  else location.hash = next;
+}
+
+function shortcut(key: ShortcutKey): void {
+  const repo = shownRepo();
+  const target = repo === null ? null : shortcutTarget(repo, effectivePick(state.route, repo), key);
+  if (target !== null) openAction(target.action, target.data);
+}
+
+function command(name: KeyCommand): void {
+  const query = state.palette?.query ?? "";
+  switch (name) {
+    case "palette":
+      dispatch({ type: "palette-open" });
+      return;
+    case "close":
+      dispatch(state.palette !== null ? { type: "palette-close" } : { type: "dialog-close" });
+      return;
+    case "confirm":
+      if (state.dialog?.stage === "review") dispatch({ type: "dialog-confirm" });
+      else if (state.run !== null && state.run.receipt !== null) dispatch({ type: "dialog-close" });
+      return;
+    case "up":
+    case "down":
+      dispatch({ type: "palette-move", delta: name === "down" ? 1 : -1, count: paletteItems(state, query).length });
+      return;
+    case "run-item": {
+      const item = state.palette === null ? undefined : paletteItems(state, query)[state.palette.index];
+      if (item !== undefined) runPaletteItem(item);
+      return;
+    }
+    case "new":
+      openAction("new", {});
+      return;
+    case "quick":
+    case "restack":
+    case "ack":
+      shortcut(name);
+      return;
+    case "next":
+    case "prev":
+      moveSelection(name === "next" ? 1 : -1);
+      return;
+  }
+}
+
+function keyMode(): KeyMode {
+  return state.palette !== null ? "palette" : state.dialog !== null ? "dialog" : "page";
+}
+
+function onKey(event: KeyboardEvent): void {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const typing = target !== null && (target.isContentEditable || (target.matches("input, select, textarea") && !target.matches("input[type=checkbox], input[type=radio]")));
+  const onControl = target !== null && target.matches("button, a, select, textarea, summary");
+  const input = { key: event.key, meta: event.metaKey, ctrl: event.ctrlKey, alt: event.altKey, typing, onControl, onRow: target?.matches(".row") ?? false };
+  const name = state.signedOut || event.isComposing ? null : keyCommand(input, keyMode());
+  if (name !== null) {
+    event.preventDefault();
+    command(name);
+    return;
+  }
+  if (keyMode() !== "page" || (event.key !== "Enter" && event.key !== " ") || target === null || target.closest("button, a, input, select, textarea") !== null) return;
+  if (target.matches("[data-href], [data-ui]") && activate(target)) event.preventDefault();
+}
+
 function tokenDeps(): TokenDeps {
   return {
     hash: location.hash,
@@ -273,13 +441,13 @@ function tokenDeps(): TokenDeps {
 
 function bind(): void {
   document.addEventListener("click", (event) => {
-    if (event.target instanceof Element && activate(event.target)) event.preventDefault();
+    if (event.target === scrim) {
+      dispatch(state.palette !== null ? { type: "palette-close" } : { type: "dialog-close" });
+      return;
+    }
+    if (event.target instanceof Element && !scrim.contains(event.target) && activate(event.target)) event.preventDefault();
   });
-  document.addEventListener("keydown", (event) => {
-    const target = event.target;
-    if ((event.key !== "Enter" && event.key !== " ") || !(target instanceof HTMLElement) || target.closest("button, a, input, select, textarea") !== null) return;
-    if (target.matches("[data-href], [data-ui]") && activate(target)) event.preventDefault();
-  });
+  document.addEventListener("keydown", onKey);
   window.addEventListener("hashchange", () => {
     if (location.hash.includes("token=")) {
       void adoptToken(tokenDeps()).then(() => location.reload());

@@ -2,7 +2,7 @@ import type { Health } from "../../../src/server/wire/health-of.js";
 import type { ActivityItem, WireRepoView } from "../../../src/server/wire/wire.types.js";
 import { html, type SafeHtml } from "../html.js";
 import { ICONS } from "../icons.js";
-import type { RowRef } from "../parse-route.js";
+import { type RowRef, routeHash } from "../parse-route.js";
 import { plural } from "../plural.js";
 import type { Load, Tab } from "../state.js";
 import { worstFinding } from "../worst-finding.js";
@@ -13,6 +13,7 @@ import { groupsOf, type ListGroup, type ListRow } from "./groups-of.js";
 import { healthGroupsOf } from "./health-groups-of.js";
 import { listRow } from "./list-row.js";
 import { loadView } from "./load-view.js";
+import { rowHref } from "./row-href.js";
 import { viewBar } from "./view-bar.js";
 
 export type RepoViewInput = {
@@ -52,18 +53,27 @@ function groupActions(group: ListGroup): SafeHtml {
       const rule = worstFinding(level.findings)?.rule;
       return rule === "parent-moved" || rule === "parent-merged";
     });
-    const restack = moved ? html`<button class="gbtn hot" data-action="restack" data-feature="${id}" data-key="group:${group.key}:restack">${ICONS.restack}Restack</button>` : "";
-    return html`${restack}<button class="gbtn" data-action="add-level" data-feature="${id}" data-key="group:${group.key}:add-level">${ICONS.plus}Add level</button>`;
+    const restack = moved ? html`<button class="gbtn hot" data-action="restack" data-feature="${id}" data-key="group:${group.key}:restack" tabindex="-1">${ICONS.restack}Restack</button>` : "";
+    return html`${restack}<button class="gbtn" data-action="add-level" data-feature="${id}" data-key="group:${group.key}:add-level" tabindex="-1">${ICONS.plus}Add level</button>`;
   }
-  if (group.kind === "singles" || group.kind === "detached") return html`<button class="gbtn" data-action="cleanup" data-key="group:${group.key}:cleanup">${ICONS.broom}Clean up</button>`;
+  if (group.kind === "singles" || group.kind === "detached") return html`<button class="gbtn" data-action="cleanup" data-key="group:${group.key}:cleanup" tabindex="-1">${ICONS.broom}Clean up</button>`;
   return html``;
 }
 
-function groupView(group: ListGroup, input: RepoViewInput): SafeHtml {
+function groupView(group: ListGroup, input: RepoViewInput, stop: string | null): SafeHtml {
   const closed = input.closed.includes(group.key);
-  const rows = group.rows.map((_, index) => listRow(group.rows, index, { repoId: input.repoId, pick: input.pick, now: input.now }));
-  return html`<div class="group${closed ? " closed" : ""}" role="button" tabindex="0" aria-expanded="${closed ? "false" : "true"}" data-ui="toggle-group" data-group="${group.key}" data-key="group:${group.key}">${ICONS.caret}<b>${group.name}</b><span class="meta">${group.meta}</span><span class="gacts">${groupActions(group)}</span><span class="tally">${tally(group.rows)}</span></div>
+  const rows = group.rows.map((_, index) => listRow(group.rows, index, { repoId: input.repoId, pick: input.pick, now: input.now, stop }));
+  const tabindex = stop === `group:${group.key}` ? "0" : "-1";
+  return html`<div class="group${closed ? " closed" : ""}" role="button" tabindex="${tabindex}" aria-expanded="${closed ? "false" : "true"}" data-ui="toggle-group" data-group="${group.key}" data-key="group:${group.key}">${ICONS.caret}<b>${group.name}</b><span class="meta">${group.meta}</span><span class="gacts">${groupActions(group)}</span><span class="tally">${tally(group.rows)}</span></div>
 <div class="rows${closed ? " closed" : ""}">${rows}</div>`;
+}
+
+function tabStop(groups: readonly ListGroup[], input: RepoViewInput): string | null {
+  const open = groups.filter((group) => !input.closed.includes(group.key));
+  const hrefs = open.flatMap((group) => group.rows.map((row) => rowHref(input.repoId, row).href));
+  const selected = input.pick === null ? null : routeHash({ view: "repo", repo: input.repoId, pick: input.pick });
+  if (selected !== null && hrefs.includes(selected)) return selected;
+  return hrefs[0] ?? (groups[0] === undefined ? null : `group:${groups[0].key}`);
 }
 
 function summary(view: WireRepoView): string {
@@ -85,7 +95,8 @@ function groupsView(view: WireRepoView, input: RepoViewInput): SafeHtml {
   if (all.length === 0) return empty("Nothing here yet besides the main checkout. New features and worktrees show up as they appear.");
   const shown = input.needsOnly ? all.map((group) => ({ ...group, rows: group.rows.filter(needsYou) })).filter((group) => group.rows.length > 0) : all;
   if (shown.length === 0) return empty("Nothing needs you");
-  return html`${shown.map((group) => groupView(group, input))}`;
+  const stop = tabStop(shown, input);
+  return html`${shown.map((group) => groupView(group, input, stop))}`;
 }
 
 function scanFailed(view: WireRepoView): SafeHtml {
@@ -96,7 +107,8 @@ function scanFailed(view: WireRepoView): SafeHtml {
 /**
  * A repository's view: its bar with the By feature, By health and Activity tabs and Scan now, the filters (the
  * Needs you toggle, the clean-up chip and a summary), and the list of its groups, or its activity on that tab. A
- * repo whose last scan failed keeps its last data under a banner.
+ * repo whose last scan failed keeps its last data under a banner. The list is one Tab stop: the selected row, else
+ * the first row of an open group, else the first group's header; group buttons are reached by mouse, palette or keys.
  */
 export function repoView(input: RepoViewInput): SafeHtml {
   const view = input.repo === null || input.repo.status === "loading" ? null : input.repo.data;

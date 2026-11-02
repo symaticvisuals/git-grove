@@ -3,7 +3,14 @@ import { activityList } from "../../ui/src/render/activity-list.js";
 import { detailPanel } from "../../ui/src/render/detail-panel.js";
 import { needsYouView } from "../../ui/src/render/needs-you-view.js";
 import { repoView } from "../../ui/src/render/repo-view.js";
-import { activityItem, feature, featureDetail, finding, level, project, repoView as view } from "./wire-fixtures.js";
+import { paletteItems } from "../../ui/src/palette/palette-items.js";
+import { dialogParts } from "../../ui/src/render/dialog-parts.js";
+import { paletteOptions } from "../../ui/src/render/palette-options.js";
+import { renderFields } from "../../ui/src/render/render-fields.js";
+import { DIALOGS } from "../../ui/src/dialogs/dialog-specs.js";
+import { sliceRequests } from "../../ui/src/slice-requests.js";
+import { initialState, reduce } from "../../ui/src/state.js";
+import { activityItem, feature, featureDetail, finding, level, plan, project, repoView as view } from "./wire-fixtures.js";
 
 const EVIL = "<img src=x onerror=alert(1)>";
 const SHOWN = "&lt;img src=x onerror=alert(1)&gt;";
@@ -55,4 +62,40 @@ test("activity and needs-you entries render as text", () => {
   safe(activityList([activityItem({ title: EVIL, detail: EVIL, branch: "x" })], 2, new Map([[1, EVIL]])).text);
   const item = { repoId: 1, repoName: EVIL, featureId: null, orphan: null, finding: finding("idle", { title: EVIL, detail: EVIL, subject: { kind: "worktree", id: EVIL } }) };
   safe(needsYouView({ status: "ready", data: [item], stale: false }).text);
+});
+
+test("a dialog's heading, plan, picks, steps and receipt render agent-written text as text", () => {
+  const ctx = { repo: evilView, feature: evilFeature, level: evilLevel, branch: EVIL, targets: [{ branch: EVIL }], worktree: EVIL };
+  const blank = initialState({ view: "repo", repo: 1, pick: null }, "1.0.0");
+  const shown = reduce(blank, { type: "loaded", key: sliceRequests(blank).repo?.key ?? "", result: { slice: "repo", data: evilView } });
+  const open = reduce(shown, { type: "dialog-open", action: "ack", ctx });
+  const before = dialogParts(open, 2);
+  safe(`${before?.head.text}`);
+  const evilPlan = plan({
+    action: "cleanup",
+    context: EVIL,
+    title: EVIL,
+    summary: EVIL,
+    confirm: EVIL,
+    note: EVIL,
+    blockers: [],
+    checks: [{ ok: false, text: EVIL, why: EVIL }],
+    effects: [EVIL],
+    commands: [EVIL],
+    folders: [{ path: EVIL, isNew: true, note: EVIL }],
+    choices: [{ id: EVIL, label: EVIL, detail: EVIL, selectable: true, selected: true, health: "fine" }],
+    before: { caption: EVIL, commits: [{ sha: "abcdef0", subject: EVIL, tip: true, base: false, lost: false, pinned: false }] },
+    after: null,
+    steps: [{ title: EVIL, detail: EVIL }],
+  });
+  const planned = reduce(open, { type: "dialog-planned", dialog: open.dialog?.id ?? 0, revision: 0, planId: "p", plan: evilPlan });
+  const review = dialogParts(planned, 2);
+  safe(`${review?.head.text}${review?.body.text}${review?.foot.text}`);
+  const confirmed = reduce(reduce(planned, { type: "dialog-confirm" }), { type: "run-started", planId: "p", runId: "r" });
+  const stepped = reduce(confirmed, { type: "event", at: 3, event: { type: "step", runId: "r", event: { index: 0, state: "failed", detail: EVIL, ms: 4 } } });
+  const done = reduce(stepped, { type: "event", at: 4, event: { type: "receipt", runId: "r", receipt: { action: "ack", ok: false, refused: true, title: EVIL, lines: [EVIL], pins: [], undo: null, at: 4 } } });
+  const run = dialogParts(done, 5);
+  safe(`${run?.body.text}`);
+  safe(renderFields(DIALOGS["add-level"], { feature: EVIL, branch: EVIL, on: EVIL, env: true }, ctx).text);
+  safe(paletteOptions(paletteItems(shown, ""), 0).text);
 });

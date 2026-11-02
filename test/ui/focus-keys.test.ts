@@ -3,6 +3,7 @@ import { detailPanel } from "../../ui/src/render/detail-panel.js";
 import { repoView } from "../../ui/src/render/repo-view.js";
 import { sidebar } from "../../ui/src/render/sidebar.js";
 import type { WireRepoView } from "../../src/server/wire/wire.types.js";
+import type { RowRef } from "../../ui/src/parse-route.js";
 import { feature, finding, level, project, repoView as view } from "./wire-fixtures.js";
 
 const moved = finding("parent-moved", { severity: "needs-action" });
@@ -21,8 +22,15 @@ function stack(id: string, name: string): ReturnType<typeof feature> {
 
 const data: WireRepoView = view({ project: project({ id: 1 }), features: [stack("1.QQ", "one"), stack("1.Qg", "two")], cleanupCount: 1 });
 
-function list(now: number, stale: boolean): string {
-  return repoView({ repoId: 1, repo: { status: "ready", data, stale }, activity: null, tab: "feature", needsOnly: false, closed: [], pick: null, now }).text;
+function list(now: number, stale: boolean, pick: RowRef | null = null, closed: string[] = []): string {
+  return repoView({ repoId: 1, repo: { status: "ready", data, stale }, activity: null, tab: "feature", needsOnly: false, closed, pick, now }).text;
+}
+
+function tabbable(text: string): string[] {
+  return [...text.slice(text.indexOf('<div class="list">')).matchAll(/<[a-z]+\b[^>]*>/g)]
+    .map((match) => match[0])
+    .filter((tag) => /^<(button|a)\b/.test(tag) ? !tag.includes('tabindex="-1"') : tag.includes('tabindex="0"'))
+    .map((tag) => /data-key="([^"]*)"/.exec(tag)?.[1] ?? "");
 }
 
 function keys(text: string): string[] {
@@ -30,7 +38,7 @@ function keys(text: string): string[] {
 }
 
 function focusable(text: string): number {
-  return (text.match(/<button\b|<a\b|tabindex="0"/g) ?? []).length;
+  return (text.match(/<(?:button|a)\b[^>]*>|<[a-z]+\b[^>]*\btabindex="[^"]*"[^>]*>/g) ?? []).length;
 }
 
 function tagWithKey(text: string, key: string): string {
@@ -68,4 +76,14 @@ test("a stack offers Restack only when one of its levels has a parent that moved
   expect(text).not.toContain('data-action="restack"');
   expect(text).toContain('data-action="add-level"');
   expect(list(1, false)).toContain('data-key="group:f:1.Qg:restack"');
+});
+
+test("the list is one Tab stop: the selected row and its own actions, else the first row", () => {
+  const picked = tabbable(list(1, false, { kind: "feature", feature: "1.Qg", branch: "two/02" }));
+  const row = "row:#/r/1/f/1.Qg/two%2F02";
+  expect(picked).toEqual([row, `${row}:restack`, `${row}:open-editor`, `${row}:open-terminal`, `${row}:palette`]);
+  expect(tabbable(list(1, false))[0]).toBe("row:#/r/1/f/1.QQ/one%2F01");
+  const folded = tabbable(list(1, false, { kind: "feature", feature: "1.QQ", branch: "one/01" }, ["f:1.QQ"]));
+  expect(folded[0]).toBe("row:#/r/1/f/1.Qg/two%2F01");
+  expect(tabbable(list(1, false, null, ["f:1.QQ", "f:1.Qg"]))).toEqual(["group:f:1.QQ"]);
 });
