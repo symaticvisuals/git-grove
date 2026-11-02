@@ -10,12 +10,14 @@ const HOOK_TIMEOUT_S = 10;
 
 /**
  * Runs `git grove install-guard`: prints the Claude Code `PreToolUse` hook that runs the guard, for the user to add to
- * `~/.claude/settings.json` themselves, and how to check it works. It writes no file. It refuses with exit 1 from an
- * npx or `pnpm dlx` cache, which may be cleared under the hook.
+ * `~/.claude/settings.json` themselves, and how to check it works. It writes no file. It refuses with exit 1 from a
+ * package runner's cache, which may be cleared under the hook.
  */
 export function installGuardCommand(io: CliIo, where: GuardInstallation): number {
   if (isEphemeralBin(where.bin)) {
-    io.err("git-grove: this git grove runs from an npx cache, which npm may clear under the hook; install it first: npm i -g @deepanshugoel/git-grove\n");
+    io.err(
+      "git-grove: this git grove runs from a package runner's cache (npx, pnpm dlx, bunx, yarn dlx), which may be cleared under the hook; install it first: npm i -g @deepanshugoel/git-grove\n",
+    );
     return 1;
   }
   const command = `${shellWord(where.node)} ${shellWord(where.bin)} guard --claude`;

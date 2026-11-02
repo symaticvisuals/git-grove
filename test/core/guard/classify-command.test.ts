@@ -96,20 +96,27 @@ test("git stash is not guarded, and earns no credit for a later discard; stash d
   expect(kinds(["git stash drop", "git stash clear", "git stash pop", "git stash list"])).toEqual(["none", "none", "none", "none"]);
 });
 
-test("checkout and restore with --ours, --theirs, -m, --merge or --conflict resolve conflicts and are not discards", () => {
-  expect(
-    kinds([
-      "git checkout --theirs -- a.txt",
-      "git checkout --ours .",
-      "git checkout -m -- a.txt",
-      "git checkout --merge a.txt",
-      "git checkout --conflict=diff3 -- a.txt",
-      "git restore --theirs a.txt",
-      "git restore --ours -- a.txt",
-      "git restore -m a.txt",
-      "git restore --conflict=merge a.txt",
-    ]),
-  ).toEqual(["none", "none", "none", "none", "none", "none", "none", "none", "none"]);
+test("checkout and restore with --ours, --theirs, -m, --merge or --conflict are path discards, since on a path that is not conflicted they discard its changes", () => {
+  for (const line of [
+    "git checkout --theirs -- a.txt",
+    "git checkout --ours .",
+    "git checkout -m -- a.txt",
+    "git checkout --conflict=diff3 -- a.txt",
+    "git restore --theirs a.txt",
+    "git restore --ours -- a.txt",
+    "git restore -m a.txt",
+    "git restore --conflict=merge a.txt",
+  ]) {
+    expect(check(line), line).toMatchObject({ kind: "discard", scope: "paths", side: "unstaged" });
+  }
+  expect(check("git checkout --merge a.txt")).toMatchObject({ kind: "checkout-operands", operands: ["a.txt"] });
+});
+
+test("checkout -f with -b or -B still discards the tree", () => {
+  for (const line of ["git checkout -f -b nb HEAD~1", "git checkout -fB nb HEAD~1", "git checkout --force --orphan nb"]) {
+    expect(check(line), line).toMatchObject({ kind: "discard", side: "all", scope: "tree" });
+  }
+  expect(kinds(["git checkout -b nb HEAD~1", "git checkout -B nb"])).toEqual(["none", "none"]);
 });
 
 test("path discards are scoped to their paths, and reset --hard to the whole tree", () => {

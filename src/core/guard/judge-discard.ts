@@ -27,7 +27,12 @@ async function countChanges(check: Discard): Promise<number> {
 
 async function advice(check: Discard): Promise<string> {
   const operation = await readOperation(check.cwd);
-  if (operation !== null) return `A ${operation.name} is in progress. To drop it and keep your own uncommitted changes, run: ${operation.abort}`;
+  if (operation !== null && check.scope === "tree") {
+    return `A ${operation.name} is in progress. To drop it and keep your own uncommitted changes, run: ${operation.abort}`;
+  }
+  if (operation !== null) {
+    return `A ${operation.name} is in progress. Name only the conflicted paths, which git diff --name-only --diff-filter=U lists, or leave the other files alone and tell the user.`;
+  }
   if (check.scope === "tree") return "Commit them, or run git stash on its own first, then retry.";
   const paths = check.pathspecs.length > 0 ? ` -- ${check.pathspecs.map(shellWord).join(" ")}` : " with the same paths";
   return `To keep a copy, run git stash push${paths} on its own first, then retry.`;
@@ -37,8 +42,9 @@ async function advice(check: Discard): Promise<string> {
  * Blocks a command that would discard uncommitted changes (`git status --porcelain=v2 --untracked-files=no
  * --ignore-submodules=all`, limited to its pathspecs, and to unstaged changes when it leaves the index alone).
  * Unmerged paths count only for a discard of the whole tree, since git's conflict tools rewrite them from the index.
- * The advice names the abort for a rebase, merge, cherry-pick or revert in progress, a path stash for a path discard,
- * and otherwise a commit or a stash run on its own. An allowed `reset --hard <rev>` that moves a branch pins its tip.
+ * During a rebase, merge, cherry-pick or revert, the advice names its abort for a whole-tree discard and the conflicted
+ * paths for a path discard, where a stash would fail; otherwise a path stash for a path discard, and a commit or a stash
+ * run on its own for the tree. An allowed `reset --hard <rev>` that moves a branch pins its tip.
  */
 export async function judgeDiscard(check: Discard, from: string): Promise<DiscardJudgement> {
   const head = await readWorktreeHead(check.cwd);

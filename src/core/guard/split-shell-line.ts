@@ -15,8 +15,14 @@ const WORD_END = new Set(["", " ", "\t", "\n", ";", "&", "|", "(", ")", "<", ">"
 const DOUBLE_QUOTE_ESCAPES = new Set(["$", "`", '"', "\\"]);
 const BACKTICK_ESCAPES = new Set(["$", "`", "\\"]);
 const MAX_EXPANSIONS = 256;
+const COMMAND_PREFIXES = new Set(["if", "then", "elif", "else", "do", "while", "until", "!", "{", "time"]);
 const OPEN: ShellItem = { kind: "open" };
 const CLOSE: ShellItem = { kind: "close" };
+
+/** Whether a substitution's commands hold `case`, whose pattern's `)` the reader cannot tell from the closing one. */
+function holdsCase(items: readonly ShellItem[]): boolean {
+  return items.some((item) => item.kind === "words" && item.words.find((word) => !COMMAND_PREFIXES.has(word.text))?.text === "case");
+}
 
 /** The index just past the `))` closing an arithmetic expansion whose body starts at `from`, or -1. */
 function closeArithmetic(line: string, from: number): number {
@@ -61,7 +67,7 @@ function scan(line: string, start: number, home: string, nested: boolean): Scan 
   };
 
   const substituted = (body: Scan, raw: string): void => {
-    if (body.unreadable) {
+    if (body.unreadable || holdsCase(body.items)) {
       unreadable = true;
       return;
     }
@@ -285,8 +291,8 @@ function scan(line: string, start: number, home: string, nested: boolean): Scan 
  * keeping `(` and `)` as subshell markers. Quotes, backslashes, comments, redirections and here-document bodies are
  * read as a POSIX shell reads them; `~` and `$HOME` expand to `home`, and any other parameter marks its word dynamic,
  * as does a brace expansion to more than 256 words. The commands inside `$( … )` and backticks come first, inside a
- * subshell, and mark the word holding them dynamic; `$(( … ))` is arithmetic. An unclosed substitution or quote, or
- * a process substitution, makes the line `unreadable`.
+ * subshell, and mark the word holding them dynamic; `$(( … ))` is arithmetic. An unclosed substitution or quote, a
+ * substitution holding `case`, or a process substitution, makes the line `unreadable`.
  */
 export function splitShellLine(line: string, home: string): ShellLine {
   const { items, unreadable } = scan(line, 0, home, false);

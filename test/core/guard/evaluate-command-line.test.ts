@@ -212,6 +212,42 @@ test("a discard mid-operation is blocked with the abort that keeps your own chan
   expect(await expectBlocked("git reset --hard")).toContain("A revert is in progress. To drop it and keep your own uncommitted changes, run: git revert --abort");
 });
 
+test("git checkout --theirs . mid-merge is blocked when another path holds your own changes", async () => {
+  await repo.commit("b.txt", "base\n", "add b");
+  await conflictedMerge();
+  await writeFile(join(root, "b.txt"), "my work\n");
+  for (const line of ["git checkout --theirs .", "git restore --theirs .", "git checkout -m ."]) {
+    expect(await expectBlocked(line), line).toBe(
+      `git grove blocked: this worktree has 1 uncommitted change that ${line} would discard. ` +
+        "A merge is in progress. Name only the conflicted paths, which git diff --name-only --diff-filter=U lists, " +
+        "or leave the other files alone and tell the user.",
+    );
+  }
+  await expectAllowed("git checkout --theirs -- base.txt");
+});
+
+test("git checkout --ours of a path outside any conflict is blocked like any discard", async () => {
+  await writeFile(join(root, "base.txt"), "my work\n");
+  for (const line of ["git checkout --ours -- base.txt", "git restore --theirs base.txt", "git checkout --conflict=merge -- .", "git checkout -m base.txt"]) {
+    expect(await expectBlocked(line), line).toContain("has 1 uncommitted change");
+  }
+});
+
+test("git checkout -f -b <new> <start> in a dirty worktree is blocked", async () => {
+  await writeFile(join(root, "base.txt"), "my work\n");
+  expect(await expectBlocked("git checkout -f -b nb HEAD~1")).toContain("git checkout -f -b nb 'HEAD~1' would discard");
+});
+
+test("a case inside a substitution makes the line one the guard cannot check, rather than misjudging its folders", async () => {
+  const dirty = join(root, ".worktrees", "dirty");
+  const clean = join(root, ".worktrees", "clean");
+  await repo.worktree(dirty, "dirty");
+  await repo.worktree(clean, "clean");
+  await writeFile(join(dirty, "base.txt"), "my work\n");
+  expect(await evaluate("(cd ../clean && x=$(case a in a) :;; esac); git reset --hard)", dirty)).toEqual({ verdict: "allow", unchecked: true, pins: [] });
+  expect(await evaluate("(cd ../clean && x=`case a in a) :;; esac`; git reset --hard)", dirty)).toEqual({ verdict: "allow", unchecked: true, pins: [] });
+});
+
 test("git checkout <path> without -- is a discard; a lone branch name is a switch", async () => {
   await repo.branch("feat");
   await writeFile(join(root, "base.txt"), "edited\n");

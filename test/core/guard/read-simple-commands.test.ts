@@ -144,6 +144,18 @@ test("the commands inside $( ) and backticks are read too, before the command ho
   expect(argvs('echo "$(echo "$(git log -1)")"')).toEqual([["git", "log", "-1"], ["echo", "$(git log -1)"], ["echo", '$(echo "$(git log -1)")']]);
 });
 
+test("a case inside $( ) or backticks, whose pattern's ) the reader cannot tell from the closing one, makes a line with git or rm unevaluable", () => {
+  for (const line of [
+    "(cd ../clean && x=$(case a in a) :;; esac); git reset --hard)",
+    "(cd ../clean && x=`case a in a) :;; esac`; git reset --hard)",
+    'echo "$(if true; then case a in a) :;; esac; fi)" && rm -rf x',
+  ]) {
+    expect(readSimpleCommands(line, "/repo", HOME), line).toEqual({ evaluable: false });
+  }
+  expect(readSimpleCommands("x=$(case a in a) :;; esac) && ls", "/repo", HOME).evaluable).toBe(true);
+  expect(argvs("echo $(echo case) && git status")).toEqual([["echo", "case"], ["echo", "$(echo case)"], ["git", "status"]]);
+});
+
 test("$(( )) is arithmetic, not a command", () => {
   expect(argvs("echo $((1+(2*3))); git reset --hard")).toEqual([["echo", "$((1+(2*3)))"], ["git", "reset", "--hard"]]);
 });

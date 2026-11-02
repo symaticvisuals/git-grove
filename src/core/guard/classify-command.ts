@@ -13,7 +13,6 @@ const UNCHECKED: GuardCheck = { kind: "unchecked" };
 const HEAD: PinRequest = { kind: "head" };
 const SHOWN_LENGTH = 120;
 const REBASE_CONTROLS = ["--continue", "--abort", "--skip", "--quit", "--edit-todo", "--show-current-patch"];
-const CONFLICT_TOOLS = ["--ours", "--theirs", "-m", "--merge", "--conflict"];
 
 const ACK = "git grove ack marks a rewrite or a deleted branch as intended, and that is for a person to decide. Tell the user what you found instead.";
 const PRUNE = "git grove pins prune deletes pins, which may hold the only copy of some commits, and that is for a person to decide. Ask the user to run it.";
@@ -82,7 +81,7 @@ function pin(at: At, verb: string, text: string, names: readonly ShellWord[], pi
 
 function checkout(at: At, args: readonly ShellWord[], text: string): GuardCheck {
   const read = readOptions(args, new Set(["-b", "-B", "--orphan"]));
-  if (hasAny(read.options, [...CONFLICT_TOOLS, "-b", "-B", "--orphan", "-p", "--patch"])) return NONE;
+  if (hasAny(read.options, ["-p", "--patch"])) return NONE;
   const verb = "git checkout";
   const fromFile = read.options.has("--pathspec-from-file");
   if (read.afterDashes !== null || fromFile) {
@@ -91,7 +90,7 @@ function checkout(at: At, args: readonly ShellWord[], text: string): GuardCheck 
     return discard(at, { verb, text, side: read.operands.length > 0 ? "all" : "unstaged", scope: "paths", pathspecs });
   }
   if (hasAny(read.options, ["-f", "--force"])) return discardTree(at, verb, text);
-  if (read.options.has("--detach") || read.operands.length === 0) return NONE;
+  if (hasAny(read.options, ["-b", "-B", "--orphan", "--detach"]) || read.operands.length === 0) return NONE;
   if (read.operands.some((word) => word.text === ".")) {
     const [first, ...rest] = read.operands;
     const fromTree = first !== undefined && first.text !== "." && rest.length > 0;
@@ -104,7 +103,7 @@ function checkout(at: At, args: readonly ShellWord[], text: string): GuardCheck 
 
 function restore(at: At, args: readonly ShellWord[], text: string): GuardCheck {
   const read = readOptions(args, new Set(["-s", "--source"]));
-  if (hasAny(read.options, [...CONFLICT_TOOLS, "-p", "--patch"])) return NONE;
+  if (hasAny(read.options, ["-p", "--patch"])) return NONE;
   const staged = hasAny(read.options, ["-S", "--staged"]);
   if (staged && !hasAny(read.options, ["-W", "--worktree"])) return NONE;
   const pathspecs = [...read.operands, ...(read.afterDashes ?? [])];

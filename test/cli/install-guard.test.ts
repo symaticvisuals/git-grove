@@ -109,6 +109,7 @@ test("install-guard from an npx, pnpm dlx, bunx or yarn dlx cache refuses with e
     const result = install("/usr/local/bin/node", bin);
     expect(result.code, bin).toBe(1);
     expect(result.out).toBe("");
+    expect(result.err).toContain("a package runner's cache (npx, pnpm dlx, bunx, yarn dlx)");
     expect(result.err).toContain("npm i -g @deepanshugoel/git-grove");
   }
 });
