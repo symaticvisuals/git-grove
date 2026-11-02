@@ -1,4 +1,3 @@
-import { chmod, mkdir, stat } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +15,7 @@ import { handleRequest, type RequestDeps } from "./http/handle-request.js";
 import { listenOnLoopback } from "./http/listen-on-loopback.js";
 import { createRouter } from "./http/router.js";
 import { lockServer } from "./lock-server.js";
+import { privateHome } from "./private-home.js";
 import type { ServerContext } from "./server-context.types.js";
 import { writeServerFile } from "./write-server-file.js";
 
@@ -47,13 +47,8 @@ function stopListening(http: Server): Promise<void> {
   });
 }
 
-async function privateHome(home: string): Promise<void> {
-  await mkdir(home, { recursive: true, mode: 0o700 });
-  if (((await stat(home)).mode & 0o077) !== 0) await chmod(home, 0o700);
-}
-
 /**
- * Starts the dashboard server: makes `<home>` private (0700), takes `<home>/server.lock` (`lockServer`), listens on
+ * Starts the dashboard server: makes sure `<home>` exists (`privateHome`), takes `<home>/server.lock` (`lockServer`), listens on
  * 127.0.0.1 and `[::1]` at `port` (default 47683) or the next of 20 free on both, and records `{ pid, port, version }`
  * in `<home>/server.json`. `close` refuses new runs and waits up to 60 s for those in progress, then stops it, giving
  * open connections a second, and removes server.json and the lock.

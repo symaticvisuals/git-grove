@@ -136,6 +136,39 @@ test("a lock written before the last boot is taken over without waiting or probi
   expect(await inode()).not.toBe(before);
 });
 
+test("a lock that looks older than boot still stands while server.json names its holder and that server answers as it", async () => {
+  await writeFile(lockFile(), String(process.pid));
+  const port = await fakeHealth(process.pid);
+  writeServerFile(home, { pid: process.pid, port, version: "0.0.1" });
+  const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
+  await utimes(lockFile(), beforeBoot, beforeBoot);
+  const before = await inode();
+  await expect(lockServer(home)).rejects.toMatchObject({ name: "ServerRunningError", port, pid: process.pid });
+  expect(await inode()).toBe(before);
+});
+
+test("a lock older than boot whose holder's port refuses is taken over at once", async () => {
+  await writeFile(lockFile(), String(process.pid));
+  writeServerFile(home, { pid: process.pid, port: await closedPort(), version: "0.0.1" });
+  const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
+  await utimes(lockFile(), beforeBoot, beforeBoot);
+  const before = await inode();
+  const startedAt = Date.now();
+  await lock();
+  expect(Date.now() - startedAt).toBeLessThan(1000);
+  expect(await inode()).not.toBe(before);
+});
+
+test("a lock older than boot whose holder's port answers as another process is taken over", async () => {
+  await writeFile(lockFile(), String(process.pid));
+  writeServerFile(home, { pid: process.pid, port: await fakeHealth(process.pid + 1), version: "0.0.1" });
+  const beforeBoot = (Date.now() - uptime() * 1000 - 60_000) / 1000;
+  await utimes(lockFile(), beforeBoot, beforeBoot);
+  const before = await inode();
+  await lock();
+  expect(await inode()).not.toBe(before);
+});
+
 test("a server still starting is waited for, and then refused", async () => {
   await writeFile(lockFile(), String(process.pid));
   writeServerFile(home, { pid: process.pid + 1, port: await closedPort(), version: "0.0.0" });

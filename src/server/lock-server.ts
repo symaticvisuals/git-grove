@@ -44,10 +44,11 @@ function granted(release: Release | null, home: string, path: string): Release {
 
 /**
  * Takes `<home>/server.lock`, taking over a lock a live process holds only on clear evidence that its server is gone:
- * the lock predates the last boot, or the port in server.json refuses or answers as another process. It waits up to
- * 2 s for a starting server to write a pid into the lock and server.json, then takes over a lock still empty or not a
- * pid. Throws ServerRunningError while the holder's server answers, and ServerUnresponsiveError when it is silent
- * or has written no server.json, so a login service retries.
+ * the port in server.json refuses or answers as another process, or the lock predates the last boot and its holder,
+ * probed once when server.json names it, does not answer as itself. It waits up to 2 s for a starting server to write
+ * a pid into the lock and server.json, then takes over a lock still empty or not a pid. Throws ServerRunningError
+ * while the holder's server answers, and ServerUnresponsiveError when it is silent or has written no server.json, so
+ * a login service retries.
  */
 export async function lockServer(home: string): Promise<Release> {
   const path = join(home, "server.lock");
@@ -61,7 +62,14 @@ export async function lockServer(home: string): Promise<Release> {
     if (tried.holder === null) return granted(await takeOverServerLock(path, null), home, path);
   }
   const holder = tried.holder;
-  if (await predatesBoot(path)) return granted(await takeOverServerLock(path, holder), home, path);
+  if (await predatesBoot(path)) {
+    const named = readServerFile(home);
+    if (named?.pid === holder) {
+      const probe = await probeHealth(named.port);
+      if (probe.kind === "answered" && probe.pid === holder) throw new ServerRunningError(named.port, holder);
+    }
+    return granted(await takeOverServerLock(path, holder), home, path);
+  }
   const info = await within<ServerInfo>(deadline, () => {
     const read = readServerFile(home);
     return read?.pid === holder ? read : null;

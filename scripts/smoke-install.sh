@@ -3,7 +3,9 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+serve_pid=""
+stop_serve() { [ -z "$serve_pid" ] || kill -KILL "$serve_pid" 2> /dev/null || true; }
+trap 'stop_serve; rm -rf "$work"' EXIT
 
 cd "$root"
 pnpm build
@@ -11,9 +13,16 @@ tarball="$(npm pack --pack-destination "$work" --silent | tail -n 1)"
 
 npm install --prefix "$work/prefix" --silent "$work/$tarball"
 export PATH="$work/prefix/node_modules/.bin:$PATH"
+installed="$work/prefix/node_modules/git-grove"
+for file in dist/ui/index.html dist/ui/app.js dist/ui/sw.js dist/ui/manifest.webmanifest dist/ui/icons/icon-512.png; do
+  [ -f "$installed/$file" ] || { echo "expected $file in the installed package" >&2; exit 1; }
+done
 
-# A throwaway grove home and git config, so the check never touches the user's own.
+# A throwaway home, grove home and git config, so the check never touches the user's own.
+export HOME="$work/user"
+mkdir -p "$HOME"
 export GIT_GROVE_HOME="$work/home"
+export GIT_GROVE_NO_OPEN=1
 export GIT_CONFIG_GLOBAL="$work/gitconfig"
 export GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME="Smoke Test" GIT_AUTHOR_EMAIL="smoke@example.com"
@@ -45,3 +54,47 @@ report="$(git grove status 2> "$work/stderr")"
 echo "$report"
 grep -qi "history rewritten" <<< "$report" || { echo "expected: history rewritten" >&2; exit 1; }
 [ ! -s "$work/stderr" ] || { echo "expected no stderr, got:" >&2; cat "$work/stderr" >&2; exit 1; }
+
+# serve: answers its health, guards the API, shows in status, and exits by itself: 0 on SIGTERM, 75 on /api/shutdown.
+# It runs as git-grove, not through git, so the signal and the exit code are the server's own.
+start_serve() {
+  git-grove serve --port 0 > "$work/serve.out" 2>&1 &
+  serve_pid=$!
+  for _ in $(seq 100); do
+    [ -s "$GIT_GROVE_HOME/server.json" ] && break
+    kill -0 "$serve_pid" 2> /dev/null || { echo "serve exited early:" >&2; cat "$work/serve.out" >&2; exit 1; }
+    sleep 0.1
+  done
+  port="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).port)' "$GIT_GROVE_HOME/server.json")"
+}
+
+wait_serve() {
+  for _ in $(seq 100); do
+    kill -0 "$serve_pid" 2> /dev/null || break
+    sleep 0.1
+  done
+  kill -0 "$serve_pid" 2> /dev/null && { echo "serve did not exit within 10 s" >&2; exit 1; }
+  code=0
+  wait "$serve_pid" || code=$?
+  serve_pid=""
+  [ "$code" = "$1" ] || { echo "expected serve to exit $1, got $code:" >&2; cat "$work/serve.out" >&2; exit 1; }
+}
+
+status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+
+start_serve
+echo "serving on port $port"
+[ "$(status_of "http://127.0.0.1:$port/api/health")" = 200 ] || { echo "expected /api/health 200" >&2; exit 1; }
+[ "$(status_of "http://127.0.0.1:$port/api/projects")" = 401 ] || { echo "expected /api/projects 401 without the token" >&2; exit 1; }
+[ "$(status_of "http://127.0.0.1:$port/manifest.webmanifest")" = 200 ] || { echo "expected the manifest" >&2; exit 1; }
+git grove status | tail -n 1 | grep -qx "Dashboard: http://127.0.0.1:$port/" || { echo "expected status to end with the dashboard" >&2; exit 1; }
+kill -TERM "$serve_pid"
+wait_serve 0
+[ ! -e "$GIT_GROVE_HOME/server.json" ] || { echo "expected server.json removed after SIGTERM" >&2; exit 1; }
+
+start_serve
+token="$(cat "$GIT_GROVE_HOME/token")"
+answer="$(status_of -X POST -H "X-Grove-Token: $token" -H "Content-Type: application/json" --data '{}' "http://127.0.0.1:$port/api/shutdown")"
+[ "$answer" = 202 ] || { echo "expected /api/shutdown 202, got $answer" >&2; exit 1; }
+wait_serve 75
+echo "serve: ok"

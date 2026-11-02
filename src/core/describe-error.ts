@@ -8,6 +8,8 @@ import { StoreCorruptError } from "./journal/store-corrupt.error.js";
 import { StoreUnavailableError } from "./journal/store-unavailable.error.js";
 import { RefusedError } from "./runner/refused.error.js";
 import { RepoLockedError } from "./runner/repo-locked.error.js";
+import { ServiceFailedError } from "./service/service-failed.error.js";
+import { ServiceUnsupportedError } from "./service/service-unsupported.error.js";
 import { PortsInUseError } from "../server/http/ports-in-use.error.js";
 import { ServerUnresponsiveError } from "../server/server-unresponsive.error.js";
 
@@ -21,6 +23,8 @@ const ONE_LINE_ERRORS = [
   RefusedError,
   RepoLockedError,
   ServerUnresponsiveError,
+  ServiceFailedError,
+  ServiceUnsupportedError,
   StoreCorruptError,
   StoreUnavailableError,
 ];

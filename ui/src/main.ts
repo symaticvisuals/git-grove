@@ -1,4 +1,5 @@
 import type { ActionName } from "../../src/core/actions/plan.types.js";
+import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import type { WireRepoView } from "../../src/server/wire/wire.types.js";
 import { adjacentRow } from "./adjacent-row.js";
 import { cycleFocus } from "./cycle-focus.js";
@@ -17,6 +18,7 @@ import { keyCommand, type KeyCommand, type KeyInput, type KeyMode } from "./keys
 import { connectLive } from "./live.js";
 import { loadable } from "./loadable.js";
 import { MESSAGES } from "./messages.js";
+import { notificationFor, type NotifyPermission } from "./notify.js";
 import { createPalette } from "./palette/palette.js";
 import type { PaletteItem } from "./palette/palette-items.js";
 import { parseRoute, routeHash } from "./parse-route.js";
@@ -180,7 +182,7 @@ function paint(): void {
   const onRepo = route.view === "repo" && !state.signedOut;
   const pick = effectivePick(route, view);
   const header = html`<div class="ws">${ICONS.logo}<b>git grove</b><span class="local">local</span></div>`;
-  const side = state.signedOut ? header : sidebar({ route, projects: state.projects, repo: view, live: state.live, now });
+  const side = state.signedOut ? header : sidebar({ route, projects: state.projects, repo: view, live: state.live, now, notify: notifyPermission() });
   paintRegion(document.getElementById("side"), side, "side");
   paintRegion(document.getElementById("view"), mainView(state, now), `${route.view}:${route.view === "repo" ? route.repo : ""}:${state.tab}`);
   const detail = onRepo ? detailPanel({ repo: state.repo, pick, feature: state.feature, preview: state.preview, now }) : html``;
@@ -212,6 +214,34 @@ function tick(): void {
     element.textContent = timeLabel(element.dataset, now);
   }
   dispatch({ type: "tick", now });
+}
+
+function notifyPermission(): NotifyPermission {
+  return typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+}
+
+function askToNotify(): void {
+  if (notifyPermission() !== "default") return;
+  void Notification.requestPermission().then((answer) => {
+    if (answer === "granted") toast("You'll get a notification when work is about to be lost");
+    if (answer === "denied") toast("Notifications are blocked for this page", false);
+    schedule();
+  });
+}
+
+function raise(event: ServerEvent): void {
+  const spec = notificationFor(event);
+  if (spec === null || notifyPermission() !== "granted") return;
+  try {
+    const shown = new Notification(spec.title, { body: spec.body, tag: spec.tag, icon: spec.icon });
+    shown.addEventListener("click", () => {
+      window.focus();
+      location.hash = spec.href;
+      shown.close();
+    });
+  } catch {
+    // Browsers that raise notifications only from a service worker show none from the page.
+  }
 }
 
 function isActionName(name: string): name is ActionName {
@@ -315,6 +345,9 @@ function runUi(element: HTMLElement): void {
       return;
     case "reload":
       location.reload();
+      return;
+    case "notify":
+      askToNotify();
       return;
     case "jump": {
       const group = data["group"] === undefined ? null : document.querySelector(`.group[data-group="${CSS.escape(data["group"])}"]`);
@@ -513,6 +546,7 @@ function bind(): void {
 async function boot(): Promise<void> {
   bind();
   schedule();
+  navigator.serviceWorker?.register("/sw.js").catch(() => undefined);
   const token = await adoptToken(tokenDeps());
   dispatch({ type: "route", route: parseRoute(location.hash) });
   if (token === null) {
@@ -523,7 +557,10 @@ async function boot(): Promise<void> {
   connectLive({
     fetchImpl,
     token,
-    onEvent: (event) => dispatch({ type: "event", event, at: Date.now() }),
+    onEvent: (event) => {
+      raise(event);
+      dispatch({ type: "event", event, at: Date.now() });
+    },
     onState: (live, problem) => dispatch(problem === undefined ? { type: "live", state: live } : { type: "live", state: live, problem }),
     onUnauthorized: () => dispatch({ type: "signed-out" }),
   });

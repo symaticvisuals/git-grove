@@ -57,6 +57,9 @@ export const ICONS = {
   terminal: glyph(stroke("M3 4.5 6.5 8 3 11.5M8.5 12H13")),
   more: glyph(`<circle cx="3.5" cy="8" r="1.3" fill="currentColor"/><circle cx="8" cy="8" r="1.3" fill="currentColor"/><circle cx="12.5" cy="8" r="1.3" fill="currentColor"/>`),
   restack: glyph(stroke("M4 2.5v6a3 3 0 0 0 3 3h5M10 9l2.5 2.5L10 14")),
+  bell: glyph(
+    `<path d="M8 2.2A3.8 3.8 0 0 0 4.2 6v3L3 11.2h10L11.8 9V6A3.8 3.8 0 0 0 8 2.2z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6.5 13.4a1.6 1.6 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>`,
+  ),
   plus: glyph(`<path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`),
   back: glyph(stroke("M6 4 2.5 7.5 6 11M3 7.5h6.5a4 4 0 0 1 0 8")),
   broom: glyph(`<path d="M10.5 2 7 8M4 8.5h6l1.5 5.5h-9z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`),

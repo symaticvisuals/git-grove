@@ -8,9 +8,12 @@ import { checkCommand } from "./commands/check.js";
 import { pinsCommand } from "./commands/pins.js";
 import { restoreCommand } from "./commands/restore.js";
 import { serveCommand } from "./commands/serve.js";
+import { serviceCommand } from "./commands/service.js";
 import { statusCommand } from "./commands/status.js";
+import { type UiDeps, uiCommand } from "./commands/ui.js";
 import { describeError } from "../core/describe-error.js";
 import { packageVersion } from "./package-version.js";
+import { realUiDeps } from "./real-ui-deps.js";
 import { runActionCommand } from "./run-action.js";
 
 type Parsed = {
@@ -48,8 +51,10 @@ type Flags = {
 
 type Command = (io: CliIo) => Promise<number>;
 
-const USAGE = `Usage: git grove <command> [options]
+const USAGE = `Usage: git grove [<command>] [options]
 
+  ui                                open the dashboard at this worktree's feature,
+                                    starting git grove first; the default command
   status [--json]                   what needs you, then one line per worktree
   restore <branch> [<pin-ref>]      move a branch back to a pin
   ack <branch>                      mark a branch's rewrite or deletion as intended
@@ -69,9 +74,11 @@ const USAGE = `Usage: git grove <command> [options]
                                     copies ignored files only it has into main
   serve [--port <n>]                run the dashboard server in the foreground,
                                     on port 47683 or the next free one
+  service install|uninstall|status  the login service that keeps the dashboard
+                                    server running (launchd or systemd)
 `;
 
-const COMMANDS = new Set(["status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm", "serve"]);
+const COMMANDS = new Set(["ui", "status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm", "serve", "service"]);
 
 function parsePort(text: string | undefined): number | undefined {
   if (text === undefined) return undefined;
@@ -106,7 +113,11 @@ function parse(argv: string[]): Parsed {
   });
 }
 
-function route(positionals: string[], flags: Flags): Command | null {
+function isServiceSubcommand(name: string | undefined): name is "install" | "uninstall" | "status" {
+  return name === "install" || name === "uninstall" || name === "status";
+}
+
+function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command | null {
   const { json, stash, dryRun } = flags;
   const [name, first, second, extra] = positionals;
   const creating = flags.branch !== undefined || flags.from !== undefined || flags.on !== undefined || flags.skipEnv || flags.install || flags.open;
@@ -136,6 +147,10 @@ function route(positionals: string[], flags: Flags): Command | null {
       : null;
   }
   if (stash || dryRun) return null;
+  if (name === undefined || name === "ui") return first === undefined && !json ? (io) => uiCommand(io, deps()) : null;
+  if (name === "service") {
+    return isServiceSubcommand(first) && second === undefined && !json ? (io) => serviceCommand(io, first, deps()) : null;
+  }
   if (name === "serve") return first === undefined && !json ? (io) => serveCommand(io, { port: parsePort(flags.port) }) : null;
   if (name === "stack") {
     return first === "plan" && second !== undefined && extra === undefined
@@ -157,10 +172,11 @@ function route(positionals: string[], flags: Flags): Command | null {
 }
 
 /**
- * Runs the CLI and resolves to the process exit code.
+ * Runs the CLI and resolves to the process exit code; no command at all runs `ui`. `deps` gives `ui` and `service`
+ * the login service, the browser and the bin, made only when one of them runs.
  * Errors a person can act on become one line on stderr and exit 1; anything else is rethrown.
  */
-export async function run(argv: string[], io: CliIo): Promise<number> {
+export async function run(argv: string[], io: CliIo, deps: () => UiDeps = realUiDeps): Promise<number> {
   let args: Parsed;
   try {
     args = parse(argv);
@@ -192,7 +208,7 @@ export async function run(argv: string[], io: CliIo): Promise<number> {
     open: values.open === true,
     rescue: values.rescue === true,
     port: values.port,
-  });
+  }, deps);
   if (command === null) {
     const [name] = args.positionals;
     io.err(name !== undefined && !COMMANDS.has(name) ? `Unknown command: ${name}\n${USAGE}` : USAGE);

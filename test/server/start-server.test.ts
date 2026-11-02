@@ -122,12 +122,19 @@ test("the token is the one in the token file", async () => {
   expect(server.context.home).toBe(home);
 });
 
-test("an existing home folder open to others is narrowed to 0700", async () => {
+test("an existing home folder grove did not create keeps its mode, and only the token in it is narrowed to 0600", async () => {
   const shared = join(home, "shared");
   await mkdir(shared);
   await chmod(shared, 0o755);
   await start({ home: shared });
-  expect((await stat(shared)).mode & 0o777).toBe(0o700);
+  expect((await stat(shared)).mode & 0o777).toBe(0o755);
+  expect((await stat(join(shared, "token"))).mode & 0o777).toBe(0o600);
+});
+
+test("a home folder the server creates is 0700", async () => {
+  const fresh = join(home, "fresh");
+  await start({ home: fresh });
+  expect((await stat(fresh)).mode & 0o777).toBe(0o700);
 });
 
 test("a second server with the same home refuses while the first runs", async () => {

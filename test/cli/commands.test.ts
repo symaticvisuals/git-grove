@@ -7,6 +7,7 @@ import { readRepoFacts } from "../../src/core/facts/read-repo-facts.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import { withRepoLock } from "../../src/core/runner/with-repo-lock.js";
 import type { JournalEntry } from "../../src/core/journal/store.types.js";
+import { startServer } from "../../src/server/start-server.js";
 import { makeRepo, type TestRepo } from "../support/make-repo.js";
 
 type Result = { code: number; out: string; err: string };
@@ -106,6 +107,21 @@ test("status --json after a squash is one JSON document with one history-rewritt
   expect(rewritten).toHaveLength(1);
   expect(field(rewritten[0], "subject")).toEqual({ kind: "branch", id: "feat" });
   expect(doc.journal).toHaveLength(1);
+});
+
+test("status ends with the dashboard's address while its server answers, and status --json never does", async () => {
+  expect((await grove(["status"])).out).not.toContain("Dashboard:");
+  const server = await startServer({ port: 0, home, version: "1.0.0" });
+  try {
+    const text = (await grove(["status"])).out;
+    expect(text.endsWith(`\n\nDashboard: http://127.0.0.1:${server.port}/\n`)).toBe(true);
+    const json = (await grove(["status", "--json"])).out;
+    expect(json).not.toContain("Dashboard");
+    expect(() => JSON.parse(json)).not.toThrow();
+  } finally {
+    await server.close();
+  }
+  expect((await grove(["status"])).out).not.toContain("Dashboard:");
 });
 
 test("status prints Needs you with the rewrite and how to undo it", async () => {

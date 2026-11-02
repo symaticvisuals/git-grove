@@ -14,11 +14,9 @@ if (out === defaultOut) await rm(out, { recursive: true, force: true });
 else if ((await readdir(out).catch(() => [])).length > 0) throw new Error(`build-ui: ${out} is not empty; give an empty or new folder`);
 
 await mkdir(out, { recursive: true });
-await build({
-  entryPoints: { app: join(root, "ui", "src", "main.ts") },
+const shared = {
   outdir: out,
   bundle: true,
-  format: "esm",
   platform: "browser",
   target: "es2022",
   minify: true,
@@ -26,7 +24,10 @@ await build({
   legalComments: "none",
   define: { __GROVE_VERSION__: JSON.stringify(version) },
   logLevel: "warning",
-});
+};
+await build({ ...shared, entryPoints: { app: join(root, "ui", "src", "main.ts") }, format: "esm" });
+// A classic script, so every browser that runs service workers can register it.
+await build({ ...shared, entryPoints: { sw: join(root, "ui", "src", "sw.ts") }, format: "iife" });
 await cp(join(root, "ui", "index.html"), join(out, "index.html"));
 await cp(join(root, "ui", "styles.css"), join(out, "styles.css"));
 await cp(join(root, "ui", "public"), out, { recursive: true });

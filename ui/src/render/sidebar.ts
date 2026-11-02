@@ -2,6 +2,7 @@ import type { WireProject, WireRepoView } from "../../../src/server/wire/wire.ty
 import { html, type SafeHtml } from "../html.js";
 import { ICONS } from "../icons.js";
 import type { LiveState } from "../live.js";
+import type { NotifyPermission } from "../notify.js";
 import type { Route } from "../parse-route.js";
 import { plural } from "../plural.js";
 import type { Load } from "../state.js";
@@ -9,17 +10,31 @@ import { groupsOf } from "./groups-of.js";
 import { loadView } from "./load-view.js";
 import { timeAgo } from "./time-ago.js";
 
-export type SidebarInput = { route: Route; projects: Load<WireProject[]>; repo: WireRepoView | null; live: LiveState; now: number };
+export type SidebarInput = {
+  route: Route;
+  projects: Load<WireProject[]>;
+  repo: WireRepoView | null;
+  live: LiveState;
+  now: number;
+  /** Whether notifications may be raised; "Notify me" shows while the browser has not been asked. */
+  notify?: NotifyPermission;
+};
 
 function nav(href: string, on: boolean, icon: SafeHtml, label: string, count: SafeHtml | string = ""): SafeHtml {
   return html`<a class="nav${on ? " on" : ""}" href="${href}" data-key="nav:${href}"${on ? html` aria-current="page"` : ""}>${icon}${label}${count}</a>`;
 }
 
-function footer(projects: WireProject[], live: LiveState, now: number): SafeHtml {
-  if (live !== "up") return html`<div class="side-foot"><div><span class="pulse off" aria-hidden="true"></span>Not connected, retrying</div></div>`;
+function notifyButton(permission: NotifyPermission | undefined): SafeHtml {
+  if (permission !== "default") return html``;
+  return html`<button class="notify" data-ui="notify" data-key="side:notify" title="A system notification when work is about to be lost">${ICONS.bell}Notify me</button>`;
+}
+
+function footer(projects: WireProject[], live: LiveState, now: number, notify: NotifyPermission | undefined): SafeHtml {
+  const button = notifyButton(notify);
+  if (live !== "up") return html`<div class="side-foot">${button}<div><span class="pulse off" aria-hidden="true"></span>Not connected, retrying</div></div>`;
   const newest = Math.max(...projects.map((project) => project.scannedAt ?? 0));
   const when = newest > 0 ? html`, ${timeAgo(newest, now, "long")}` : "";
-  return html`<div class="side-foot"><div><span class="pulse" aria-hidden="true"></span><span>Watching ${plural(projects.length, "repo")}${when}</span></div></div>`;
+  return html`<div class="side-foot">${button}<div><span class="pulse" aria-hidden="true"></span><span>Watching ${plural(projects.length, "repo")}${when}</span></div></div>`;
 }
 
 function repoNav(project: WireProject, input: SidebarInput): SafeHtml {
@@ -32,7 +47,8 @@ function repoNav(project: WireProject, input: SidebarInput): SafeHtml {
 
 /**
  * The sidebar: Needs you (hot when anything does), Activity, Pins, every repo with its health and worktree count
- * and, under the current one, its groups to jump to; then whether the dashboard is live, and how fresh it is.
+ * and, under the current one, its groups to jump to; then "Notify me" while notifications are not yet allowed or
+ * refused, whether the dashboard is live, and how fresh it is.
  */
 export function sidebar(input: SidebarInput): SafeHtml {
   const { route } = input;
@@ -48,5 +64,5 @@ ${nav("#/activity", route.view === "activity", ICONS.activity, "Activity")}
 ${nav("#/pins", route.view === "pins", ICONS.pin, "Pins", html`<span class="count">${pins}</span>`)}
 <a class="sec${route.view === "projects" ? " on" : ""}" href="#/" data-key="nav:#/">Repos<span>All</span></a>
 <div class="repos">${repos}</div>
-${footer(data, input.live, input.now)}`;
+${footer(data, input.live, input.now, input.notify)}`;
 }

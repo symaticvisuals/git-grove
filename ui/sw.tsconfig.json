@@ -1,0 +1,11 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "WebWorker"],
+    "types": [],
+    "noEmit": true,
+    "rootDir": ".."
+  },
+  "include": ["src/sw.ts"]
+}

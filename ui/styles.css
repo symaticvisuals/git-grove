@@ -42,6 +42,8 @@ a.sec span{font-size:11px}
 .repo-sub .nav{height:26px}
 .side-foot{margin-top:auto;padding:10px 8px 4px;border-top:1px solid var(--line);display:grid;gap:6px;color:var(--muted);font-size:12px}
 .side-foot div{display:flex;align-items:center;gap:8px}
+.side-foot .notify{display:flex;align-items:center;gap:8px;width:100%;height:28px;padding:0 8px;border:1px solid var(--line-hi);border-radius:7px;background:transparent;color:var(--text);font-size:12px}
+.side-foot .notify:hover{background:var(--hover)}
 .pulse{width:7px;height:7px;border-radius:50%;background:var(--moss);box-shadow:0 0 0 0 rgba(125,176,138,.45);animation:pulse 2.4s ease-out infinite;flex:none}
 .pulse.off{background:var(--faint);animation:none;box-shadow:none}
 @keyframes pulse{to{box-shadow:0 0 0 7px rgba(125,176,138,0)}}

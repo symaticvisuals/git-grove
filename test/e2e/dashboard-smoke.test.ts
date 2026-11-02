@@ -38,7 +38,8 @@ test("/ needs no token and carries the version meta and /app.js, with no inline 
   const page = await get("/");
   expect(page.status).toBe(200);
   expect(page.body).toContain('<meta name="grove-version" content="0.0.0-smoke">');
-  expect(page.body).toContain('src="/app.js"');
+  expect(page.body).toContain('src="/app.js?v=0.0.0-smoke"');
+  expect(page.body).toContain('href="/styles.css?v=0.0.0-smoke"');
   expect(page.body).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/);
   expect(page.body).not.toMatch(/\sstyle=/);
   expect(page.body).not.toContain("fonts.googleapis");
@@ -99,4 +100,29 @@ test("the build empties dist/ui first, and refuses a custom folder that is not e
   await expect(run(["--out", used])).rejects.toThrow(/not empty/);
   expect(await readFile(join(used, "keep.txt"), "utf8")).toBe("mine");
   await rm(used, { recursive: true, force: true });
+});
+
+test("manifest, sw.js and icons load without a token, and the page links them", async () => {
+  for (const path of ["/manifest.webmanifest", "/sw.js", "/favicon.svg", "/favicon.ico", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/icon-maskable-512.png"]) {
+    expect((await get(path)).status, path).toBe(200);
+  }
+  const manifest: unknown = JSON.parse((await get("/manifest.webmanifest")).body);
+  expect(manifest).toMatchObject({ name: "git grove", short_name: "grove", id: "/", start_url: "/", scope: "/", display: "standalone", theme_color: "#0B0F0E" });
+  expect((await get("/manifest.webmanifest")).headers["content-type"]).toBe("application/manifest+json");
+  expect((await get("/sw.js")).headers["content-type"]).toContain("text/javascript");
+  expect((await get("/icons/icon-512.png")).headers["content-type"]).toBe("image/png");
+  const page = (await get("/")).body;
+  for (const link of ['rel="manifest" href="/manifest.webmanifest"', 'rel="icon" href="/favicon.svg"', 'name="theme-color" content="#0B0F0E"']) expect(page).toContain(link);
+});
+
+test("the service worker is a classic script that never answers /api or /events, and caches under this version", async () => {
+  const worker = (await get("/sw.js")).body;
+  expect(worker).not.toMatch(/^\s*(import|export)\b/m);
+  expect(worker).toContain('"/events"');
+  expect(worker).toContain('"/api/"');
+  expect(worker).toContain("grove-");
+  expect(worker).not.toContain(server.token);
+  const pkg: unknown = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
+  const version = typeof pkg === "object" && pkg !== null && "version" in pkg ? String(pkg.version) : "";
+  expect(worker).toContain(JSON.stringify(version));
 });

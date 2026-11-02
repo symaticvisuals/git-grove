@@ -16,7 +16,7 @@
     "build": "tsc -p tsconfig.json && node scripts/build-ui.mjs",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/bin.js', 0o755)\"",
     "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.test.json && tsc -p ui/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.test.json && tsc -p ui/tsconfig.json && tsc -p ui/sw.tsconfig.json",
     "prepublishOnly": "pnpm build && pnpm test"
   },
   "devDependencies": {
