@@ -210,8 +210,11 @@ test("API calls without the token header are 401, and with it they pass the gate
   for (const path of ["api/unrouted", "events"]) {
     expect((await fetch(`${server.url}${path}`)).status, path).toBe(401);
     expect((await fetch(`${server.url}${path}`, { headers: { "x-grove-token": "f".repeat(64) } })).status, path).toBe(401);
-    expect((await fetch(`${server.url}${path}`, { headers: tokenOf(server) })).status, path).toBe(404);
   }
+  expect((await fetch(`${server.url}api/unrouted`, { headers: tokenOf(server) })).status).toBe(404);
+  const stream = await fetch(`${server.url}events`, { headers: tokenOf(server) });
+  expect(stream.status).toBe(200);
+  await stream.body?.cancel();
   expect((await fetch(`${server.url}api/projects?token=${server.token}`)).status).toBe(401);
   expect((await fetch(`${server.url}api/health`)).status).toBe(200);
 });

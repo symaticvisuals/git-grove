@@ -1,3 +1,4 @@
+import type { Hub } from "./live/hub.js";
 import type { Snapshots } from "./live/snapshots.js";
 import type { Store } from "../core/journal/store.types.js";
 
@@ -5,6 +6,7 @@ import type { Store } from "../core/journal/store.types.js";
 export type ServerContext = {
   store: Store;
   snapshots: Snapshots;
+  hub: Hub;
   token: string;
   port: number;
   version: string;

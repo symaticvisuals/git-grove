@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { groveHome } from "../core/grove-home.js";
 import { openStore } from "../core/journal/open-store.js";
 import type { Store } from "../core/journal/store.types.js";
+import { createHub, type Hub } from "./live/hub.js";
 import { createSnapshots } from "./live/snapshots.js";
 import { registerApi } from "./api/register-api.js";
 import { readOrCreateToken } from "./auth/read-or-create-token.js";
@@ -24,6 +25,8 @@ export type StartServerOptions = {
   onShutdown?: (code: number) => void;
   /** The clock the snapshots use; `Date.now` by default. */
   now?: () => number;
+  /** How long the watcher waits after a change, and how often it polls; 300 ms and 30 s by default. */
+  watch?: { debounceMs?: number | undefined; pollMs?: number | undefined };
 };
 
 export type RunningServer = { port: number; url: string; token: string; context: ServerContext; close(): Promise<void> };
@@ -59,14 +62,19 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
   const release = await lockServer(home);
   let servers: Server[] = [];
   let store: Store | null = null;
+  let hub: Hub | null = null;
   try {
     const token = await readOrCreateToken(home);
     store = openStore(join(home, "grove.db"));
     const opened = store;
     let closing: Promise<void> | null = null;
+    const snapshots = createSnapshots(opened, options.now);
+    const liveHub = createHub({ snapshots, store: opened, ...options.watch });
+    hub = liveHub;
     const close = (): Promise<void> => {
       closing ??= (async () => {
         try {
+          liveHub.close();
           await Promise.all(servers.map(stopListening));
           clearServerFile(home, process.pid);
           opened.close();
@@ -78,7 +86,8 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     };
     const context: ServerContext = {
       store: opened,
-      snapshots: createSnapshots(opened, options.now),
+      snapshots,
+      hub: liveHub,
       token,
       port: 0,
       version: options.version,
@@ -100,6 +109,7 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     writeServerFile(home, { pid: process.pid, port: listening.port, version: options.version });
     return { port: listening.port, url: `http://127.0.0.1:${listening.port}/`, token, context, close };
   } catch (error) {
+    hub?.close();
     store?.close();
     await Promise.all(servers.map(stopListening));
     await release();
