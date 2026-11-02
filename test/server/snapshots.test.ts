@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { observe } from "../../src/core/journal/observe.js";
 import { openStore } from "../../src/core/journal/open-store.js";
 import type { JournalEntry, Store } from "../../src/core/journal/store.types.js";
+import { withRepoLock } from "../../src/core/runner/with-repo-lock.js";
 import { readSnapshot, type Snapshot } from "../../src/core/snapshot/read-snapshot.js";
 import { createSnapshots } from "../../src/server/live/snapshots.js";
 import { squashedFixture, type SquashedFixture } from "../support/squashed-fixture.js";
@@ -152,6 +153,30 @@ test("quick gets reuse the cache, and a stale cache starts one background refres
   expect(stale.every((snapshot) => snapshot === first)).toBe(true);
   await snapshots.refresh(repoId);
   expect(reads).toBe(2);
+});
+
+test("while a running process holds grove.lock, a stale get serves the cache without scanning; once released the next get scans", async () => {
+  const repoId = (await readSnapshot(fixture.repo.path, store, clock)).repoId;
+  let reads = 0;
+  const snapshots = createSnapshots(store, () => clock, (cwd, st, at) => {
+    reads += 1;
+    return readSnapshot(cwd, st, at);
+  });
+  const first = await snapshots.get(repoId);
+  const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 100));
+  const commonDir = join(fixture.repo.path, ".git");
+  await withRepoLock(commonDir, async () => {
+    clock += 3000;
+    expect(await snapshots.get(repoId)).toBe(first);
+    await settle();
+    expect(reads).toBe(1);
+  });
+  expect(await snapshots.get(repoId)).toBe(first);
+  await vi.waitFor(() => expect(reads).toBe(2));
+  await withRepoLock(commonDir, async () => {
+    await snapshots.refresh(repoId, { force: true });
+  });
+  expect(reads).toBe(3);
 });
 
 test("a failed scan is remembered for 5 s", async () => {

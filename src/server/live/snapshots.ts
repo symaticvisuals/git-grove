@@ -1,6 +1,8 @@
+import { join } from "node:path";
 import { describeError } from "../../core/describe-error.js";
 import type { JournalEntry, Store, StoredRepo } from "../../core/journal/store.types.js";
 import { readSnapshot, type Snapshot } from "../../core/snapshot/read-snapshot.js";
+import { lockBlocksScan } from "./lock-blocks-scan.js";
 
 export type RefreshListener = (snapshot: Snapshot, delivered: JournalEntry[]) => void;
 
@@ -8,8 +10,9 @@ export type Snapshots = {
   /** The repositories the store knows now; snapshots of any other are dropped. */
   repos(): StoredRepo[];
   /**
-   * The cached snapshot, however old: one older than 2 s starts a background refresh. With no cache it waits for a
-   * scan, and rethrows a scan that failed under 5 s ago. Throws for an unknown repository.
+   * The cached snapshot, however old: one older than 2 s starts a background refresh, unless a running process holds
+   * the repository's `grove.lock` (`lockBlocksScan`). With no cache it waits for a scan, and rethrows a scan that
+   * failed under 5 s ago. Throws for an unknown repository.
    */
   get(repoId: number): Promise<Snapshot>;
   /**
@@ -120,6 +123,11 @@ export function createSnapshots(store: Store, now: () => number = Date.now, read
     return flight.running;
   };
 
+  const locked = async (repoId: number): Promise<boolean> => {
+    const repo = repos().find((candidate) => candidate.id === repoId);
+    return repo !== undefined && (await lockBlocksScan(join(repo.commonDir, "grove.lock")));
+  };
+
   const refresh = (repoId: number, options: { force?: boolean } = {}): Promise<Snapshot> => {
     const flight = flights.get(repoId);
     if (flight === undefined) return begin(repoId);
@@ -135,7 +143,7 @@ export function createSnapshots(store: Store, now: () => number = Date.now, read
     async get(repoId) {
       const held = snapshots.get(repoId);
       if (held !== undefined) {
-        if (now() - held.readAt >= FRESH_MS) refresh(repoId).catch(() => undefined);
+        if (now() - held.readAt >= FRESH_MS && !(await locked(repoId))) refresh(repoId).catch(() => undefined);
         return held;
       }
       const failure = failures.get(repoId);

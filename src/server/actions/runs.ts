@@ -3,9 +3,10 @@ import type { ActionContext, Prepared } from "../../core/actions/action.types.js
 import { errorLine } from "../../core/actions/error-line.js";
 import type { Plan, Receipt, StepEvent } from "../../core/actions/plan.types.js";
 import { runPrepared } from "../../core/actions/run-prepared.js";
-import type { Store } from "../../core/journal/store.types.js";
+import type { Store, StoredActivity } from "../../core/journal/store.types.js";
 import { HttpError } from "../http/http.error.js";
 import type { Hub } from "../live/hub.js";
+import { toActivityItem } from "../wire/to-activity-item.js";
 
 export type RunState = { plan: Plan; events: StepEvent[]; receipt: Receipt | null };
 
@@ -25,10 +26,22 @@ function crashed(prepared: Prepared, error: unknown): Receipt {
   return { action: prepared.plan.action, ok: false, refused: false, title: "Stopped: the run failed", lines, pins: [], undo: null, at: Date.now() };
 }
 
+function recordingInto(store: Store, rows: StoredActivity[]): Store {
+  return {
+    ...store,
+    addActivity(repoId, item) {
+      const id = store.addActivity(repoId, item);
+      rows.push({ ...item, id, repoId });
+      return id;
+    },
+  };
+}
+
 /**
- * Runs prepared plans with `runPrepared` and publishes each step event, then the receipt, through `hub` as `step` and
- * `receipt` events with the run's id. The repository is scanned again (`hub.scan`, a forced refresh) before the receipt
- * goes out, so a client that refetches on the receipt sees the change. Keeps the 50 newest finished runs.
+ * Runs prepared plans with `runPrepared` and publishes each step event, then the activity rows the run stored, then the
+ * receipt, through `hub` as `step`, `activity` and `receipt` events. The repository is scanned again (`hub.scan`, a
+ * forced refresh) before the receipt goes out, so a client that refetches on the receipt sees the change. Keeps the 50
+ * newest finished runs.
  */
 export function createRuns(hub: Hub, store: Store): Runs {
   const runs = new Map<string, RunState>();
@@ -45,7 +58,10 @@ export function createRuns(hub: Hub, store: Store): Runs {
       state.events.push(event);
       hub.publish({ type: "step", runId, event });
     };
-    const receipt = await runPrepared(ctx, prepared, emit).catch((error: unknown) => crashed(prepared, error));
+    const rows: StoredActivity[] = [];
+    const recording = { ...ctx, store: recordingInto(ctx.store, rows) };
+    const receipt = await runPrepared(recording, prepared, emit).catch((error: unknown) => crashed(prepared, error));
+    for (const row of rows) hub.publish({ type: "activity", item: toActivityItem(row, row.repoId) });
     await hub.scan(repoId).catch(() => undefined);
     state.receipt = receipt;
     hub.publish({ type: "receipt", runId, receipt });

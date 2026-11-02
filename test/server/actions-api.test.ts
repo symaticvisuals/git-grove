@@ -189,6 +189,23 @@ test("preview then run restores the squash; step events and the receipt arrive o
   expect(state["receipt"]).toEqual(receipt);
 });
 
+test("a run's stored activity row is published live as an a: activity event before the receipt", async () => {
+  const stream = await openStream();
+  await stream.until((seen) => seen.includes("event: hello"));
+  const runId = await run((await preview()).planId);
+  const all = frames(await stream.until(hasReceipt(runId)));
+  const receipt = record(all.find((frame) => frame["type"] === "receipt" && frame["runId"] === runId)?.["receipt"]);
+  const published = all.filter((frame) => frame["type"] === "activity").map((frame) => record(frame["item"]));
+  const action = published.filter((item) => item["kind"] === "action");
+  expect(action).toHaveLength(1);
+  expect(action[0]).toMatchObject({ repoId, kind: "action", branch: LEVEL1, title: receipt["title"], severity: "info", at: receipt["at"] });
+  expect(text(action[0]?.["id"])).toMatch(/^a:\d+$/);
+  const stored = list((await get(`/api/activity?repo=${repoId}`)).body).find((item) => item["kind"] === "action");
+  expect(stored).toEqual(action[0]);
+  const order = all.map((frame) => frame["type"]);
+  expect(order.lastIndexOf("activity")).toBeLessThan(order.lastIndexOf("receipt"));
+});
+
 test("the same plan cannot run twice; an unknown plan is expired", async () => {
   const { planId } = await preview();
   const runId = await run(planId);
