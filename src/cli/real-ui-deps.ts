@@ -1,10 +1,11 @@
 import { homedir } from "node:os";
 import { claudeSettingsPath } from "../core/guard-install/claude-settings-path.js";
 import { guardHookCommand } from "../core/guard-install/guard-hook-command.js";
+import { readHookCommand } from "../core/guard-install/hook-command.js";
 import { guardPhaseOf } from "../core/guard-install/guard-phase-of.js";
 import { readGuardStatus } from "../core/guard-install/read-guard-status.js";
 import { readSettingsFile } from "../core/guard-install/read-settings-file.js";
-import { isEphemeralBin } from "../core/is-ephemeral-bin.js";
+import { groveHome } from "../core/grove-home.js";
 import { realServiceHost } from "../core/service/service-host.js";
 import { createServiceManager } from "../core/service/service-manager.js";
 import { binPath } from "./bin-path.js";
@@ -25,7 +26,7 @@ export function realUiDeps(): UiDeps {
     guardDone: async () => {
       const file = await readSettingsFile(settingsPath);
       const reading = readGuardStatus(file.text, guardHookCommand(stableNodePath(), binPath()), file.problem);
-      return guardPhaseOf({ reading, hookCommand: !isEphemeralBin(binPath()) }).done;
+      return guardPhaseOf({ reading, hookCommand: (await readHookCommand(groveHome())) !== null }).done;
     },
   };
 }

@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { writeHookCommand } from "../../src/core/guard-install/hook-command.js";
+import { hookCommandPath } from "../../src/core/guard-install/hook-command.js";
 import { createGuardInstaller } from "../../src/server/guard/guard-installer.js";
 import type { GuardSetup } from "../../src/server/guard/guard-setup.types.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
@@ -132,7 +132,6 @@ test("with the plugin enabled and a usable hook-command, the guard is in the plu
   await start();
   await mkdir(join(claude, ".claude"));
   await writeFile(settingsPath, JSON.stringify({ enabledPlugins: { "git-grove@git-grove": true } }));
-  await writeHookCommand(home, process.execPath, BIN);
   expect((await call("GET", "/api/guard")).body).toMatchObject({
     status: "absent",
     plugin: true,
@@ -141,6 +140,14 @@ test("with the plugin enabled and a usable hook-command, the guard is in the plu
     done: true,
     installCommands: ["claude plugin marketplace add symaticvisuals/git-grove", "claude plugin install git-grove@git-grove"],
   });
+});
+
+test("with the plugin enabled but the hook-command file gone, the guard is in the plugin phase and not done", async () => {
+  await start();
+  await mkdir(join(claude, ".claude"));
+  await writeFile(settingsPath, JSON.stringify({ enabledPlugins: { "git-grove@git-grove": true } }));
+  await rm(hookCommandPath(home));
+  expect((await call("GET", "/api/guard")).body).toMatchObject({ plugin: true, hookCommand: false, phase: "plugin", done: false });
 });
 
 test("a plan runs once: the second run is a 409, and an unknown plan a 410", async () => {
