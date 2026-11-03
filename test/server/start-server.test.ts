@@ -4,6 +4,7 @@ import { connect, createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import type { GuardSetup } from "../../src/server/guard/guard-setup.types.js";
 import { PortsInUseError } from "../../src/server/http/ports-in-use.error.js";
 import { ServerRunningError } from "../../src/server/server-running.error.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
@@ -47,7 +48,7 @@ afterEach(async () => {
   await ui.cleanup();
 });
 
-async function start(options: { port?: number; home?: string; onShutdown?: (code: number) => void } = {}): Promise<RunningServer> {
+async function start(options: { port?: number; home?: string; onShutdown?: (code: number) => void; guard?: () => GuardSetup } = {}): Promise<RunningServer> {
   const server = await startServer({ port: 0, home, uiDir: ui.dir, version: VERSION, ...options });
   servers.push(server);
   return server;
@@ -119,6 +120,19 @@ test("records pid, port and version in server.json and serves /api/health", asyn
   const health = await fetch(`${server.url}api/health`);
   expect(health.status).toBe(200);
   expect(await health.json()).toEqual({ ok: true, version: VERSION, pid: process.pid });
+});
+
+test("with a guard setup, records its node and bin in hook-command", async () => {
+  const node = process.execPath;
+  const bin = join(home, "bin.js");
+  await writeFile(bin, "");
+  await start({ guard: () => ({ node, bin, settingsPath: join(home, "settings.json"), home }) });
+  expect(await readFile(join(home, "hook-command"), "utf8")).toBe(`${node}\n${bin}\n`);
+});
+
+test("without a guard setup, writes no hook-command", async () => {
+  await start();
+  expect(existsSync(join(home, "hook-command"))).toBe(false);
 });
 
 test("the token is the one in the token file", async () => {

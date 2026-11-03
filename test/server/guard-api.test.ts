@@ -52,7 +52,7 @@ function text(value: unknown): string {
 }
 
 async function start(setup: Partial<GuardSetup> | null = {}): Promise<void> {
-  const guard = setup === null ? undefined : () => ({ node: process.execPath, bin: BIN, settingsPath, ...setup });
+  const guard = setup === null ? undefined : () => ({ node: process.execPath, bin: BIN, settingsPath, home, ...setup });
   server = await startServer({ port: 0, home, uiDir: ui.dir, version: "9.9.9", watch: { debounceMs: 30, pollMs: 60_000 }, ...(guard === undefined ? {} : { guard }) });
 }
 
@@ -132,7 +132,7 @@ test("a plan runs once: the second run is a 409, and an unknown plan a 410", asy
 
 test("an expired guard plan cannot run", async () => {
   let clock = 0;
-  const installer = createGuardInstaller(() => ({ node: process.execPath, bin: BIN, settingsPath }), { ttlMs: 100, now: () => clock });
+  const installer = createGuardInstaller(() => ({ node: process.execPath, bin: BIN, settingsPath, home }), { ttlMs: 100, now: () => clock });
   const { planId } = await installer.plan("install");
   clock = 200;
   await expect(installer.run(planId)).rejects.toMatchObject({ status: 410 });

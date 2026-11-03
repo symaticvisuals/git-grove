@@ -197,6 +197,12 @@ test("with no server and no service support, ui serves in the foreground and say
   expect(run.opened[0]).toMatch(/^http:\/\/127\.0\.0\.1:40001\//);
 });
 
+test("ui records the node and bin in hook-command", async () => {
+  const run = harness(fakeService({ kind: null }), { node: "/opt/node/bin/node" });
+  await ui(run.deps, home);
+  expect(await readFile(join(home, "hook-command"), "utf8")).toBe(`/opt/node/bin/node\n${BIN}\n`);
+});
+
 test("with no server and an uninstalled service, ui installs it and prints the file and how to remove it", async () => {
   const started: RunningServer[] = [];
   const service = fakeService({ kind: "launchd", onInstall: async () => void started.push(await serve()) });
@@ -469,7 +475,7 @@ test("an installed service that reads another Claude Code folder is rewritten to
 
 test("when the running server would install the agent guard into another settings file than this shell's, ui names both", async () => {
   const served = join(home, "server-claude", "settings.json");
-  servers.push(await startServer({ port: 0, home, version: packageVersion(), guard: () => ({ node: process.execPath, bin: BIN, settingsPath: served }) }));
+  servers.push(await startServer({ port: 0, home, version: packageVersion(), guard: () => ({ node: process.execPath, bin: BIN, settingsPath: served, home }) }));
   const shell = join(home, "shell-claude", "settings.json");
   const result = await ui(harness(fakeService({ kind: "launchd" }), { claudeSettingsPath: shell }).deps, home);
   expect(result.out).toContain(`The dashboard installs the agent guard into ${served}, but Claude Code here reads ${shell}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);

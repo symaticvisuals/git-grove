@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { writeHookCommand } from "../../core/guard-install/hook-command.js";
 import { groveHome } from "../../core/grove-home.js";
 import type { GuardStatus } from "../../core/guard-install/guard-install.types.js";
 import { isEphemeralBin } from "../../core/is-ephemeral-bin.js";
@@ -18,6 +19,7 @@ import { findServer } from "../find-server.js";
 import { packageVersion } from "../package-version.js";
 import { servedSettingsPath } from "../served-settings-path.js";
 import { serviceProgramOf } from "../service-program-of.js";
+import { stableNodePath } from "../stable-node-path.js";
 import { waitForExit } from "../wait-for-exit.js";
 
 export type UiDeps = {
@@ -32,6 +34,8 @@ export type UiDeps = {
   restartWaitMs?: number;
   /** Where the agent guard stands in Claude Code's settings; without it, `ui` never mentions the guard. */
   guardStatus?(): Promise<GuardStatus>;
+  /** The Node the dashboard records for the plugin's hook; this process's stable Node by default. */
+  node?: string;
   /** The settings file Claude Code reads from this shell; when given, `ui` says so if the dashboard would install the guard elsewhere. */
   claudeSettingsPath?: string;
 };
@@ -167,6 +171,7 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
  */
 export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   const home = groveHome();
+  await writeHookCommand(home, deps.node ?? stableNodePath(), deps.bin).catch((error: unknown) => io.err(`${firstLine(error)}\n`));
   const waitMs = deps.waitMs ?? WAIT_MS;
   const target = await dashboardTarget(io.cwd, home);
   const updated = await alignService(io, deps, home);

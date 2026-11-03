@@ -21,8 +21,12 @@ let home: string;
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "git-grove-serve-"));
   process.env["GIT_GROVE_HOME"] = home;
+  // The real guard setup refuses to run under vitest, so the server says it could not record hook-command.
+  const write = process.stderr.write.bind(process.stderr);
+  vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => (String(chunk).startsWith("git-grove: recording hook-command") ? true : write(chunk)));
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   if (savedHome === undefined) delete process.env["GIT_GROVE_HOME"];
   else process.env["GIT_GROVE_HOME"] = savedHome;
   await rm(home, { recursive: true, force: true });

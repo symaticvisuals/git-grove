@@ -10,6 +10,7 @@ import { createGuardInstaller } from "./guard/guard-installer.js";
 import type { GuardSetup } from "./guard/guard-setup.types.js";
 import { createHub, type Hub } from "./live/hub.js";
 import { createSnapshots } from "./live/snapshots.js";
+import { recordHookCommand } from "./record-hook-command.js";
 import { registerApi } from "./api/register-api.js";
 import { readOrCreateToken } from "./auth/read-or-create-token.js";
 import { clearServerFile } from "./clear-server-file.js";
@@ -117,6 +118,7 @@ export async function startServer(options: StartServerOptions): Promise<RunningS
     servers = listening.servers;
     context.port = listening.port;
     writeServerFile(home, { pid: process.pid, port: listening.port, version: options.version });
+    if (options.guard !== undefined) await recordHookCommand(home, options.guard);
     return { port: listening.port, url: `http://127.0.0.1:${listening.port}/`, token, context, close };
   } catch (error) {
     hub?.close();
