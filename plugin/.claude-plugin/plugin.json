@@ -1,6 +1,6 @@
 {
   "name": "git-grove",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Agent guard and skill for git grove: stops Claude Code from losing work in git worktrees.",
   "author": { "name": "symaticvisuals" },
   "homepage": "https://github.com/symaticvisuals/git-grove",
