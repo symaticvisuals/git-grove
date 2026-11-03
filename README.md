@@ -87,12 +87,18 @@ The plugin holds two things. Its hook runs the guard on each Bash command, and i
 to do around the guard: run `git grove check remove <path>` before removing a worktree, use `git grove rm --rescue`
 for one that holds ignored files, stash before a blocked discard, and never run the people-only commands.
 
-The hook finds git grove through `~/.git-grove/hook-command`, which holds the Node and the `dist/cli/bin.js` it runs.
-Run `git grove ui` once, with git grove installed globally (`npm i -g @deepanshugoel/git-grove`), and the dashboard
-writes it. It rewrites the file when the Node or the grove path changes. Without it the hook runs `git-grove` from your `PATH`,
-and with neither it allows every command and prints one line saying to run `git grove ui`. `git grove ui` and the dashboard's "Getting started" page (the sidebar) show the same
-three steps, and `git grove install-guard` prints the two commands. Claude Code run with `--bare` or `--safe-mode`
-skips plugins, so the guard is off there.
+The hook finds git grove through `$GIT_GROVE_HOME/hook-command` (by default `~/.git-grove/hook-command`), which holds
+the Node and the `dist/cli/bin.js` it runs. Run `git grove ui` once, with git grove installed globally
+(`npm i -g @deepanshugoel/git-grove`), and the dashboard writes it. It rewrites the file when the Node or the grove path
+changes. Without it the hook runs `git-grove` from your `PATH`, and with neither it allows every command and prints one
+line saying to run `git grove ui`. Claude Code run with `--bare` or `--safe-mode` skips plugins, so the guard is off
+there.
+
+The dashboard's "Getting started" page (in the sidebar, shown once on a browser's first visit) walks through three
+steps: watch a repository (`git grove ui` inside it), protect worktrees from Claude Code (the two plugin commands, plus
+"Remove the old hook…" when an old settings hook is there), and keep grove running (`git grove service status`).
+Separately, `git grove ui` prints the two plugin commands on each run while the guard is off, and
+`git grove install-guard` prints them too.
 
 Upgrading from 0.2.0, which wrote a hook into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`): with
 that hook still there and the plugin on, the guard would run twice. While the old hook is present the dashboard offers
