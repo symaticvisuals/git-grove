@@ -56,7 +56,8 @@ you confirm a plan.
 | `src/core/runner/` | Pins (`pin.ts`), the per-repo lock (`with-repo-lock.ts`) and the restore that moves a branch back. |
 | `src/core/actions/` | Eight actions (restore, ack, restack, new, add-level, copy-env, remove, cleanup) and `run-prepared.ts`, which runs any of them. |
 | `src/core/guard/` | The agent guard: `read-simple-commands.ts` splits a shell line into simple commands, `classify-command.ts` decides what each needs checked, and `evaluate-command-line.ts` judges them in order and pins. |
-| `src/core/guard-install/` | Installing the guard into Claude Code's settings: `plan-guard-install.ts` and `plan-guard-uninstall.ts` plan the new text, `write-settings-file.ts` re-reads, backs up and renames it into place. |
+| `plugin/` | The Claude Code plugin that installs the guard: `hooks/guard.sh` runs the grove recorded in `hook-command`, and the `git-grove` skill tells Claude what the guard expects. |
+| `src/core/guard-install/` | Which guard Claude Code runs, and taking 0.2.0's old hook out of its settings: `read-guard-status.ts` and `guard-phase-of.ts` read the phase, `plan-guard-uninstall.ts` plans the new text, `write-settings-file.ts` re-reads, backs up and renames it into place. |
 | `src/server/` | The local server: the gate (`auth/check-request.ts`), the watcher (`live/watch-repo.ts`), cached scans (`live/snapshots.ts`), live events (`live/hub.ts`) and previewed plans (`actions/plan-cache.ts`). |
 | `ui/src/` | The dashboard: plain TypeScript, bundled by esbuild, with no runtime dependencies. |
 | `src/cli/` | The commands. `run-guard.ts` is the hook's entry, which `bin.ts` loads without the rest of the CLI. |
@@ -192,23 +193,34 @@ new pins written as activity rows, for repositories grove already knows, waiting
 `ls` 40 ms and a blocked `git worktree remove` 145 ms on Node 24.11; 111 ms and 212 ms on Homebrew's Node 26, which
 is slow to start.
 
-Installing it is a review like any dashboard change. While the guard is missing from Claude Code's user settings
-(`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`), or points at an old Node or grove path, the
-projects page offers it in a card, and the sidebar and ⌘K reach the same dialog. `src/core/guard-install/` parses the
-file strictly, and refuses one that is not a JSON object, whose `hooks.PreToolUse` is not a list, that is read-only,
-starts with a byte-order mark, is a link to a missing file, or holds a number it cannot write back exactly. It then
-plans the new text: any grove hook is taken out and one group of grove's own is appended, never merged into a user's
-`Bash` group. The dialog shows the file, its backup and the exact JSON. Confirming writes the new text to a temp file,
-checks that the file's SHA-256 is still the one the review saw, copies the old bytes to `settings.json.grove-backup`
-(and, the first time, to `settings.json.grove-original`, never overwritten), and renames the temp file into place, so
-a failure before the rename leaves every earlier copy as it was. Undo is an uninstall planned against the file as it
-is then, so later edits survive. The login service carries `CLAUDE_CONFIG_DIR`, so the server edits the file Claude
-Code reads. These routes change no repository, so
-they take no repo lock and pin nothing (`src/server/api/guard-routes.ts`). Tests in
-`test/core/guard-install/plan-guard-install.test.ts` and `test/server/guard-api.test.ts`, among them "installing
-keeps every other setting and every other group, the user's own Bash group included, in order, and never merges into
-it" and "the command an install writes, run by sh as Claude Code runs it, blocks removing the demo's precious worktree
-with exit 2".
+The guard ships as a Claude Code plugin from this repository (`plugin/`), installed with
+`claude plugin marketplace add symaticvisuals/git-grove`, then `claude plugin install git-grove@git-grove`. Its hook
+runs `hooks/guard.sh` on each Bash command. The script reads `hook-command` in grove's folder, the Node and the
+`dist/cli/bin.js` that `git grove ui` and the server record there, and runs `guard --claude` with them; failing that it
+runs `git-grove` from the `PATH`, and with neither it allows the command with one line saying to run `git grove ui`.
+Installing writes nothing into Claude Code's settings. The dashboard only reads the user settings
+(`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR/settings.json`) to tell which guard runs (`guardPhaseOf`): the
+plugin, the plugin and 0.2.0's old settings hook, the old hook alone, or neither. The guard counts as on only with the
+plugin alone, hooks not turned off and a usable `hook-command`. Until then the projects page shows a card, and the
+Getting started page, shown once on a browser's first visit, lists the two commands.
+
+The one change grove still makes to that file is taking its old hook out, and that is a review like any dashboard
+change. `src/core/guard-install/` parses the file strictly, and refuses one that is not a JSON object, whose
+`hooks.PreToolUse` is not a list, that is read-only, starts with a byte-order mark, is a link to a missing file, or
+holds a number it cannot write back exactly. It then plans the new text with only grove's entry gone, never touching a
+user's own `Bash` group. The dialog shows the file, its backup and the exact JSON removed, and warns when the plugin
+is not enabled, since no guard would be left. Confirming writes the new text to a temp file, checks that the file's
+SHA-256 is still the one the review saw, copies the old bytes to `settings.json.grove-backup` (and, the first time, to
+`settings.json.grove-original`, never overwritten), and renames the temp file into place, so a failure before the
+rename leaves every earlier copy as it was. The receipt offers no Undo, since the plugin replaces the hook. The login
+service carries `CLAUDE_CONFIG_DIR`, so the server reads the file Claude Code reads. These routes change no
+repository, so they take no repo lock and pin nothing (`src/server/api/guard-routes.ts`). Tests in
+`test/core/guard-install/plan-guard-uninstall.test.ts`, `test/core/guard-install/guard-phase-of.test.ts`,
+`test/plugin/` and `test/server/guard-api.test.ts`, among them "uninstalling keeps the user's hooks, their own Bash
+group included, and every other setting, in order", "the plugin without a usable hook-command is not done", "a
+recorded node that is gone falls back to git-grove on PATH", "the plugin's hook runs the built grove from
+hook-command: it blocks git grove ack with the reason" and "the command grove's hook runs, run by sh as Claude Code
+runs it, blocks removing the demo's precious worktree with exit 2".
 
 Tests in `test/core/guard/evaluate-command-line.test.ts`, among them "git worktree remove --force of a merged worktree
 holding a precious ignored file is blocked", "git worktree remove of a worktree by its bare name, as git resolves it,
@@ -232,6 +244,7 @@ the old tip" and "git push --force origin feat pins the remote tip it would repl
 - The dashboard and the CLI take the same `grove.lock`, so they cannot act on one repository at once. Background scans
   wait while it is held.
 - Undo in a receipt prepares the undo as a new plan and opens it for review. It never runs anything you have not seen.
+  Removing the old hook has no Undo: the plugin replaces it.
 
 Tests: "a confirm before the arming delay is ignored, and a plan that replaces an armed one starts unarmed" and "a
 confirm whose painted plan id is not the dialog's plan is ignored" (`test/ui/dialog-state.test.ts`); "a held Enter,
@@ -324,7 +337,8 @@ What grove does today when something goes wrong, and the test that shows it.
 | grove cannot read part of a worktree | The removal verdict says unreadable and refuses. | `test/core/rules/safe-to-remove.test.ts`, "a failed read is unreadable, never zero" and "an ignored file grove cannot inspect is unreadable, not skipped" |
 | A rescued file changes after its copy was checked | The removal stops and the folder stays. | `test/core/actions/remove-actions.test.ts`, "E2: a rescued file edited after its copy was checked stops the removal, and the folder stays" |
 | A watched repository's folder is deleted | It stays listed with its error; the other repositories carry on. | `test/server/hub.test.ts`, "a deleted repo folder publishes one scan-error and keeps the project listed" |
-| `~/.claude/settings.json` changed after the review, or does not parse | The install is refused ("settings.json changed since the review; review again"), or never offered, and the file is not rewritten. | `test/core/guard-install/write-settings-file.test.ts`, "a file that changed since the plan read it is refused, and nothing is written"; `test/core/guard-install/plan-guard-install.test.ts`, "invalid JSON, a file that is not an object, a hooks that is not an object and a PreToolUse that is not a list are refused" |
+| `~/.claude/settings.json` changed after the review, or does not parse | Removing the old hook is refused ("settings.json changed since the review; review again"), or blocked with why, and the file is not rewritten. | `test/core/guard-install/write-settings-file.test.ts`, "a file that changed since the plan read it is refused, and nothing is written"; `test/core/guard-install/plan-guard-uninstall.test.ts`, "invalid JSON, a file that is not an object, a hooks that is not an object and a PreToolUse that is not a list are refused" |
+| The plugin's hook cannot find grove | `guard.sh` tries the Node and bin in `hook-command`, then `git-grove` on the `PATH`; with neither it allows the command (exit 0) and prints one line saying to run `git grove ui`. | `test/plugin/guard-sh.test.ts`, "a recorded node that is gone falls back to git-grove on PATH", "a recorded node that is a directory falls back to git-grove on PATH" and "with nothing recorded and nothing on PATH it allows, saying why" |
 | The guard itself crashes, cannot read its input, or is slow | It allows the command (exit 0) and prints one line: `git-grove guard: could not check (<reason>); allowing`. | `test/cli/guard-command.test.ts`, "an error thrown inside the evaluation is allowed, with a warning", "an evaluation past its deadline is allowed, with a warning", "garbage on stdin is allowed, with a warning" and "a cwd that is not a repository is allowed: plain commands silently, git ones with a warning"; `test/cli/guard-bin.test.ts`, "guard --claude exits 0 with one warning line for stdin it cannot read" |
 
 What it does not handle yet:
@@ -356,14 +370,15 @@ What it does not handle yet:
 
 ## 5. What's built and what's next
 
-Built, with 1108 tests in 119 files (vitest against real temporary git repositories):
+Built, with 1156 tests in 125 files (vitest against real temporary git repositories):
 
 - the CLI: `status`, `restore`, `ack`, `pins list`, `check remove`, `new`, `add-level`, `restack`, `stack plan`,
   `rm [--rescue]`, `ui`, `serve`, `service install|uninstall|status`, `install-guard` and `guard --claude`;
 - the agent guard: a Claude Code `PreToolUse` hook that blocks worktree removals and recursive `rm` that the removal
   verdict refuses, discards of uncommitted changes and grove's people-only commands, pins the tips that rebase,
-  amend, `branch -D` and a force push could lose, and fails open; the dashboard installs it into Claude Code's user
-  settings after a review, with a backup, Undo and Uninstall, and offers it in an onboarding card;
+  amend, `branch -D` and a force push could lose, and fails open; it installs as a Claude Code plugin, with a skill
+  that tells Claude what it expects, and the dashboard's Getting started page and onboarding card walk through it and
+  remove 0.2.0's old settings hook after a review, with a backup;
 - the core: git facts in three tiers by cost (the whole repository, each worktree, and the removal checks), the
   journal and classifier, pins, restore, stacks from gh-stack config, the fail-closed removal verdict, ten rules and
   `ack`;

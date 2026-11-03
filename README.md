@@ -22,8 +22,8 @@ way an agent might, and leaves a merged worktree holding the only copy of an ign
 `git grove status` reports both, `git grove check remove` refuses the worktree with exit 3, the agent guard blocks a
 `git worktree remove --force` of it with exit 2, and `restore` and `rm --rescue` put things right. The demo uses its
 own temp `GIT_GROVE_HOME`, `HOME`, `CLAUDE_CONFIG_DIR` and git config, installs nothing and needs no network. At the
-end it prints how to open the dashboard on the same repository, with the same temp folders, so an agent guard
-installed there goes into the demo's own Claude Code settings.
+end it prints how to open the dashboard on the same repository, with the same temp folders, so the dashboard reads
+the demo's own Claude Code settings, not yours.
 
 ## Install
 
@@ -92,17 +92,21 @@ the Node and the `dist/cli/bin.js` it runs. Run `git grove ui` once, with git gr
 (`npm i -g @deepanshugoel/git-grove`), and the dashboard writes it. It rewrites the file when the Node or the grove path
 changes. Without it the hook runs `git-grove` from your `PATH`, and with neither it allows every command and prints one
 line saying to run `git grove ui`. Claude Code run with `--bare` or `--safe-mode` skips plugins, so the guard is off
-there.
+there. With a custom `GIT_GROVE_HOME`, `git grove ui`, the server and the login service record `hook-command` in that
+folder, so Claude Code must run with the same `GIT_GROVE_HOME`; otherwise the hook looks in `~/.git-grove` and falls
+back to `git-grove` on your `PATH`.
 
 The dashboard's "Getting started" page (in the sidebar, shown once on a browser's first visit) walks through three
 steps: watch a repository (`git grove ui` inside it), protect worktrees from Claude Code (the two plugin commands, plus
 "Remove the old hook…" when an old settings hook is there), and keep grove running (`git grove service status`).
-Separately, `git grove ui` prints the two plugin commands on each run while the guard is off, and
-`git grove install-guard` prints them too.
+Separately, on each run while the guard is not on, `git grove ui` prints one line on what it still needs: the two
+plugin commands when the plugin is not installed, removing the old hook when both run, or that your settings turn hooks
+off. `git grove install-guard` prints the two commands too.
 
 Upgrading from 0.2.0, which wrote a hook into `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`): with
 that hook still there and the plugin on, the guard would run twice. While the old hook is present the dashboard offers
-"Remove the old hook…". It opens a review like every other dashboard change, showing the file, the backup it keeps
+"Remove the old hook…". Install the plugin first: removing the hook without it leaves no guard, and the review says
+so. It opens a review like every other dashboard change, showing the file, the backup it keeps
 (`settings.json.grove-backup`) and the exact JSON it takes out, and removes only grove's entry. grove writes nothing
 else to Claude Code's settings. Settings files are strict JSON, so grove will not touch one that does not parse, is
 read-only or has a `hooks` of the wrong type; the dialog then says so and you can delete the entry yourself. When your
@@ -175,7 +179,7 @@ browser at the feature of the worktree you are in. Outside a repository it opens
 `GIT_GROVE_NO_OPEN=1` it prints the address instead of opening it.
 
 The first time, `ui` installs a login service, so the dashboard is there whenever you are logged in, and, while the
-agent guard is not on, prints one line with the two plugin commands:
+agent guard is not on, prints one line on what it still needs (see Agents):
 
 - macOS: a launchd agent, `~/Library/LaunchAgents/work.grove.server.plist`
 - Linux: a systemd user unit, `~/.config/systemd/user/git-grove.service`
@@ -286,8 +290,8 @@ branch is. Errors print one line on stderr and exit 1; an action blocked by what
   - `rm -r` of a folder holding whole repositories, run from a folder outside them, and `rm -rf .git`, which takes
     the pins with it;
   - pins for a detached HEAD;
-  - a custom `GIT_GROVE_HOME`, which the hook does not carry, so such a setup records no guard activity; and guard
-    activity reaches an open dashboard on its next load, not live.
+  - a custom `GIT_GROVE_HOME` that Claude Code does not run with too, so the hook neither finds `hook-command` nor
+    records guard activity there; and guard activity reaches an open dashboard on its next load, not live.
 - Reflog catch-up. A change made while grove was not running is found at the next scan as one move, from the last tip
   grove saved to the current one, and is pinned and classified like any other. The steps in between are not read
   from the reflog, a branch grove never saw has nothing to compare, and an old tip git has already pruned is
