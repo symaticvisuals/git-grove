@@ -135,6 +135,11 @@ line that runs `eval` or `bash -c` around `git` or `rm`, leaves a `$(` unclosed,
 `$( … )`. Blocks and the pins the guard
 takes appear in the dashboard's activity, for repositories grove already knows, the next time it loads the activity.
 
+The guard runs git before you approve the command, so it never lets a repository's own config run anything: its git
+calls run with `core.fsmonitor` off and no hooks. A command in a bare repository grove does not watch, such as one a
+clone carries inside its files, is allowed unchecked, because its config came with the clone; once grove watches that
+repository, its commands are checked like any other.
+
 So that agents know what the guard expects, add this to your `CLAUDE.md`:
 
 ```md
@@ -269,7 +274,9 @@ git grove install-guard                      # print the Claude Code hook that r
 git grove guard --claude                     # the agent guard itself: reads the hook's JSON, exits 2 to block
 ```
 
-`new` and `add-level` copy the main worktree's env files into the new level (`--skip-env` to skip), and take
+`new` and `add-level` copy the main worktree's env files into the new level (`--skip-env` to skip), and so does
+`copy-env` for a worktree that lacks them. An env file a symlinked folder of the worktree would send elsewhere is never
+copied, and the plan says so. `new` and `add-level` take
 `--install` to install dependencies and `--open` to open it in your editor. `rm --rescue` first copies the ignored
 files only that worktree has into the main worktree, and checks the copies. `restore`, `ack`, `new`, `add-level`,
 `restack` and `rm` go through the same core the dashboard uses: each prints its plan, each step and the receipt,
