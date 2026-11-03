@@ -52,6 +52,8 @@ export type State = {
   guardDialog: GuardDialogState | null;
   /** The agent guard phase the card was put off for with "Not now"; it shows again for any other. */
   guardDismissed: GuardPhase | null;
+  /** Where the Getting started page sends the user on, the address that was opened before it. */
+  setupNext: string;
 };
 
 export type UiAction =
@@ -66,6 +68,7 @@ export type UiAction =
   | { type: "needs-only"; on: boolean }
   | { type: "toggle-group"; key: string }
   | { type: "signed-out" }
+  | { type: "setup-next"; next: string }
   | DialogAction
   | GuardAction;
 
@@ -239,6 +242,8 @@ function step(state: State, action: UiAction): State {
       return { ...state, closed: state.closed.includes(action.key) ? state.closed.filter((key) => key !== action.key) : [...state.closed, action.key] };
     case "signed-out":
       return { ...state, signedOut: true };
+    case "setup-next":
+      return { ...state, setupNext: action.next };
     case "guard-open":
     case "guard-planned":
     case "guard-plan-failed":
@@ -297,6 +302,7 @@ export function initialState(route: Route, pageVersion: string): State {
     dialogSeq: 0,
     guardDialog: null,
     guardDismissed: null,
+    setupNext: "#/",
   };
   const wanted = sliceRequests(blank);
   return SLICE_NAMES.reduce((state, slice) => (wanted[slice] === null ? state : update(state, slice, () => LOADING)), blank);

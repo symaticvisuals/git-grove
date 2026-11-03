@@ -67,6 +67,7 @@ export function sidebar(input: SidebarInput): SafeHtml {
 ${nav("#/needs", route.view === "needs", ICONS.needs, "Needs you", html`<span class="count${needs > 0 ? " hot" : ""}">${needs}</span>`)}
 ${nav("#/activity", route.view === "activity", ICONS.activity, "Activity")}
 ${nav("#/pins", route.view === "pins", ICONS.pin, "Pins", html`<span class="count">${pins}</span>`)}
+${nav("#/setup", route.view === "setup", ICONS.tick, "Getting started")}
 <a class="sec${route.view === "projects" ? " on" : ""}" href="#/" data-key="nav:#/">Repos<span>All</span></a>
 <div class="repos">${repos}</div>
 ${footer(data, input)}`;

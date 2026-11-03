@@ -3,6 +3,7 @@ import { html, type SafeHtml } from "../html.js";
 import { ICONS } from "../icons.js";
 import type { Load } from "../state.js";
 import { commandRow } from "./command-row.js";
+import { removeHook } from "./remove-hook.js";
 
 const BODY = "Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.";
 
@@ -18,10 +19,6 @@ function notDoneReason(state: GuardState): string {
 
 function notNow(state: GuardState): SafeHtml {
   return html`<button class="btn" data-ui="guard-dismiss" data-phase="${state.phase}" data-key="guard:dismiss">Not now</button>`;
-}
-
-function removeHook(label: string): SafeHtml {
-  return html`<button class="btn" data-ui="guard-open" data-change="uninstall" data-key="guard:uninstall">${label}</button>`;
 }
 
 type Card = { title: string; body: SafeHtml; acts: SafeHtml };

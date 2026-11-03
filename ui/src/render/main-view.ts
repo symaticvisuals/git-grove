@@ -9,6 +9,7 @@ import { notices } from "./notices.js";
 import { pinsView } from "./pins-view.js";
 import { projectsView } from "./projects-view.js";
 import { repoView } from "./repo-view.js";
+import { setupView } from "./setup-view.js";
 import { signedOut } from "./signed-out.js";
 import { viewBar } from "./view-bar.js";
 
@@ -24,6 +25,8 @@ export function mainView(state: State, now: number): SafeHtml {
       return html`${top}${needsYouView(state.needs)}`;
     case "pins":
       return html`${top}${pinsView(state.pins, now)}`;
+    case "setup":
+      return html`${top}${setupView(state.projects, state.guard, state.setupNext)}`;
     case "activity": {
       const names = new Map((state.projects.status === "loading" ? [] : (state.projects.data ?? [])).map((project) => [project.id, project.name]));
       return html`${top}${viewBar(html`<b>Activity</b>`)}<div class="list">${loadView(state.activity, "activity", (items) => activityList(items, now, names))}</div>`;
