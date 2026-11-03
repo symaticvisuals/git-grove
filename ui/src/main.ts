@@ -39,6 +39,7 @@ import { initialState, reduce, type State, type Tab, type UiAction } from "./sta
 import { timeLabel } from "./time-label.js";
 import { GUARD_DISMISSED_KEY, SETUP_SEEN_KEY } from "./storage-keys.js";
 import { guardStatusTarget } from "./guard-status-target.js";
+import { setupRedirect } from "./setup-redirect.js";
 import { toast } from "./toast.js";
 
 declare const __GROVE_VERSION__: string;
@@ -614,15 +615,17 @@ function bind(): void {
 }
 
 function openSetupOnFirstVisit(): void {
+  let next: string | null;
   try {
     const store = storage();
-    if (store === null || store.getItem(SETUP_SEEN_KEY) !== null) return;
+    if (store === null) return;
+    next = setupRedirect(store.getItem(SETUP_SEEN_KEY) !== null, location.hash);
+    if (next === null) return;
     store.setItem(SETUP_SEEN_KEY, "1");
   } catch {
     return;
   }
-  const opened = location.hash;
-  dispatch({ type: "setup-next", next: opened === "" || opened === "#/setup" ? "#/" : opened });
+  dispatch({ type: "setup-next", next });
   history.replaceState(null, "", "#/setup");
 }
 

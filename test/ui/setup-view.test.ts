@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import type { GuardState } from "../../src/core/guard-install/guard-install.types.js";
+import { PLUGIN_INSTALL } from "../../src/core/guard-install/plugin-commands.js";
 import type { WireProject } from "../../src/server/wire/wire.types.js";
 import { GUARD_DISMISSED_KEY, SETUP_SEEN_KEY } from "../../ui/src/storage-keys.js";
+import { PLUGIN_COMMANDS } from "../../ui/src/plugin-commands.js";
 import { guardStatusTarget } from "../../ui/src/guard-status-target.js";
 import { mainView } from "../../ui/src/render/main-view.js";
 import { setupView } from "../../ui/src/render/setup-view.js";
@@ -67,8 +69,19 @@ test("step 2 is ticked when the guard is done", () => {
   expect(ticks(text(none, guard({ phase: "plugin", done: true })))).toBe(1);
 });
 
-test("step 2 still renders while the guard is unknown", () => {
-  expect(text(none, null)).toContain("Protect worktrees from Claude Code");
+test("step 2 still shows both commands while the guard is unknown, loading or failed", () => {
+  const failed: Load<GuardState> = { status: "error", message: "no", data: null };
+  for (const unknown of [null, { status: "loading" } as const, failed]) {
+    const out = text(none, unknown);
+    expect(out).toContain("Protect worktrees from Claude Code");
+    for (const command of CMDS) expect(out).toContain(command);
+    expect(out).not.toContain("Remove the old hook");
+  }
+});
+
+test("the dashboard's fallback commands are the server's", () => {
+  expect(PLUGIN_COMMANDS).toEqual(PLUGIN_INSTALL);
+  expect(CMDS).toEqual(PLUGIN_INSTALL);
 });
 
 test("step 3 always shows the service command and never ticks", () => {
@@ -87,6 +100,8 @@ test("the main view and sidebar route to the setup page", () => {
   expect(mainView(state, 0).text).toContain('href="#/r/3"');
   const side = sidebar({ route: state.route, projects: one, repo: null, live: "up", now: 0, notify: "default", guard: null }).text;
   expect(side).toContain('href="#/setup"');
+  const link = side.slice(side.indexOf('href="#/setup"'), side.indexOf("Getting started"));
+  expect(link).not.toContain('class="tick"');
 });
 
 test("the guard status button goes to setup unless the plugin runs and an old hook can be removed", () => {

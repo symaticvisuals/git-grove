@@ -50,6 +50,7 @@ export const ICONS = {
   needs: glyph(`<path d="M2 9.5V13h12V9.5M2 9.5 4 3h8l2 6.5M2 9.5h3.5l1 1.8h3l1-1.8H14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>`, 15),
   activity: glyph(`<path d="M1.5 8h3l2-5 3 10 2-5h3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/>`, 15),
   pin: glyph(`<circle cx="8" cy="6.5" r="3.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 10.1V15" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>`, 15),
+  compass: glyph(`<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.6 5.4 9 9 5.4 10.6 7 7z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>`),
   projects: glyph(`<rect x="2" y="2" width="5" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="2" width="5" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="2" y="9" width="5" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><rect x="9" y="9" width="5" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/>`, 15),
   scan: glyph(stroke("M13.5 8A5.5 5.5 0 1 1 11.8 4M13.5 2v3.5H10")),
   caret: raw(`<svg class="caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`),

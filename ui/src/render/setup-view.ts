@@ -2,6 +2,7 @@ import type { GuardState } from "../../../src/core/guard-install/guard-install.t
 import type { WireProject } from "../../../src/server/wire/wire.types.js";
 import { html, type SafeHtml } from "../html.js";
 import { ICONS } from "../icons.js";
+import { PLUGIN_COMMANDS } from "../plugin-commands.js";
 import type { Load } from "../state.js";
 import { commandRow } from "./command-row.js";
 import { removeHook } from "./remove-hook.js";
@@ -16,15 +17,16 @@ function watching(projects: Load<WireProject[]>): boolean {
 }
 
 function guardCommands(guard: GuardState | null): SafeHtml {
-  if (guard === null) return html``;
-  const old = guard.phase === "hook" || guard.phase === "plugin-and-hook";
-  return html`${guard.installCommands.map((command, index) => commandRow(command, `setup:copy:${index}`))}${old ? removeHook("Remove the old hook…") : ""}`;
+  const old = guard?.phase === "hook" || guard?.phase === "plugin-and-hook";
+  const commands = guard?.installCommands ?? PLUGIN_COMMANDS;
+  return html`${commands.map((command, index) => commandRow(command, `setup:copy:${index}`))}${old ? removeHook("Remove the old hook…") : ""}`;
 }
 
 /**
  * The Getting started page: watch a repo, install the Claude Code plugin, keep grove running. A step ticks when the
- * projects list has a repo (step 1) or the agent guard is on (step 2); the last has no check. The footer link goes on
- * to `next`, the address that was opened before this page.
+ * projects list has a repo (step 1) or the agent guard is on (step 2); the last has no check. Step 2 shows the two
+ * install commands even while the guard's state is unknown. The footer link goes on to `next`, the address that was
+ * opened before this page.
  */
 export function setupView(projects: Load<WireProject[]>, guard: Load<GuardState> | null, next: string): SafeHtml {
   const state = guard !== null && guard.status !== "loading" ? guard.data : null;
