@@ -3,15 +3,16 @@ import { html, type SafeHtml } from "../html.js";
 import type { Load } from "../state.js";
 
 function label(state: GuardState): string {
-  switch (state.status) {
-    case "installed":
-      return state.hooksDisabled ? "Agent guard on, hooks off" : "Agent guard on";
-    case "stale":
-      return "Agent guard out of date";
+  if (state.done) return "Agent guard on";
+  switch (state.phase) {
+    case "plugin-and-hook":
+      return "Agent guard runs twice";
+    case "hook":
+      return "Agent guard: old hook";
+    case "plugin":
+      return "Agent guard not running";
     case "absent":
       return "Agent guard off";
-    case "unreadable":
-      return "Agent guard unknown";
   }
 }
 
@@ -19,6 +20,5 @@ function label(state: GuardState): string {
 export function guardStatus(guard: Load<GuardState> | null): SafeHtml {
   const state = guard === null || guard.status === "loading" ? null : guard.data;
   if (state === null) return html``;
-  const on = state.status === "installed" && !state.hooksDisabled;
-  return html`<button class="guard-state${on ? " on" : ""}" data-ui="guard" data-key="side:guard" title="${state.settingsPath}"><span class="gdot" aria-hidden="true"></span>${label(state)}</button>`;
+  return html`<button class="guard-state${state.done ? " on" : ""}" data-ui="guard" data-key="side:guard" title="${state.settingsPath}"><span class="gdot" aria-hidden="true"></span>${label(state)}</button>`;
 }

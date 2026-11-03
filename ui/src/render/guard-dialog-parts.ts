@@ -13,10 +13,7 @@ const HEADING = "Uninstall the agent guard";
 const CHECKING = html`<section><div class="async"><span class="spin" aria-hidden="true"></span>Reading the settings file…</div></section>`;
 
 function file(plan: GuardPlan): SafeHtml {
-  const backup =
-    plan.backupPath === null
-      ? html`<li>${ICONS.dot}<span>The file does not exist yet, so grove creates it and keeps no backup.</span></li>`
-      : html`<li>${ICONS.tick}<span>Keeps the file as it is now in <code>${plan.backupPath}</code></span></li>`;
+  const backup = plan.backupPath === null ? "" : html`<li>${ICONS.tick}<span>Keeps the file as it is now in <code>${plan.backupPath}</code></span></li>`;
   return html`<section><div class="h3">Settings file</div><ul><li>${ICONS.tick}<span>Writes <code>${plan.settingsPath}</code></span></li>${backup}</ul></section>`;
 }
 

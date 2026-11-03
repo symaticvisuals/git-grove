@@ -5,6 +5,7 @@ import type { GuardPlan, GuardReceipt, GuardState } from "../../src/core/guard-i
 import { focusAfterClose } from "../../ui/src/focus-after-close.js";
 import { landmarkAfterCard } from "../../ui/src/landmark-after-card.js";
 import { paletteItems } from "../../ui/src/palette/palette-items.js";
+import { isGuardPhase } from "../../ui/src/is-guard-phase.js";
 import { guardCard } from "../../ui/src/render/guard-card.js";
 import { guardDialogParts } from "../../ui/src/render/guard-dialog-parts.js";
 import { guardStatus } from "../../ui/src/render/guard-status.js";
@@ -103,53 +104,105 @@ test("the guard's state is loaded on every route", () => {
   expect(home().guard).toEqual(ready(guard()));
 });
 
-test("the card shows while the guard is absent or stale, offers no Install, and hides once it is installed or put off with Not now", () => {
-  const card = guardCard(ready(guard()), null).text;
-  const absent = plain(card);
-  expect(absent).toContain("Protect worktrees from Claude Code");
-  expect(absent).toContain("Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.");
-  expect(absent).toContain("Not now");
-  expect(absent).not.toContain("Install…");
+const CMDS = ["claude plugin marketplace add deepanshugoel/git-grove", "claude plugin install git-grove@git-grove"];
+
+test("absent: the card protects worktrees, lists each install command with Copy, and offers only Not now", () => {
+  const card = guardCard(ready(guard({ installCommands: CMDS })), null).text;
+  const text = plain(card);
+  expect(text).toContain("Protect worktrees from Claude Code");
+  expect(text).toContain("Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.");
+  for (const command of CMDS) expect(card).toContain(`data-copy="${command}"`);
+  expect(card.match(/data-ui="copy"/g)).toHaveLength(2);
+  expect(text).toContain("Not now");
+  expect(card).toContain('data-phase="absent"');
   expect(card).not.toContain('data-ui="guard-open"');
-  expect(guardCard(ready(guard({ status: "installed" })), null).text).toBe("");
-  expect(guardCard(ready(guard()), "absent").text).toBe("");
-  expect(guardCard({ status: "loading" }, null).text).toBe("");
-  const stale = plain(guardCard(ready(guard({ status: "stale" })), null).text);
-  expect(stale).toContain("The agent guard points at an old Node or grove path.");
-  expect(stale).not.toContain("Update…");
+  expect(text).not.toContain("Install…");
+  expect(text).not.toContain("Update…");
 });
 
-test("the card says when hooks are turned off, and for a file grove will not edit shows the server's refusal", () => {
-  expect(plain(guardCard(ready(guard({ hooksDisabled: true })), null).text)).toContain(
-    `Hooks are turned off in ${PATH}: it sets disableAllHooks to true, so the guard will not run unless a project turns hooks back on.`,
-  );
+test("hook: the card offers the plugin commands, then removing the old hook, and Not now", () => {
+  const card = guardCard(ready(guard({ status: "installed", phase: "hook", installCommands: CMDS })), null).text;
+  expect(plain(card)).toContain("Switch the agent guard to the Claude Code plugin");
+  for (const command of CMDS) expect(card).toContain(`data-copy="${command}"`);
+  expect(tagOf(card, 'data-ui="guard-open"')).toContain('data-change="uninstall"');
+  expect(plain(card)).toContain("Then remove the old hook…");
+  expect(plain(card)).toContain("Not now");
+  expect(plain(card)).not.toContain("Install…");
+});
+
+test("a stale old hook with the plugin off is the hook card", () => {
+  const card = plain(guardCard(ready(guard({ status: "stale", phase: "hook", installCommands: CMDS })), null).text);
+  expect(card).toContain("Switch the agent guard to the Claude Code plugin");
+  expect(card).not.toContain("Update…");
+});
+
+test("plugin-and-hook: the card says the guard runs twice and offers Remove the old hook only", () => {
+  const card = guardCard(ready(guard({ status: "installed", plugin: true, phase: "plugin-and-hook", installCommands: CMDS })), null).text;
+  expect(plain(card)).toContain("The agent guard runs twice");
+  expect(plain(card)).toContain("The plugin and an old hook in settings.json both run it.");
+  expect(tagOf(card, 'data-ui="guard-open"')).toContain('data-change="uninstall"');
+  expect(plain(card)).toContain("Remove the old hook…");
+  expect(plain(card)).not.toContain("Not now");
+  expect(card).not.toContain('data-ui="copy"');
+});
+
+test("plugin, not done: the card says why, with no buttons", () => {
+  const base = { plugin: true, phase: "plugin", done: false } as const;
+  const off = guardCard(ready(guard({ ...base, hookCommand: true, hooksDisabled: true })), null).text;
+  expect(plain(off)).toContain("Finish the agent guard");
+  expect(plain(off)).toContain(`Hooks are turned off in ${PATH}`);
+  const ephemeral = guardCard(ready(guard({ ...base, ephemeral: true })), null).text;
+  expect(plain(ephemeral)).toContain("Install git grove for the plugin to run it: npm i -g @deepanshugoel/git-grove");
+  const missing = guardCard(ready(guard({ ...base })), null).text;
+  expect(plain(missing)).toContain("The plugin's hook can't find git grove yet. Run git grove ui once.");
+  for (const card of [off, ephemeral, missing]) expect(card).not.toContain("<button");
+});
+
+test("the card is empty when done, loading, or put off for that phase; a refusal is kept as a note", () => {
+  expect(guardCard(ready(guard({ plugin: true, phase: "plugin", done: true, hookCommand: true })), null).text).toBe("");
+  expect(guardCard(ready(guard({ installCommands: CMDS })), "absent").text).toBe("");
+  expect(guardCard(ready(guard({ phase: "hook", installCommands: CMDS })), "absent").text).not.toBe("");
+  expect(guardCard({ status: "loading" }, null).text).toBe("");
   const refusal = `grove will not edit ${PATH}: it is not valid JSON (Unexpected token '/'). To add the hook yourself, run git grove install-guard.`;
   const unreadable = guardCard(ready(guard({ status: "unreadable", refusal })), null).text;
   expect(plain(unreadable)).toContain(refusal);
-  expect(unreadable).not.toContain('data-ui="guard-open"');
-  const readOnly = guardCard(ready(guard({ refusal: `grove will not edit ${PATH}: it is read-only. To add the hook yourself, run git grove install-guard.` })), null).text;
-  expect(plain(readOnly)).toContain("it is read-only.");
-  expect(readOnly).not.toContain('data-ui="guard-open"');
-  const npx = guardCard(ready(guard({ refusal: NPX })), null).text;
-  expect(plain(npx)).toContain(NPX);
-  expect(npx).not.toContain('data-ui="guard-open"');
+  expect(plain(guardCard(ready(guard({ refusal: NPX })), null).text)).toContain(NPX);
+});
+
+test("a command is escaped in the row and its Copy button", () => {
+  const card = guardCard(ready(guard({ installCommands: ['x"><script>'] })), null).text;
+  expect(card).not.toContain("<script>");
+  expect(card).toContain('data-copy="x&quot;&gt;&lt;script&gt;"');
+});
+
+test("isGuardPhase accepts the four phases and not an old status", () => {
+  for (const phase of ["plugin", "plugin-and-hook", "hook", "absent"]) expect(isGuardPhase(phase)).toBe(true);
+  for (const old of ["installed", "stale", "unreadable", 3, null]) expect(isGuardPhase(old)).toBe(false);
 });
 
 test("the card sits at the top of the projects view only", () => {
   const state = home();
   expect(mainView(state, 5_000).text).toContain('class="guard-card"');
-  expect(mainView(reduce(state, { type: "guard-dismiss", status: "absent" }), 5_000).text).not.toContain('class="guard-card"');
+  expect(mainView(reduce(state, { type: "guard-dismiss", phase: "absent" }), 5_000).text).not.toContain('class="guard-card"');
   expect(mainView({ ...state, route: { view: "pins" } }, 5_000).text).not.toContain('class="guard-card"');
 });
 
-test("the header status says on or off, quietly, and opens the dialog", () => {
-  expect(plain(guardStatus(ready(guard({ status: "installed" }))).text)).toBe("Agent guard on");
-  expect(guardStatus(ready(guard({ status: "installed" }))).text).toContain('class="guard-state on"');
-  expect(guardStatus(ready(guard({ status: "installed" }))).text).toContain('data-ui="guard"');
-  expect(plain(guardStatus(ready(guard({ status: "installed", hooksDisabled: true }))).text)).toBe("Agent guard on, hooks off");
-  expect(plain(guardStatus(ready(guard())).text)).toBe("Agent guard off");
-  expect(plain(guardStatus(ready(guard({ status: "stale" }))).text)).toBe("Agent guard out of date");
-  expect(plain(guardStatus(ready(guard({ status: "unreadable" }))).text)).toBe("Agent guard unknown");
+test("the sidebar status names the phase quietly, and is lit only when the guard is done", () => {
+  const on = guardStatus(ready(guard({ plugin: true, phase: "plugin", done: true, hookCommand: true }))).text;
+  expect(plain(on)).toBe("Agent guard on");
+  expect(on).toContain('class="guard-state on"');
+  expect(on).toContain('data-ui="guard"');
+  const labels: [Partial<GuardState>, string][] = [
+    [{ phase: "plugin-and-hook" }, "Agent guard runs twice"],
+    [{ phase: "hook" }, "Agent guard: old hook"],
+    [{ phase: "plugin" }, "Agent guard not running"],
+    [{ phase: "absent" }, "Agent guard off"],
+  ];
+  for (const [overrides, text] of labels) {
+    const html = guardStatus(ready(guard(overrides))).text;
+    expect(plain(html)).toBe(text);
+    expect(html).not.toContain("guard-state on");
+  }
   expect(guardStatus(null).text).toBe("");
   const side = sidebar({ route: { view: "projects" }, projects: { status: "ready", data: [], stale: false }, repo: null, live: "up", now: 0, guard: ready(guard()) }).text;
   expect(plain(side)).toContain("Agent guard off");
@@ -243,7 +296,7 @@ test("the guard dialog does not open over an action dialog, the palette does not
   const withAction = reduce(home(), { type: "dialog-open", action: "new", ctx: { repo: view, feature: null, level: null, branch: null, targets: null, worktree: null } });
   expect(reduce(withAction, { type: "guard-open", change: "uninstall" }).guardDialog).toBeNull();
   expect(reduce(opened(), { type: "palette-open" }).palette).toBeNull();
-  expect(run(home(), { type: "guard-dismiss", status: "absent" }, { type: "route", route: { view: "pins" } }, { type: "route", route: { view: "projects" } }).guardDismissed).toBe("absent");
+  expect(run(home(), { type: "guard-dismiss", phase: "absent" }, { type: "route", route: { view: "pins" } }, { type: "route", route: { view: "projects" } }).guardDismissed).toBe("absent");
   expect(reduce(opened(), { type: "guard-close" }).guardDialog).toBeNull();
 });
 
@@ -253,18 +306,18 @@ test("the guard's state reloads with the project list every 30 s while live, so 
   expect(reduce(live, { type: "tick", now: 31_000 }).guard).toMatchObject({ status: "ready", stale: true });
 });
 
-test("Not now is kept per status, so a guard that later goes stale shows the card once more", () => {
-  const dismissed = reduce(home(), { type: "guard-dismiss", status: "absent" });
+test("Not now is kept per phase, so a guard that later changes phase shows the card once more", () => {
+  const withCommands = (overrides: Partial<GuardState>) => guard({ installCommands: CMDS, ...overrides });
+  const dismissed = reduce(home(withCommands({})), { type: "guard-dismiss", phase: "absent" });
   expect(guardCard(dismissed.guard, dismissed.guardDismissed).text).toBe("");
-  const stale = reduce(dismissed, { type: "loaded", key: "guard", result: { slice: "guard", data: guard({ status: "stale" }) } });
-  expect(guardCard(stale.guard, stale.guardDismissed).text).toContain("The agent guard points at an old Node or grove path.");
-  expect(guardCard(stale.guard, stale.guardDismissed).text).toContain('data-status="stale"');
-  const again = reduce(stale, { type: "guard-dismiss", status: "stale" });
+  const hook = reduce(dismissed, { type: "loaded", key: "guard", result: { slice: "guard", data: withCommands({ status: "installed", phase: "hook" }) } });
+  expect(guardCard(hook.guard, hook.guardDismissed).text).toContain('data-phase="hook"');
+  const again = reduce(hook, { type: "guard-dismiss", phase: "hook" });
   expect(guardCard(again.guard, again.guardDismissed).text).toBe("");
 });
 
 test("closing the guard dialog gives focus back to its opener, else to the sidebar's guard status; Not now moves it to the list", () => {
-  expect(focusAfterClose("guard", "guard:install")).toEqual(["guard:install", "side:guard"]);
+  expect(focusAfterClose("guard", "guard:uninstall")).toEqual(["guard:uninstall", "side:guard"]);
   expect(focusAfterClose("guard", null)).toEqual(["side:guard"]);
   expect(focusAfterClose("dialog", "row:#/r/1")).toEqual(["row:#/r/1"]);
   expect(landmarkAfterCard(["row:#/r/1", "row:#/r/2"])).toBe("row:#/r/1");

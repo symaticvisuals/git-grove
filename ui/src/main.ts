@@ -17,7 +17,7 @@ import { createGuardDialogHost } from "./guard/guard-dialog-host.js";
 import { createGuardEffects } from "./guard/guard-effects.js";
 import { html } from "./html.js";
 import { ICONS } from "./icons.js";
-import { isGuardStatus } from "./is-guard-status.js";
+import { isGuardPhase } from "./is-guard-phase.js";
 import { keyCommand, type KeyCommand, type KeyInput, type KeyMode } from "./keys.js";
 import { landmarkAfterCard } from "./landmark-after-card.js";
 import { connectLive } from "./live.js";
@@ -342,20 +342,34 @@ function storage(): Storage | null {
   }
 }
 
-function dismissGuardCard(status: string | undefined): void {
-  if (!isGuardStatus(status)) return;
+function dismissGuardCard(phase: string | undefined): void {
+  if (!isGuardPhase(phase)) return;
   try {
-    storage()?.setItem(GUARD_DISMISSED, status);
+    storage()?.setItem(GUARD_DISMISSED, phase);
   } catch {
     // A page that cannot store the choice hides the card for this visit only.
   }
   const rows = [...document.querySelectorAll<HTMLElement>("#view .row[data-key]")].map((row) => row.dataset["key"] ?? "");
   focusAfterPaint = { key: landmarkAfterCard(rows), until: Date.now() + FOCUS_WAIT_MS };
-  dispatch({ type: "guard-dismiss", status });
+  dispatch({ type: "guard-dismiss", phase });
 }
 
 function openGuard(): void {
-  dispatch({ type: "guard-open", change: "uninstall" });
+  const phase = state.guard?.status === "ready" ? state.guard.data.phase : null;
+  if (phase === "hook" || phase === "plugin-and-hook") {
+    dispatch({ type: "guard-open", change: "uninstall" });
+    return;
+  }
+  const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  document.querySelector(".guard-card")?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
+}
+
+function copyCommand(command: string | undefined): void {
+  if (command === undefined) return;
+  navigator.clipboard.writeText(command).then(
+    () => toast("Copied"),
+    () => toast("Could not copy; select the command and copy it", false),
+  );
 }
 
 function isSlice(name: string | undefined): name is SliceName {
@@ -390,7 +404,10 @@ function runUi(element: HTMLElement): void {
       openGuard();
       return;
     case "guard-dismiss":
-      dismissGuardCard(data["status"]);
+      dismissGuardCard(data["phase"]);
+      return;
+    case "copy":
+      copyCommand(data["copy"]);
       return;
     case "jump": {
       const group = data["group"] === undefined ? null : document.querySelector(`.group[data-group="${CSS.escape(data["group"])}"]`);
@@ -598,7 +615,7 @@ async function boot(): Promise<void> {
   bind();
   try {
     const dismissed = storage()?.getItem(GUARD_DISMISSED);
-    if (isGuardStatus(dismissed)) dispatch({ type: "guard-dismiss", status: dismissed });
+    if (isGuardPhase(dismissed)) dispatch({ type: "guard-dismiss", phase: dismissed });
   } catch {
     // A page that cannot read storage shows the card.
   }

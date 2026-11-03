@@ -5,7 +5,7 @@ import type { RunState } from "../../src/server/actions/runs.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { ApiError } from "./api.error.js";
 import { isActivityItem } from "./is-activity-item.js";
-import { isGuardStatus } from "./is-guard-status.js";
+import { isGuardPhase } from "./is-guard-phase.js";
 import { isReceipt } from "./is-receipt.js";
 import { isRecord } from "./is-record.js";
 import { isStepEvent } from "./is-step-event.js";
@@ -147,9 +147,10 @@ function isGuardChange(value: unknown): value is GuardChange {
 function isGuardState(value: unknown): value is GuardState {
   return (
     isRecord(value) &&
-    isGuardStatus(value["status"]) &&
+    isGuardPhase(value["phase"]) &&
     ["settingsPath", "command"].every((key) => typeof value[key] === "string") &&
-    typeof value["hooksDisabled"] === "boolean" &&
+    ["hooksDisabled", "done"].every((key) => typeof value[key] === "boolean") &&
+    isStrings(value["installCommands"]) &&
     isNullableString(value["refusal"])
   );
 }

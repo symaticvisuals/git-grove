@@ -6,7 +6,7 @@ import { type WrittenSettings, writeSettingsFile } from "./write-settings-file.j
 
 function linesOf(path: string, written: WrittenSettings): string[] {
   const { backup, original } = written;
-  if (backup === null || original === null) return [`Created ${path}`];
+  if (backup === null || original === null) return [`Wrote ${path}`];
   const kept = original.written ? `It is also in ${original.path}, which grove never overwrites` : `The file from before grove first changed it is in ${original.path}`;
   return [`Wrote ${path}`, `The file as it was is in ${backup}`, kept];
 }

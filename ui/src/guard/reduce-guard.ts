@@ -1,4 +1,4 @@
-import type { GuardChange, GuardPlan, GuardReceipt, GuardStatus } from "../../../src/core/guard-install/guard-install.types.js";
+import type { GuardChange, GuardPhase, GuardPlan, GuardReceipt } from "../../../src/core/guard-install/guard-install.types.js";
 import type { DialogState, PaletteState } from "../dialogs/reduce-dialog.js";
 
 /**
@@ -20,10 +20,10 @@ export type GuardDialogState = {
   receipt: GuardReceipt | null;
 };
 
-/** `guardDismissed` is the status the onboarding card was put off for with "Not now". */
+/** `guardDismissed` is the phase the onboarding card was put off for with "Not now". */
 export type GuardSlices = {
   guardDialog: GuardDialogState | null;
-  guardDismissed: GuardStatus | null;
+  guardDismissed: GuardPhase | null;
   dialog: DialogState | null;
   palette: PaletteState | null;
   dialogSeq: number;
@@ -39,7 +39,7 @@ export type GuardAction =
   | { type: "guard-run-failed"; dialog: number; status: number; message: string }
   | { type: "guard-again" }
   | { type: "guard-close" }
-  | { type: "guard-dismiss"; status: GuardStatus };
+  | { type: "guard-dismiss"; phase: GuardPhase };
 
 const EXPIRED = "That preview expired, so grove read the file again. Look it over, then confirm.";
 
@@ -92,11 +92,11 @@ function step(dialog: GuardDialogState, action: GuardAction): GuardDialogState |
  * dialog opens only while no action dialog is, closing the palette, and previews at once. Confirm takes the plan only
  * when the id painted on its button is the plan shown, that plan has been armed, and nothing is being checked,
  * failing or blocking it. A run refused because its preview expired previews it again at once. "Not now" hides the
- * card for the status it was shown for.
+ * card for the phase it was shown for.
  */
 export function reduceGuard(slices: GuardSlices, action: GuardAction): GuardSlices {
   if (action.type === "guard-open") return opened(slices, action.change);
-  if (action.type === "guard-dismiss") return slices.guardDismissed === action.status ? slices : { ...slices, guardDismissed: action.status };
+  if (action.type === "guard-dismiss") return slices.guardDismissed === action.phase ? slices : { ...slices, guardDismissed: action.phase };
   const dialog = slices.guardDialog;
   if (dialog === null) return slices;
   const next = step(dialog, action);
