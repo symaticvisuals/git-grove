@@ -1,0 +1,12 @@
+{
+  "name": "git-grove",
+  "owner": { "name": "symaticvisuals" },
+  "metadata": { "description": "Claude Code plugins from git grove." },
+  "plugins": [
+    {
+      "name": "git-grove",
+      "source": "./plugin",
+      "description": "Agent guard and skill for git grove: stops Claude Code from losing work in git worktrees."
+    }
+  ]
+}

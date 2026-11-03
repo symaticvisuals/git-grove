@@ -11,7 +11,7 @@ const DEADLINE_MS = 3000;
 const USAGE = `Usage: git grove guard --claude
   the agent guard, run by a Claude Code PreToolUse hook: reads the hook's JSON on stdin,
   exits 2 with the reason on stderr to block a command, 0 to allow it
-  (git grove install-guard prints the hook to add)
+  (git grove install-guard prints how to install it as a Claude Code plugin)
 git grove guard --announce
   tells a new Claude Code session that this agent is bounded by the guard
 `;

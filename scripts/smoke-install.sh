@@ -36,8 +36,9 @@ git -C "$repo" init --quiet -b main
 cd "$repo"
 
 actual="$(git grove --version)"
+expected="git-grove $(node -p 'require(process.argv[1]).version' "$root/package.json")"
 echo "$actual"
-[ "$actual" = "git-grove 0.2.0" ] || { echo "expected: git-grove 0.2.0" >&2; exit 1; }
+[ "$actual" = "$expected" ] || { echo "expected: $expected" >&2; exit 1; }
 
 git config stack.trunk main
 echo base > base.txt && git add base.txt && git commit --quiet -m base
@@ -56,7 +57,8 @@ echo "$report"
 grep -qi "history rewritten" <<< "$report" || { echo "expected: history rewritten" >&2; exit 1; }
 [ ! -s "$work/stderr" ] || { echo "expected no stderr, got:" >&2; cat "$work/stderr" >&2; exit 1; }
 
-# The installed guard blocks a worktree removal that would lose an ignored file, and install-guard names the installed bin.
+# The installed guard blocks a worktree removal that would lose an ignored file, install-guard prints the plugin's
+# install commands, and the plugin's hook reaches the installed grove: through PATH before hook-command exists.
 echo ".local/" >> "$(git rev-parse --git-common-dir)/info/exclude"
 git worktree add --quiet "$work/seeded" -b seeded main
 mkdir "$work/seeded/.local" && echo "insert;" > "$work/seeded/.local/seed.sql"
@@ -66,7 +68,15 @@ git-grove guard --claude <<< "$hook" > "$work/guard.out" 2> "$work/guard.err" ||
 [ "$code" = 2 ] || { echo "expected the guard to exit 2, got $code:" >&2; cat "$work/guard.err" >&2; exit 1; }
 [ ! -s "$work/guard.out" ] || { echo "expected no stdout from the guard" >&2; exit 1; }
 grep -q ".local/seed.sql" "$work/guard.err" || { echo "expected the guard to name .local/seed.sql" >&2; exit 1; }
-git grove install-guard | grep -qF "$(cd "$installed" && pwd -P)/dist/cli/bin.js guard --claude" || { echo "expected install-guard to print the installed bin" >&2; exit 1; }
+git grove install-guard | grep -qxF "  claude plugin install git-grove@git-grove" || { echo "expected install-guard to print the plugin install command" >&2; exit 1; }
+plugin_hook() {
+  code=0
+  sh "$root/plugin/hooks/guard.sh" <<< "$hook" > "$work/plugin.out" 2> "$work/plugin.err" || code=$?
+  [ "$code" = 2 ] || { echo "expected the plugin's hook to exit 2 ($1), got $code:" >&2; cat "$work/plugin.err" >&2; exit 1; }
+  grep -q ".local/seed.sql" "$work/plugin.err" || { echo "expected the plugin's hook to name .local/seed.sql ($1)" >&2; exit 1; }
+}
+[ ! -e "$GIT_GROVE_HOME/hook-command" ] || { echo "expected no hook-command before the server runs" >&2; exit 1; }
+plugin_hook "through PATH"
 echo "guard: ok"
 
 # serve: answers its health, guards the API, shows in status, and exits by itself: 0 on SIGTERM, 75 on /api/shutdown.
@@ -98,6 +108,8 @@ status_of() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 
 start_serve
 echo "serving on port $port"
+[ "$(sed -n 2p "$GIT_GROVE_HOME/hook-command")" = "$(cd "$installed" && pwd -P)/dist/cli/bin.js" ] || { echo "expected hook-command to name the installed bin" >&2; cat "$GIT_GROVE_HOME/hook-command" >&2; exit 1; }
+plugin_hook "through hook-command"
 [ "$(status_of "http://127.0.0.1:$port/api/health")" = 200 ] || { echo "expected /api/health 200" >&2; exit 1; }
 [ "$(status_of "http://127.0.0.1:$port/api/projects")" = 401 ] || { echo "expected /api/projects 401 without the token" >&2; exit 1; }
 [ "$(status_of "http://127.0.0.1:$port/manifest.webmanifest")" = 200 ] || { echo "expected the manifest" >&2; exit 1; }

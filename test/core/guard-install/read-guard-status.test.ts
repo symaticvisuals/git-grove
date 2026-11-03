@@ -18,7 +18,7 @@ function both(announce = ANNOUNCE): string {
 }
 
 test("no file, or no grove hook, is absent; a group whose matcher is not Bash does not count", () => {
-  expect(readGuardStatus(null, COMMAND)).toEqual({ status: "absent", hooksDisabled: false, problem: null });
+  expect(readGuardStatus(null, COMMAND)).toEqual({ status: "absent", pluginEnabled: false, hooksDisabled: false, problem: null });
   expect(readGuardStatus(settings("echo hi"), COMMAND).status).toBe("absent");
   const edit = JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Edit", hooks: [{ type: "command", command: COMMAND }] }] } });
   expect(readGuardStatus(edit, COMMAND).status).toBe("absent");
@@ -35,11 +35,11 @@ test("the wanted Bash hook and the matching session notice together are installe
 
 test("a file that cannot be parsed, or that the reader could not read, is unreadable with why", () => {
   expect(readGuardStatus("{ nope", COMMAND)).toMatchObject({ status: "unreadable", problem: expect.stringContaining("is not valid JSON") });
-  expect(readGuardStatus(null, COMMAND, "cannot be read (EACCES)")).toEqual({ status: "unreadable", hooksDisabled: false, problem: "cannot be read (EACCES)" });
+  expect(readGuardStatus(null, COMMAND, "cannot be read (EACCES)")).toEqual({ status: "unreadable", pluginEnabled: false, hooksDisabled: false, problem: "cannot be read (EACCES)" });
 });
 
 test("disableAllHooks: true in the file is reported", () => {
-  expect(readGuardStatus(JSON.stringify({ disableAllHooks: true }), COMMAND)).toEqual({ status: "absent", hooksDisabled: true, problem: null });
+  expect(readGuardStatus(JSON.stringify({ disableAllHooks: true }), COMMAND)).toEqual({ status: "absent", pluginEnabled: false, hooksDisabled: true, problem: null });
   expect(readGuardStatus(JSON.stringify({ disableAllHooks: "true" }), COMMAND).hooksDisabled).toBe(false);
 });
 
@@ -64,4 +64,13 @@ test("grove's hook under a matcher of *, none, or a list naming Bash counts when
   expect(readGuardStatus(under({ matcher: "Edit" }), COMMAND).status).toBe("stale");
   const startup = JSON.stringify({ hooks: { SessionStart: [{ matcher: "startup", hooks: [{ type: "command", command: "~/bin/hello.sh" }] }] } });
   expect(readGuardStatus(startup, COMMAND).status).toBe("absent");
+});
+
+test("enabledPlugins naming grove's plugin as true reads pluginEnabled; anything else reads false and never unreadable", () => {
+  const read = (enabledPlugins: unknown) => readGuardStatus(JSON.stringify({ enabledPlugins }), COMMAND);
+  expect(read({ "git-grove@git-grove": true })).toEqual({ status: "absent", pluginEnabled: true, hooksDisabled: false, problem: null });
+  for (const value of [{ "git-grove@git-grove": false }, {}, [], "x"]) {
+    expect(read(value), JSON.stringify(value)).toMatchObject({ status: "absent", pluginEnabled: false });
+  }
+  expect(readGuardStatus("{}", COMMAND).pluginEnabled).toBe(false);
 });

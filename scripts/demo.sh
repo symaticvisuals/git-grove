@@ -136,7 +136,7 @@ cat << EOF
 Done. The scenario stays in $work.
 
 To see it in the dashboard, serve it from this terminal (Ctrl-C stops it). Its HOME and Claude Code folder are the
-demo's, so installing the agent guard there edits only $CLAUDE_CONFIG_DIR/settings.json:
+demo's, so the dashboard reads only $CLAUDE_CONFIG_DIR/settings.json, never your own Claude Code settings:
   HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" GIT_GROVE_HOME="$GIT_GROVE_HOME" node "$bin" serve
 serve prints its address without the token, and the page needs the token. In a second terminal, this prints
 the address to open, token included:

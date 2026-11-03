@@ -9,6 +9,7 @@ export type Route =
   | { view: "needs" }
   | { view: "activity" }
   | { view: "pins" }
+  | { view: "setup" }
   | { view: "repo"; repo: number; pick: RowRef | null };
 
 const PROJECTS: Route = { view: "projects" };
@@ -39,14 +40,14 @@ function repoRoute(repo: number, rest: string[]): Route {
 }
 
 /**
- * The route a location hash names: `#/` (projects), `#/needs`, `#/activity`, `#/pins`, `#/r/<repo>`,
+ * The route a location hash names: `#/` (projects), `#/needs`, `#/activity`, `#/pins`, `#/setup`, `#/r/<repo>`,
  * `#/r/<repo>/f/<featureId>[/<branch>]`, `#/r/<repo>/deleted/<branch>` or `#/r/<repo>/detached`, branches
  * percent-encoded. Anything else is projects.
  */
 export function parseRoute(hash: string): Route {
   if (!hash.startsWith("#/")) return PROJECTS;
   const [head, ...rest] = hash.slice(2).split("/");
-  if (rest.length === 0 && (head === "needs" || head === "activity" || head === "pins")) return { view: head };
+  if (rest.length === 0 && (head === "needs" || head === "activity" || head === "pins" || head === "setup")) return { view: head };
   if (head === "r" && rest[0] !== undefined && /^[1-9]\d{0,14}$/.test(rest[0])) return repoRoute(Number(rest[0]), rest.slice(1));
   return PROJECTS;
 }

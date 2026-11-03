@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { hookCommandPath } from "../../src/core/guard-install/hook-command.js";
 import { createGuardInstaller } from "../../src/server/guard/guard-installer.js";
 import type { GuardSetup } from "../../src/server/guard/guard-setup.types.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
@@ -35,12 +36,6 @@ function record(value: unknown): Json {
   return value;
 }
 
-function first(value: unknown): unknown {
-  if (!Array.isArray(value)) throw new Error("expected an array");
-  const items: unknown[] = value;
-  return items[0];
-}
-
 function live(): RunningServer {
   if (server === undefined) throw new Error("no server started");
   return server;
@@ -52,7 +47,7 @@ function text(value: unknown): string {
 }
 
 async function start(setup: Partial<GuardSetup> | null = {}): Promise<void> {
-  const guard = setup === null ? undefined : () => ({ node: process.execPath, bin: BIN, settingsPath, ...setup });
+  const guard = setup === null ? undefined : () => ({ node: process.execPath, bin: BIN, settingsPath, home, ...setup });
   server = await startServer({ port: 0, home, uiDir: ui.dir, version: "9.9.9", watch: { debounceMs: 30, pollMs: 60_000 }, ...(guard === undefined ? {} : { guard }) });
 }
 
@@ -62,8 +57,8 @@ async function call(method: "GET" | "POST", path: string, body?: unknown, header
   return { status: reply.status, body: record(JSON.parse(reply.body)) };
 }
 
-async function plan(change: "install" | "uninstall"): Promise<{ planId: string; plan: Json }> {
-  const reply = await call("POST", "/api/guard/plans", { change });
+async function plan(): Promise<{ planId: string; plan: Json }> {
+  const reply = await call("POST", "/api/guard/plans", { change: "uninstall" });
   expect(reply.status).toBe(200);
   return { planId: text(reply.body["planId"]), plan: record(reply.body["plan"]) };
 }
@@ -74,6 +69,19 @@ async function runPlan(planId: string): Promise<Reply> {
 
 async function settings(): Promise<unknown> {
   return JSON.parse(await readFile(settingsPath, "utf8"));
+}
+
+/** Writes a settings file holding grove's old hook, which runs `command`, after `rest`. */
+async function writeOldHook(rest: Json = {}, command = `${process.execPath} ${BIN} guard --claude`): Promise<string> {
+  await mkdir(join(claude, ".claude"), { recursive: true });
+  const announce = command.replace(/ guard --claude$/, " guard --announce");
+  const hooks = {
+    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }],
+    SessionStart: [{ hooks: [{ type: "command", command: announce, timeout: 10 }] }],
+  };
+  const text = `${JSON.stringify({ ...rest, hooks }, null, 2)}\n`;
+  await writeFile(settingsPath, text);
+  return text;
 }
 
 beforeEach(async () => {
@@ -93,44 +101,73 @@ afterEach(async () => {
   await ui.cleanup();
 });
 
-test("read, plan, install, read again, then undo the install by an uninstall planned against the file as it is", async () => {
+test("read, plan, uninstall the old hook planned against the file as it is, then read again", async () => {
   await start();
   const command = `${process.execPath} ${BIN} guard --claude`;
   await mkdir(join(claude, ".claude"));
   await writeFile(settingsPath, '{\n  "model": "opus"\n}\n');
   expect((await call("GET", "/api/guard")).body).toEqual({
     status: "absent",
+    plugin: false,
+    hookCommand: true,
+    ephemeral: false,
+    phase: "absent",
+    done: false,
+    installCommands: ["claude plugin marketplace add symaticvisuals/git-grove", "claude plugin install git-grove@git-grove"],
     settingsPath,
     command,
     hooksDisabled: false,
     refusal: null,
   });
-  const install = await plan("install");
-  expect(install.plan).toMatchObject({ change: "install", confirm: "Install", settingsPath, backupPath: `${settingsPath}.grove-backup`, blockers: [] });
-  const ran = await runPlan(install.planId);
-  expect(ran.status).toBe(200);
-  expect(record(ran.body["receipt"])).toMatchObject({ change: "install", ok: true, title: "Installed the agent guard", undo: "uninstall" });
-  const announce = command.replace(/ guard --claude$/, " guard --announce");
-  expect(await settings()).toEqual({
-    model: "opus",
-    hooks: {
-      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }],
-      SessionStart: [{ hooks: [{ type: "command", command: announce, timeout: 10 }] }],
-    },
-  });
-  expect(await readFile(`${settingsPath}.grove-backup`, "utf8")).toBe('{\n  "model": "opus"\n}\n');
+  const before = await writeOldHook({ model: "opus" });
   expect((await call("GET", "/api/guard")).body["status"]).toBe("installed");
 
-  await writeFile(settingsPath, (await readFile(settingsPath, "utf8")).replace('"model": "opus",', '"model": "opus",\n  "theme": "dark",'));
-  const undo = await plan("uninstall");
-  expect((await runPlan(undo.planId)).body["receipt"]).toMatchObject({ ok: true, title: "Uninstalled the agent guard", undo: "install" });
+  await writeFile(settingsPath, before.replace('"model": "opus",', '"model": "opus",\n  "theme": "dark",'));
+  const uninstall = await plan();
+  expect(uninstall.plan).toMatchObject({ change: "uninstall", confirm: "Remove", settingsPath, backupPath: `${settingsPath}.grove-backup`, adds: null, blockers: [] });
+  const ran = await runPlan(uninstall.planId);
+  expect(ran.status).toBe(200);
+  expect(record(ran.body["receipt"])).toMatchObject({ change: "uninstall", ok: true, title: "Removed the old hook", undo: null });
   expect(await settings()).toEqual({ model: "opus", theme: "dark" });
+  expect(JSON.parse(await readFile(`${settingsPath}.grove-backup`, "utf8"))).toMatchObject({ theme: "dark", hooks: { PreToolUse: [{ matcher: "Bash" }] } });
   expect((await call("GET", "/api/guard")).body["status"]).toBe("absent");
+});
+
+test("an install plan is a 400 that points to the plugin, and writes nothing", async () => {
+  await start();
+  expect(await call("POST", "/api/guard/plans", { change: "install" })).toEqual({
+    status: 400,
+    body: { error: "the agent guard installs as a Claude Code plugin: claude plugin marketplace add symaticvisuals/git-grove, then claude plugin install git-grove@git-grove" },
+  });
+  await expect(readFile(settingsPath)).rejects.toMatchObject({ code: "ENOENT" });
+});
+
+test("with the plugin enabled and a usable hook-command, the guard is in the plugin phase and done", async () => {
+  await start();
+  await mkdir(join(claude, ".claude"));
+  await writeFile(settingsPath, JSON.stringify({ enabledPlugins: { "git-grove@git-grove": true } }));
+  expect((await call("GET", "/api/guard")).body).toMatchObject({
+    status: "absent",
+    plugin: true,
+    hookCommand: true,
+    phase: "plugin",
+    done: true,
+    installCommands: ["claude plugin marketplace add symaticvisuals/git-grove", "claude plugin install git-grove@git-grove"],
+  });
+});
+
+test("with the plugin enabled but the hook-command file gone, the guard is in the plugin phase and not done", async () => {
+  await start();
+  await mkdir(join(claude, ".claude"));
+  await writeFile(settingsPath, JSON.stringify({ enabledPlugins: { "git-grove@git-grove": true } }));
+  await rm(hookCommandPath(home));
+  expect((await call("GET", "/api/guard")).body).toMatchObject({ plugin: true, hookCommand: false, phase: "plugin", done: false });
 });
 
 test("a plan runs once: the second run is a 409, and an unknown plan a 410", async () => {
   await start();
-  const { planId } = await plan("install");
+  await writeOldHook();
+  const { planId } = await plan();
   expect((await runPlan(planId)).status).toBe(200);
   expect(await runPlan(planId)).toEqual({ status: 409, body: { error: "This plan already ran" } });
   expect((await runPlan("nope")).status).toBe(410);
@@ -139,59 +176,64 @@ test("a plan runs once: the second run is a 409, and an unknown plan a 410", asy
 
 test("an expired guard plan cannot run", async () => {
   let clock = 0;
-  const installer = createGuardInstaller(() => ({ node: process.execPath, bin: BIN, settingsPath }), { ttlMs: 100, now: () => clock });
-  const { planId } = await installer.plan("install");
+  const installer = createGuardInstaller(() => ({ node: process.execPath, bin: BIN, settingsPath, home }), { ttlMs: 100, now: () => clock });
+  const before = await writeOldHook();
+  const { planId } = await installer.plan();
   clock = 200;
   await expect(installer.run(planId)).rejects.toMatchObject({ status: 410 });
-  await expect(readFile(settingsPath)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(settingsPath, "utf8")).toBe(before);
 });
 
 test("the guard routes need the token, a same-origin change and a JSON body, like every other route", async () => {
   await start();
   expect((await call("GET", "/api/guard", undefined, {})).status).toBe(401);
-  expect((await call("POST", "/api/guard/plans", { change: "install" }, {})).status).toBe(401);
-  const { planId } = await plan("install");
+  expect((await call("POST", "/api/guard/plans", { change: "uninstall" }, {})).status).toBe(401);
+  const before = await writeOldHook();
+  const { planId } = await plan();
   expect((await call("POST", "/api/guard/actions", { planId }, { "x-grove-token": live().token, origin: "http://evil.example" })).status).toBe(403);
   expect((await call("POST", "/api/guard/actions", { planId }, { "x-grove-token": "f".repeat(64) })).status).toBe(401);
-  await expect(readFile(settingsPath)).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(settingsPath, "utf8")).toBe(before);
 });
 
 test("the guard routes answer only a loopback Host", async () => {
   await start();
   expect((await call("GET", "/api/guard", undefined, { "x-grove-token": live().token, host: "evil.example" })).status).toBe(421);
-  expect((await call("POST", "/api/guard/plans", { change: "install" }, { "x-grove-token": live().token, host: `evil.example:${live().port}` })).status).toBe(421);
+  expect((await call("POST", "/api/guard/plans", { change: "uninstall" }, { "x-grove-token": live().token, host: `evil.example:${live().port}` })).status).toBe(421);
 });
 
-test("two changes run at once are made one at a time: the second sees the file changed and is refused, and one hook is written", async () => {
+test("two changes run at once are made one at a time: the second sees the file changed and is refused", async () => {
   await start();
-  const [one, two] = [await plan("install"), await plan("install")];
+  await writeOldHook({ model: "opus" });
+  const [one, two] = [await plan(), await plan()];
   const receipts = await Promise.all([runPlan(one.planId), runPlan(two.planId)]);
-  expect(receipts.map((reply) => record(reply.body["receipt"])["title"]).sort()).toEqual(["Changed since you looked", "Installed the agent guard"]);
-  const written = record(await settings());
-  expect(record(first(record(written["hooks"])["PreToolUse"]))["matcher"]).toBe("Bash");
-  expect(record(written["hooks"])["PreToolUse"]).toHaveLength(1);
+  expect(receipts.map((reply) => record(reply.body["receipt"])["title"]).sort()).toEqual(["Changed since you looked", "Removed the old hook"]);
+  expect(await settings()).toEqual({ model: "opus" });
 });
 
-test("a read-only settings file is reported with grove's refusal, and its status is still read", async () => {
+test("a read-only settings file is reported with grove's refusal, its status is still read, and an uninstall is blocked", async () => {
   await start();
-  await mkdir(join(claude, ".claude"));
-  await writeFile(settingsPath, "{}\n");
+  const before = await writeOldHook();
   await chmod(settingsPath, 0o444);
   expect((await call("GET", "/api/guard")).body).toMatchObject({
-    status: "absent",
-    refusal: `grove will not edit ${settingsPath}: it is read-only. To add the hook yourself, run git grove install-guard.`,
+    status: "installed",
+    refusal: `grove will not edit ${settingsPath}: it is read-only. To remove the old hook yourself, edit that file by hand.`,
   });
+  const uninstall = await plan();
+  expect(uninstall.plan["blockers"]).toEqual([`grove will not edit ${settingsPath}: it is read-only. To take grove's hook out, edit the file yourself.`]);
+  expect(record((await runPlan(uninstall.planId)).body["receipt"])).toMatchObject({ ok: false, refused: true, title: "Not run" });
+  expect(await readFile(settingsPath, "utf8")).toBe(before);
 });
 
-test("from a package runner's cache the state and the plan carry install-guard's refusal, and nothing is written", async () => {
+test("from a package runner's cache the state carries install-guard's refusal, and the old hook can still be taken out", async () => {
   await start({ bin: NPX_BIN });
   const state = (await call("GET", "/api/guard")).body;
   expect(text(state["refusal"])).toContain("a package runner's cache (npx, pnpm dlx, bunx, yarn dlx)");
   expect(text(state["refusal"])).toContain("npm i -g @deepanshugoel/git-grove");
-  const install = await plan("install");
-  expect(install.plan["blockers"]).toEqual([state["refusal"]]);
-  expect(record((await runPlan(install.planId)).body["receipt"])).toMatchObject({ ok: false, refused: true, title: "Not run" });
-  await expect(readFile(settingsPath)).rejects.toMatchObject({ code: "ENOENT" });
+  await writeOldHook({}, "/opt/node /opt/git-grove/dist/cli/bin.js guard --claude");
+  const uninstall = await plan();
+  expect(uninstall.plan["blockers"]).toEqual([]);
+  expect(record((await runPlan(uninstall.planId)).body["receipt"])).toMatchObject({ ok: true, title: "Removed the old hook" });
+  expect(await settings()).toEqual({});
 });
 
 test("a settings file grove cannot parse is unreadable, and grove says it will not edit it", async () => {
@@ -200,12 +242,12 @@ test("a settings file grove cannot parse is unreadable, and grove says it will n
   await writeFile(settingsPath, "// mine\n{}\n");
   const state = (await call("GET", "/api/guard")).body;
   expect(state).toMatchObject({ status: "unreadable", refusal: expect.stringMatching(/^grove will not edit .*settings\.json: it is not valid JSON/) });
-  expect((await plan("install")).plan["blockers"]).toEqual([expect.stringContaining("To add the hook yourself, run git grove install-guard.")]);
+  expect((await plan()).plan["blockers"]).toEqual([expect.stringContaining("To take grove's hook out, edit the file yourself.")]);
 });
 
 test("a server started without a guard setup answers the guard routes with 503", async () => {
   await start(null);
-  expect(await call("GET", "/api/guard")).toEqual({ status: 503, body: { error: "This git grove server cannot install the agent guard" } });
+  expect(await call("GET", "/api/guard")).toEqual({ status: 503, body: { error: "This git grove server cannot read the agent guard setup" } });
 });
 
 function sh(command: string, stdin: string, cwd: string): Promise<{ code: number | null; stderr: string }> {
@@ -219,7 +261,7 @@ function sh(command: string, stdin: string, cwd: string): Promise<{ code: number
   });
 }
 
-test("the command an install writes, run by sh as Claude Code runs it, blocks removing the demo's precious worktree with exit 2", async () => {
+test("the command grove's hook runs, run by sh as Claude Code runs it, blocks removing the demo's precious worktree with exit 2", async () => {
   await start();
   const repo = await makeRepo();
   try {
@@ -231,11 +273,7 @@ test("the command an install writes, run by sh as Claude Code runs it, blocks re
     await mkdir(join(old, ".local"));
     await writeFile(join(old, ".local", "seed.sql"), "insert into coupons values ('WELCOME10', 10);\n");
 
-    const { planId } = await plan("install");
-    expect((await runPlan(planId)).status).toBe(200);
-    const written = record(await settings());
-    const group = record(first(record(written["hooks"])["PreToolUse"]));
-    const command = text(record(first(group["hooks"]))["command"]);
+    const command = text((await call("GET", "/api/guard")).body["command"]);
     const hook = JSON.stringify({ session_id: "proof", cwd: root, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "git worktree remove --force .worktrees/old-onboarding" } });
     const result = await sh(command, hook, root);
     expect(result.code).toBe(2);

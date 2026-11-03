@@ -1,5 +1,5 @@
 import type { Plan } from "../../src/core/actions/plan.types.js";
-import type { GuardState, GuardStatus } from "../../src/core/guard-install/guard-install.types.js";
+import type { GuardPhase, GuardState } from "../../src/core/guard-install/guard-install.types.js";
 import type { ServerEvent } from "../../src/server/live/server-event.types.js";
 import type { ActivityItem, NeedsYouItem, WireFeatureDetail, WireProject, WireRepoView } from "../../src/server/wire/wire.types.js";
 import { activityQuery } from "./activity-query.js";
@@ -50,8 +50,10 @@ export type State = {
   /** The id the last dialog opened got; each open takes the next one. */
   dialogSeq: number;
   guardDialog: GuardDialogState | null;
-  /** The agent guard status the card was put off for with "Not now"; it shows again for any other. */
-  guardDismissed: GuardStatus | null;
+  /** The agent guard phase the card was put off for with "Not now"; it shows again for any other. */
+  guardDismissed: GuardPhase | null;
+  /** Where the Getting started page sends the user on, the address that was opened before it. */
+  setupNext: string;
 };
 
 export type UiAction =
@@ -66,6 +68,7 @@ export type UiAction =
   | { type: "needs-only"; on: boolean }
   | { type: "toggle-group"; key: string }
   | { type: "signed-out" }
+  | { type: "setup-next"; next: string }
   | DialogAction
   | GuardAction;
 
@@ -239,6 +242,8 @@ function step(state: State, action: UiAction): State {
       return { ...state, closed: state.closed.includes(action.key) ? state.closed.filter((key) => key !== action.key) : [...state.closed, action.key] };
     case "signed-out":
       return { ...state, signedOut: true };
+    case "setup-next":
+      return { ...state, setupNext: action.next };
     case "guard-open":
     case "guard-planned":
     case "guard-plan-failed":
@@ -247,7 +252,6 @@ function step(state: State, action: UiAction): State {
     case "guard-ran":
     case "guard-run-failed":
     case "guard-again":
-    case "guard-undo":
     case "guard-close":
     case "guard-dismiss":
       return withGuard(state, action);
@@ -298,6 +302,7 @@ export function initialState(route: Route, pageVersion: string): State {
     dialogSeq: 0,
     guardDialog: null,
     guardDismissed: null,
+    setupNext: "#/",
   };
   const wanted = sliceRequests(blank);
   return SLICE_NAMES.reduce((state, slice) => (wanted[slice] === null ? state : update(state, slice, () => LOADING)), blank);

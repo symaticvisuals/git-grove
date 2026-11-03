@@ -1,5 +1,5 @@
-/** What a review of Claude Code's settings asks for: add grove's hook, or take it out. */
-export type GuardChange = "install" | "uninstall";
+/** What a review of Claude Code's settings asks for: taking grove's old hook out. The guard installs as a plugin instead. */
+export type GuardChange = "uninstall";
 
 /**
  * Where the agent guard stands in a settings file: `absent` (no file, or no grove hook in it), `installed` (one grove
@@ -14,12 +14,29 @@ export type GuardStatus = "absent" | "installed" | "stale" | "unreadable";
  */
 export type SettingsFile = { path: string; text: string | null; bytes: Uint8Array | null; hash: string; problem: string | null; readOnly: boolean };
 
-/** The status of grove's hook in a settings file, whether that file turns every hook off, and why it is unreadable. */
-export type GuardReading = { status: GuardStatus; hooksDisabled: boolean; problem: string | null };
+/**
+ * Which guard Claude Code runs: `plugin` (grove's plugin alone), `plugin-and-hook` (the plugin and the old hook in
+ * settings), `hook` (the old hook alone), or `absent` (neither).
+ */
+export type GuardPhase = "plugin" | "plugin-and-hook" | "hook" | "absent";
 
-/** What the dashboard shows of the guard: where it stands, the settings file, the command grove wants, and why grove would refuse. */
+/** The status of grove's hook in a settings file, whether the plugin is enabled there, whether that file turns every hook off, and why it is unreadable. */
+export type GuardReading = { status: GuardStatus; pluginEnabled: boolean; hooksDisabled: boolean; problem: string | null };
+
+/**
+ * What the dashboard shows of the guard: where the old hook stands, the settings file, the command grove wants, and why
+ * grove would refuse. `plugin` is whether the plugin is enabled, `hookCommand` whether the plugin's `hook-command` record
+ * is usable, `ephemeral` whether this grove runs from a package runner's cache, `phase` which guard runs, `done` whether
+ * the guard is really on, and `installCommands` what installs the plugin.
+ */
 export type GuardState = {
   status: GuardStatus;
+  plugin: boolean;
+  hookCommand: boolean;
+  ephemeral: boolean;
+  phase: GuardPhase;
+  done: boolean;
+  installCommands: string[];
   settingsPath: string;
   command: string;
   hooksDisabled: boolean;
@@ -27,10 +44,10 @@ export type GuardState = {
 };
 
 /**
- * A change to Claude Code's settings, shown before it is made. `adds` and `removes` are the JSON it adds and takes
- * out; `backupPath` is null when the file does not exist yet. `lines` say what else is true, `warnings` what stops
- * the hook from running even once it is in, and `blockers` why the change cannot be made; a plan with blockers runs
- * nothing.
+ * A change to Claude Code's settings, shown before it is made. `removes` is the JSON it takes out; `adds` is null,
+ * since grove only removes its old hook. `backupPath` is null when the file does not exist yet. `lines` say what else
+ * is true, `warnings` what the change cannot fix, and `blockers` why the change cannot be made; a plan with blockers
+ * runs nothing.
  */
 export type GuardPlan = {
   change: GuardChange;
@@ -50,20 +67,16 @@ export type GuardPlan = {
 /** The write a plan makes: the new text for `path`, made only while the file still hashes to `saw`. */
 export type GuardEdit = { path: string; saw: string; text: string };
 
-/** A reviewed change: its plan, the edit it makes (null when it is blocked), the receipt's title once it is made, and whether it replaces an older grove hook. */
-export type PreparedGuardChange = { plan: GuardPlan; edit: GuardEdit | null; done: string; updated: boolean };
+/** A reviewed change: its plan, the edit it makes (null when it is blocked), and the receipt's title once it is made. */
+export type PreparedGuardChange = { plan: GuardPlan; edit: GuardEdit | null; done: string };
 
-/**
- * What a change did. `undo` is the change offered after it, for review; null when nothing changed. After an install
- * that `updated` an older grove hook it is an uninstall, which does not bring the old hook back.
- */
+/** What a change did. `undo` is always null: grove no longer puts its hook back, the plugin replaces it. */
 export type GuardReceipt = {
   change: GuardChange;
-  updated: boolean;
   ok: boolean;
   refused: boolean;
   title: string;
   lines: string[];
-  undo: GuardChange | null;
+  undo: null;
   at: number;
 };

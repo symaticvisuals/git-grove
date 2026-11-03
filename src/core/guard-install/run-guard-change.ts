@@ -6,7 +6,7 @@ import { type WrittenSettings, writeSettingsFile } from "./write-settings-file.j
 
 function linesOf(path: string, written: WrittenSettings): string[] {
   const { backup, original } = written;
-  if (backup === null || original === null) return [`Created ${path}`];
+  if (original === null) return [`Wrote ${path}`];
   const kept = original.written ? `It is also in ${original.path}, which grove never overwrites` : `The file from before grove first changed it is in ${original.path}`;
   return [`Wrote ${path}`, `The file as it was is in ${backup}`, kept];
 }
@@ -14,20 +14,19 @@ function linesOf(path: string, written: WrittenSettings): string[] {
 /**
  * Makes a reviewed change (`writeSettingsFile`) and resolves to its receipt; refusals and failures are receipts,
  * never throws. A blocked plan writes nothing; a file that changed since the review, or that grove now leaves alone,
- * is refused. A change that was made offers the opposite change as its undo, planned against the file as it is then;
- * after an update that is an uninstall.
+ * is refused. No receipt offers an undo.
  */
 export async function runGuardChange(prepared: PreparedGuardChange, now: () => number = Date.now): Promise<GuardReceipt> {
-  const { plan, edit, updated } = prepared;
+  const { plan, edit } = prepared;
   const change = plan.change;
-  const refused = (title: string, lines: string[]): GuardReceipt => ({ change, updated, ok: false, refused: true, title, lines, undo: null, at: now() });
+  const refused = (title: string, lines: string[]): GuardReceipt => ({ change, ok: false, refused: true, title, lines, undo: null, at: now() });
   if (edit === null || plan.blockers.length > 0) return refused("Not run", plan.blockers);
   try {
     const written = await writeSettingsFile(edit);
-    return { change, updated, ok: true, refused: false, title: prepared.done, lines: linesOf(edit.path, written), undo: change === "install" ? "uninstall" : "install", at: now() };
+    return { change, ok: true, refused: false, title: prepared.done, lines: linesOf(edit.path, written), undo: null, at: now() };
   } catch (error) {
     if (error instanceof SettingsChangedError) return refused("Changed since you looked", [error.message]);
     if (error instanceof SettingsRefusedError) return refused("Not run", [error.message]);
-    return { change, updated, ok: false, refused: false, title: "Stopped: the settings file was not written", lines: [errorLine(error)], undo: null, at: now() };
+    return { change, ok: false, refused: false, title: "Stopped: the settings file was not written", lines: [errorLine(error)], undo: null, at: now() };
   }
 }

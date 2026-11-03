@@ -17,7 +17,7 @@ import { createGuardDialogHost } from "./guard/guard-dialog-host.js";
 import { createGuardEffects } from "./guard/guard-effects.js";
 import { html } from "./html.js";
 import { ICONS } from "./icons.js";
-import { isGuardStatus } from "./is-guard-status.js";
+import { isGuardPhase } from "./is-guard-phase.js";
 import { keyCommand, type KeyCommand, type KeyInput, type KeyMode } from "./keys.js";
 import { landmarkAfterCard } from "./landmark-after-card.js";
 import { connectLive } from "./live.js";
@@ -37,6 +37,9 @@ import { SLICE_NAMES, type SliceName } from "./slice-names.js";
 import { sliceRequests } from "./slice-requests.js";
 import { initialState, reduce, type State, type Tab, type UiAction } from "./state.js";
 import { timeLabel } from "./time-label.js";
+import { GUARD_DISMISSED_KEY, SETUP_SEEN_KEY } from "./storage-keys.js";
+import { guardStatusTarget } from "./guard-status-target.js";
+import { setupRedirect } from "./setup-redirect.js";
 import { toast } from "./toast.js";
 
 declare const __GROVE_VERSION__: string;
@@ -48,7 +51,6 @@ const TRAPPED = 'input:not([disabled]), select:not([disabled]), button:not([disa
 const FOCUS_WAIT_MS = 2_000;
 const TABS: readonly Tab[] = ["feature", "health", "activity"];
 const ACTION_NAMES = Object.keys(DIALOGS);
-const GUARD_DISMISSED = "grove.guardCardDismissed";
 
 function pageVersion(): string {
   const content = document.querySelector('meta[name="grove-version"]')?.getAttribute("content") ?? "";
@@ -342,22 +344,35 @@ function storage(): Storage | null {
   }
 }
 
-function dismissGuardCard(status: string | undefined): void {
-  if (!isGuardStatus(status)) return;
+function dismissGuardCard(phase: string | undefined): void {
+  if (!isGuardPhase(phase)) return;
   try {
-    storage()?.setItem(GUARD_DISMISSED, status);
+    storage()?.setItem(GUARD_DISMISSED_KEY, phase);
   } catch {
     // A page that cannot store the choice hides the card for this visit only.
   }
   const rows = [...document.querySelectorAll<HTMLElement>("#view .row[data-key]")].map((row) => row.dataset["key"] ?? "");
   focusAfterPaint = { key: landmarkAfterCard(rows), until: Date.now() + FOCUS_WAIT_MS };
-  dispatch({ type: "guard-dismiss", status });
+  dispatch({ type: "guard-dismiss", phase });
 }
 
-function openGuard(change: string | undefined): void {
-  const guard = state.guard === null || state.guard.status === "loading" ? null : state.guard.data;
-  const wanted = change ?? (guard?.status === "installed" ? "uninstall" : "install");
-  if (wanted === "install" || wanted === "uninstall") dispatch({ type: "guard-open", change: wanted });
+function openGuard(): void {
+  const phase = state.guard?.status === "ready" ? state.guard.data.phase : null;
+  if (guardStatusTarget(phase) === "uninstall") dispatch({ type: "guard-open", change: "uninstall" });
+  else location.hash = "#/setup";
+}
+
+function copyCommand(command: string | undefined): void {
+  if (command === undefined) return;
+  const failed = (): void => toast("Could not copy; select the command and copy it", false);
+  if (navigator.clipboard === undefined) {
+    failed();
+    return;
+  }
+  navigator.clipboard.writeText(command).then(
+    () => toast("Copied"),
+    failed,
+  );
 }
 
 function isSlice(name: string | undefined): name is SliceName {
@@ -389,10 +404,13 @@ function runUi(element: HTMLElement): void {
       return;
     case "guard":
     case "guard-open":
-      openGuard(data["change"]);
+      openGuard();
       return;
     case "guard-dismiss":
-      dismissGuardCard(data["status"]);
+      dismissGuardCard(data["phase"]);
+      return;
+    case "copy":
+      copyCommand(data["copy"]);
       return;
     case "jump": {
       const group = data["group"] === undefined ? null : document.querySelector(`.group[data-group="${CSS.escape(data["group"])}"]`);
@@ -596,17 +614,33 @@ function bind(): void {
   });
 }
 
+function openSetupOnFirstVisit(): void {
+  let next: string | null;
+  try {
+    const store = storage();
+    if (store === null) return;
+    next = setupRedirect(store.getItem(SETUP_SEEN_KEY) !== null, location.hash);
+    if (next === null) return;
+    store.setItem(SETUP_SEEN_KEY, "1");
+  } catch {
+    return;
+  }
+  dispatch({ type: "setup-next", next });
+  history.replaceState(null, "", "#/setup");
+}
+
 async function boot(): Promise<void> {
   bind();
   try {
-    const dismissed = storage()?.getItem(GUARD_DISMISSED);
-    if (isGuardStatus(dismissed)) dispatch({ type: "guard-dismiss", status: dismissed });
+    const dismissed = storage()?.getItem(GUARD_DISMISSED_KEY);
+    if (isGuardPhase(dismissed)) dispatch({ type: "guard-dismiss", phase: dismissed });
   } catch {
     // A page that cannot read storage shows the card.
   }
   schedule();
   navigator.serviceWorker?.register("/sw.js").catch(() => undefined);
   const token = await adoptToken(tokenDeps());
+  if (token !== null) openSetupOnFirstVisit();
   dispatch({ type: "route", route: parseRoute(location.hash) });
   if (token === null) {
     dispatch({ type: "signed-out" });

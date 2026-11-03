@@ -6,6 +6,7 @@ const ROUTES: [string, Route][] = [
   ["#/needs", { view: "needs" }],
   ["#/activity", { view: "activity" }],
   ["#/pins", { view: "pins" }],
+  ["#/setup", { view: "setup" }],
   ["#/r/3", { view: "repo", repo: 3, pick: null }],
   ["#/r/3/f/3.Y2hlY2tvdXQgY291cG9ucw", { view: "repo", repo: 3, pick: { kind: "feature", feature: "3.Y2hlY2tvdXQgY291cG9ucw", branch: null } }],
   [
