@@ -66,6 +66,31 @@ test("no match gives []", () => {
   expect(paletteItems(state, "zebra")).toEqual([]);
 });
 
+test("Forget counts only gone worktrees that would not lose commits", () => {
+  const gone = level({
+    branch: "feat/gone",
+    health: "action",
+    findings: [finding("prunable", { title: "Worktree folder is gone" })],
+    worktree: { path: "/w/gone", rel: "gone", dirty: 0, operation: null, touchedAt: null },
+  });
+  const stranded = level({
+    branch: "feat/stranded",
+    health: "loses",
+    findings: [finding("prunable", { severity: "loses-work", title: "Worktree folder is gone" })],
+  });
+  const view = repoView({
+    features: [feature({ id: "1.gg", levels: [gone, stranded] })],
+    findings: [
+      finding("prunable", { subject: { kind: "worktree", id: "/w/gone" } }),
+      finding("prunable", { severity: "loses-work", subject: { kind: "worktree", id: "/w/stranded" } }),
+      finding("prunable", { subject: { kind: "worktree", id: "/w/other" } }),
+    ],
+  });
+  const items = paletteItems(shown(view), "forget");
+  expect(items.map((item) => item.text)).toEqual(["Forget feat/gone", "Force forget feat/stranded", "Forget 2 gone worktrees"]);
+  expect(items.find((item) => item.text === "Forget 2 gone worktrees")?.run).toMatchObject({ open: "forget", ctx: { worktree: null } });
+});
+
 test("away from a repo it offers the views and the repos", () => {
   const home = reduce(initialState({ view: "projects" }, "1.0.0"), { type: "loaded", key: "projects", result: { slice: "projects", data: [project()] } });
   const items = paletteItems(home, "");

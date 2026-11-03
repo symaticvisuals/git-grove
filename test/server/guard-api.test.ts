@@ -110,7 +110,14 @@ test("read, plan, install, read again, then undo the install by an uninstall pla
   const ran = await runPlan(install.planId);
   expect(ran.status).toBe(200);
   expect(record(ran.body["receipt"])).toMatchObject({ change: "install", ok: true, title: "Installed the agent guard", undo: "uninstall" });
-  expect(await settings()).toEqual({ model: "opus", hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }] } });
+  const announce = command.replace(/ guard --claude$/, " guard --announce");
+  expect(await settings()).toEqual({
+    model: "opus",
+    hooks: {
+      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }],
+      SessionStart: [{ hooks: [{ type: "command", command: announce, timeout: 10 }] }],
+    },
+  });
   expect(await readFile(`${settingsPath}.grove-backup`, "utf8")).toBe('{\n  "model": "opus"\n}\n');
   expect((await call("GET", "/api/guard")).body["status"]).toBe("installed");
 

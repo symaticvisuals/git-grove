@@ -30,7 +30,7 @@ const ADVICE: Record<GuardChange, string> = {
 
 function headings(change: GuardChange, stale: boolean): Pick<GuardPlan, "title" | "summary" | "confirm"> {
   if (change === "uninstall") return { title: "Uninstall the agent guard", summary: "Takes grove's hook out of Claude Code's settings.", confirm: "Uninstall" };
-  const summary = "Claude Code checks each Bash command with grove before it runs, and stops one that would lose work.";
+  const summary = "Claude Code checks each Bash command with grove before it runs, and stops one that would lose work. A new session is told this agent is bounded by the guard.";
   return { title: stale ? "Update the agent guard" : "Install the agent guard", summary, confirm: "Install" };
 }
 

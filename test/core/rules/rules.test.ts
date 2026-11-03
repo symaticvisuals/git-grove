@@ -3,7 +3,7 @@ import type { RepoFacts, WorktreeFacts } from "../../../src/core/facts/facts.typ
 import type { JournalEntry } from "../../../src/core/journal/store.types.js";
 import type { Finding, RuleContext } from "../../../src/core/rules/rule.types.js";
 import { evaluate } from "../../../src/core/rules/evaluate.js";
-import { needsYou, worst } from "../../../src/core/rules/needs-you.js";
+import { needsYou, worst, worstFinding } from "../../../src/core/rules/needs-you.js";
 import { RULES } from "../../../src/core/rules/registry.js";
 import type { Level } from "../../../src/core/stacks/stacks.types.js";
 
@@ -212,7 +212,7 @@ test("env-missing fires for a non-empty list only", () => {
 test("prunable fires on a prunable worktree", () => {
   const hit = run("prunable", ctx({ worktrees: [wt("/r/a", { prunable: true }), wt("/r/b")] }));
   expect(hit).toHaveLength(1);
-  expect(hit[0]).toMatchObject({ severity: "needs-action", action: "git worktree prune" });
+  expect(hit[0]).toMatchObject({ severity: "needs-action", action: "git grove forget" });
 });
 
 test("prunable on a detached worktree holding commits only on its HEAD is loses-work with a rescue branch", () => {
@@ -223,7 +223,7 @@ test("prunable on a detached worktree holding commits only on its HEAD is loses-
   expect(hit[0]).toMatchObject({ severity: "loses-work", action: `git branch rescue/sandbox ${head}` });
   expect(hit[0]?.detail).toContain("2 commits only on its detached HEAD");
   const empty = run("prunable", ctx({ worktrees: [sandbox], detachedOnly: new Map([[sandbox.path, 0]]) }));
-  expect(empty[0]).toMatchObject({ severity: "needs-action", action: "git worktree prune" });
+  expect(empty[0]).toMatchObject({ severity: "needs-action", action: "git grove forget" });
 });
 
 test("prunable on a detached worktree whose commits could not be counted is loses-work with a rescue branch", () => {
@@ -281,6 +281,26 @@ test("needsYou keeps needs-action or worse, worst first, stable", () => {
     f("e", "needs-action"),
   ]);
   expect(out.map((x) => x.rule)).toEqual(["c", "b", "e"]);
+});
+
+test("worstFinding prefers a gone folder when severities tie, and a worse severity still wins", () => {
+  const f = (rule: string, severity: Finding["severity"]): Finding => ({
+    rule,
+    severity,
+    subject: { kind: "branch", id: rule },
+    title: "",
+    detail: "",
+    action: null,
+  });
+  const parent = f("parent-merged", "needs-action");
+  const gone = f("prunable", "needs-action");
+  const stranded = f("prunable", "loses-work");
+  const rewritten = f("history-rewritten", "loses-work");
+  expect(worstFinding([parent, gone])?.rule).toBe("prunable");
+  expect(worstFinding([gone, parent])?.rule).toBe("prunable");
+  expect(worstFinding([rewritten, gone])?.rule).toBe("history-rewritten");
+  expect(worstFinding([stranded, parent])?.rule).toBe("prunable");
+  expect(worstFinding([])).toBeNull();
 });
 
 test("worst of nothing is fine, otherwise the highest severity", () => {

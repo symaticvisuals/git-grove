@@ -120,6 +120,14 @@ test("readEnvMissing reports ignored .env files absent from a worktree", async (
   expect(missing.get(wt)).toEqual(["apps/web/.env.local"]);
 });
 
+test("readEnvMissing skips a worktree whose folder is gone", async () => {
+  await write(join(root, ".env"), "A=1\n");
+  const wt = await mergedWorktree("gone-env");
+  await rm(wt, { recursive: true, force: true });
+  const missing = await readEnvMissing(root, await readRepoFacts(root));
+  expect(missing.has(wt)).toBe(false);
+});
+
 test("untracked files are found even when status.showUntrackedFiles is no", async () => {
   const wt = await mergedWorktree("quiet");
   await repo.git("config", "status.showUntrackedFiles", "no");

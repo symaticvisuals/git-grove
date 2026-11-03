@@ -21,6 +21,10 @@ export function quickAction(row: ListRow, key: string, tabbable: boolean): SafeH
   const button = (action: string, icon: SafeHtml, label: string, extra: SafeHtml = html``): SafeHtml =>
     html`<button class="ib hot" data-action="${action}" data-feature="${feature.id}" data-branch="${level.branch}"${extra} data-key="${key}:${action}"${skip} title="${label}" aria-label="${label}">${icon}</button>`;
   if (rule === "history-rewritten") return button("restore", ICONS.back, `Bring back ${plural(level.pinnedLost, "commit")}`);
+  if (rule === "prunable" && level.worktree !== null) {
+    const loses = level.findings.some((finding) => finding.rule === "prunable" && finding.severity === "loses-work");
+    return button("forget", ICONS.broom, loses ? "Force forget" : "Forget", html` data-path="${level.worktree.path}"`);
+  }
   if (rule === "parent-moved" || rule === "parent-merged") return button("restack", ICONS.restack, "Restack onto its parent");
   if (rule === "unsafe-merged-worktree" && level.worktree !== null) {
     return button("remove", ICONS.broom, "Copy the file, then remove", html` data-path="${level.worktree.path}"`);

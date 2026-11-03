@@ -6,7 +6,7 @@ import { ICONS } from "../icons.js";
 import { type RowRef, routeHash } from "../parse-route.js";
 import { plural } from "../plural.js";
 import type { Load, Tab } from "../state.js";
-import { worstFinding } from "../worst-finding.js";
+import { parentNeedsRestack } from "../worst-finding.js";
 import { activityList } from "./activity-list.js";
 import { banner } from "./banner.js";
 import { empty } from "./empty.js";
@@ -50,10 +50,7 @@ function tally(rows: readonly ListRow[]): SafeHtml {
 function groupActions(group: ListGroup): SafeHtml {
   if (group.kind === "stack" && group.feature !== null) {
     const id = group.feature.id;
-    const moved = group.feature.levels.some((level) => {
-      const rule = worstFinding(level.findings)?.rule;
-      return rule === "parent-moved" || rule === "parent-merged";
-    });
+    const moved = group.feature.levels.some((level) => parentNeedsRestack(level.findings));
     const restack = moved ? html`<button class="gbtn hot" data-action="restack" data-feature="${id}" data-key="group:${group.key}:restack" tabindex="-1">${ICONS.restack}Restack</button>` : "";
     return html`${restack}<button class="gbtn" data-action="add-level" data-feature="${id}" data-key="group:${group.key}:add-level" tabindex="-1">${ICONS.plus}Add level</button>`;
   }

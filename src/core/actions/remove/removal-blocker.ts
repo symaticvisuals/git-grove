@@ -10,8 +10,8 @@ export function removalBlocker(worktree: WorktreeFacts): string | null {
   if (worktree.locked) return "locked; unlock it with git worktree unlock first";
   if (worktree.prunable || !existsSync(worktree.path)) {
     return existsSync(worktree.path)
-      ? "git no longer tracks this folder as a worktree; look through it by hand, then run git worktree prune"
-      : "its folder is gone; run git worktree prune";
+      ? "git no longer tracks this folder as a worktree; look through it by hand, then run git grove forget"
+      : "its folder is gone; run git grove forget";
   }
   if (worktree.operation !== null) return `a ${worktree.operation} is in progress; finish or abort it first`;
   return null;

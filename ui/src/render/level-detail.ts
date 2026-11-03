@@ -5,7 +5,7 @@ import { ICONS } from "../icons.js";
 import { plural } from "../plural.js";
 import { sentence } from "../sentence.js";
 import type { Load } from "../state.js";
-import { worstFinding } from "../worst-finding.js";
+import { parentNeedsRestack, worstFinding } from "../worst-finding.js";
 import { activityList } from "./activity-list.js";
 import { banner } from "./banner.js";
 import { detailHead } from "./detail-head.js";
@@ -28,7 +28,7 @@ export type LevelDetailInput = {
 
 function opens(level: WireLevel): SafeHtml {
   const path = level.worktree?.path;
-  if (path === undefined) return html``;
+  if (path === undefined || level.findings.some((finding) => finding.rule === "prunable")) return html``;
   return html`<div class="acts"><button class="btn" data-action="open-editor" data-path="${path}" data-key="detail:open-editor">${ICONS.editor}Open in editor</button><button class="btn" data-action="open-terminal" data-path="${path}" data-key="detail:open-terminal">${ICONS.terminal}Terminal</button></div>`;
 }
 
@@ -64,6 +64,20 @@ function findingSections(input: LevelDetailInput): SafeHtml {
       const path = level.worktree?.path ?? "";
       const button = html`<button class="btn primary" data-action="copy-env" data-path="${path}" data-key="detail:copy-env">${ICONS.copy}Copy</button>`;
       return html`<div class="d-sec">${banner("warn", worst.title, sentence(worst.detail))}<div class="opts">${optionCard("Copy env files", "Copies them from the main checkout. Nothing already in this folder is overwritten.", button)}</div></div>`;
+    }
+    case "prunable": {
+      const path = level.worktree?.path ?? "";
+      const loses = worst.severity === "loses-work";
+      const label = loses ? "Force forget" : "Forget";
+      const button = html`<button class="btn primary" data-action="forget" data-feature="${feature.id}" data-branch="${level.branch}" data-path="${path}" data-key="detail:forget">${label} <kbd>R</kbd></button>`;
+      const text = loses
+        ? "Git's record goes. Commits only its detached HEAD holds become unreachable."
+        : "Git's record of the folder goes. The branch stays.";
+      const restack =
+        parentNeedsRestack(level.findings) && feature.kind === "stack"
+          ? optionCard("Restack the whole stack", "The parent changed. Restacking moves this level onto the latest parent. Forgetting only drops the missing folder.", restackButton)
+          : "";
+      return html`<div class="d-sec">${banner(loses ? "loses" : "warn", worst.title, sentence(worst.detail))}<div class="opts">${optionCard(loses ? "Force forget this worktree" : "Forget this worktree", text, button)}${restack}</div></div>${previewChecks(loses ? "Before you force forget" : "Before you forget", preview, now)}`;
     }
     default: {
       if (worst !== null && (worst.severity === "loses-work" || worst.severity === "needs-action")) {

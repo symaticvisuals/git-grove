@@ -4,8 +4,8 @@ import { ICONS } from "../icons.js";
 import type { Load } from "../state.js";
 
 const TITLE = "Protect worktrees from Claude Code";
-const BODY = "Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.";
-const STALE = "The agent guard points at an old Node or grove path.";
+const BODY = "Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost. A new session is told this agent is bounded by the guard.";
+const STALE = "The agent guard is missing the notice a new session gets, or it points at an old Node or grove path.";
 
 function notes(state: GuardState): string[] {
   const lines: string[] = [];

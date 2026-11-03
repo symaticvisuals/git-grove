@@ -5,6 +5,9 @@ import type { SettingsPlan } from "../../../src/core/guard-install/settings-plan
 const COMMAND = "/opt/homebrew/bin/node /usr/local/lib/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js guard --claude";
 const OLD = "/opt/homebrew/Cellar/node/24.1.0/bin/node /usr/local/lib/node_modules/@deepanshugoel/git-grove/dist/cli/bin.js guard --claude";
 const GROUP = { matcher: "Bash", hooks: [{ type: "command", command: COMMAND, timeout: 10 }] };
+const ANNOUNCE = COMMAND.replace(/ guard --claude$/, " guard --announce");
+const SESSION = { hooks: [{ type: "command", command: ANNOUNCE, timeout: 10 }] };
+const ADDS = { PreToolUse: GROUP, SessionStart: SESSION };
 
 function text(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -23,14 +26,14 @@ function written(plan: SettingsPlan): Record<string, unknown> {
 
 test("installing into a missing file starts from {} and writes one group of grove's own", () => {
   const plan = changed(planGuardInstall(null, COMMAND));
-  expect(plan.text).toBe(text({ hooks: { PreToolUse: [GROUP] } }));
-  expect(plan.adds).toEqual(GROUP);
+  expect(plan.text).toBe(text({ hooks: { PreToolUse: [GROUP], SessionStart: [SESSION] } }));
+  expect(plan.adds).toEqual(ADDS);
   expect(plan.removes).toEqual([]);
   expect(plan.reformats).toBe(false);
 });
 
 test("installing into {} adds hooks.PreToolUse with grove's group", () => {
-  expect(written(planGuardInstall("{}\n", COMMAND))).toEqual({ hooks: { PreToolUse: [GROUP] } });
+  expect(written(planGuardInstall("{}\n", COMMAND))).toEqual({ hooks: { PreToolUse: [GROUP], SessionStart: [SESSION] } });
   expect(changed(planGuardInstall("{}\n", COMMAND)).reformats).toBe(false);
 });
 
@@ -44,14 +47,14 @@ test("installing keeps every other setting and every other group, the user's own
     model: "opus",
   };
   const after = written(planGuardInstall(text(before), COMMAND));
-  expect(after).toEqual({ ...before, hooks: { PreToolUse: [userBash, edits, GROUP], PostToolUse: [edits] } });
+  expect(after).toEqual({ ...before, hooks: { PreToolUse: [userBash, edits, GROUP], PostToolUse: [edits], SessionStart: [SESSION] } });
   expect(Object.keys(after)).toEqual(["$schema", "permissions", "hooks", "model"]);
 });
 
 test("installing over a stale entry replaces it, and says what it removes", () => {
   const stale = { matcher: "Bash", hooks: [{ type: "command", command: OLD, timeout: 10 }] };
   const plan = changed(planGuardInstall(text({ hooks: { PreToolUse: [stale] } }), COMMAND));
-  expect(JSON.parse(plan.text)).toEqual({ hooks: { PreToolUse: [GROUP] } });
+  expect(JSON.parse(plan.text)).toEqual({ hooks: { PreToolUse: [GROUP], SessionStart: [SESSION] } });
   expect(plan.removes).toEqual([stale]);
 });
 
@@ -60,14 +63,22 @@ test("installing collapses two grove entries into one, taking grove's hook out o
   const mine = { type: "command", command: "~/bin/log-bash.sh" };
   const shared = { matcher: "Bash", hooks: [mine, { type: "command", command: COMMAND }] };
   const plan = changed(planGuardInstall(text({ hooks: { PreToolUse: [stale, shared] } }), COMMAND));
-  expect(JSON.parse(plan.text)).toEqual({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [mine] }, GROUP] } });
+  expect(JSON.parse(plan.text)).toEqual({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [mine] }, GROUP], SessionStart: [SESSION] } });
   expect(plan.removes).toEqual([stale, { type: "command", command: COMMAND }]);
 });
 
-test("a file that already runs the wanted command once is a no-op", () => {
-  expect(planGuardInstall(text({ hooks: { PreToolUse: [GROUP] } }), COMMAND)).toEqual({ kind: "unchanged" });
+test("a file that already runs the wanted command once, and the session notice, is a no-op", () => {
+  expect(planGuardInstall(text({ hooks: { PreToolUse: [GROUP], SessionStart: [SESSION] } }), COMMAND)).toEqual({ kind: "unchanged" });
+});
+
+test("a grove hook inside a user's group is moved into its own group, and the session notice is added", () => {
   const elsewhere = { matcher: "Bash", hooks: [{ type: "command", command: "~/bin/log.sh" }, { type: "command", command: COMMAND, timeout: 30 }] };
-  expect(planGuardInstall(text({ hooks: { PreToolUse: [elsewhere] } }), COMMAND)).toEqual({ kind: "unchanged" });
+  const plan = changed(planGuardInstall(text({ hooks: { PreToolUse: [elsewhere] } }), COMMAND));
+  expect(plan.removes).toEqual([{ type: "command", command: COMMAND, timeout: 30 }]);
+  expect(plan.adds).toEqual(ADDS);
+  expect(JSON.parse(plan.text)).toEqual({
+    hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "~/bin/log.sh" }] }, GROUP], SessionStart: [SESSION] },
+  });
 });
 
 test("invalid JSON, a file that is not an object, a hooks that is not an object and a PreToolUse that is not a list are refused", () => {
@@ -77,17 +88,18 @@ test("invalid JSON, a file that is not an object, a hooks that is not an object 
   expect(planGuardInstall("null\n", COMMAND)).toEqual({ kind: "refused", problem: "is not a JSON object" });
   expect(planGuardInstall('{ "hooks": [] }\n', COMMAND)).toEqual({ kind: "refused", problem: 'has a "hooks" that is not an object' });
   expect(planGuardInstall('{ "hooks": { "PreToolUse": {} } }\n', COMMAND)).toEqual({ kind: "refused", problem: 'has a "hooks.PreToolUse" that is not a list' });
+  expect(planGuardInstall('{ "hooks": { "SessionStart": {} } }\n', COMMAND)).toEqual({ kind: "refused", problem: 'has a "hooks.SessionStart" that is not a list' });
 });
 
 test("a file holding only whitespace is read as {}", () => {
-  expect(written(planGuardInstall("  \n", COMMAND))).toEqual({ hooks: { PreToolUse: [GROUP] } });
+  expect(written(planGuardInstall("  \n", COMMAND))).toEqual({ hooks: { PreToolUse: [GROUP], SessionStart: [SESSION] } });
 });
 
 test("a file not written as 2-space JSON is rewritten with 2-space indentation, and the plan says so; a missing final newline alone is not", () => {
   const tabs = '{\n\t"model": "opus"\n}\n';
   const plan = changed(planGuardInstall(tabs, COMMAND));
   expect(plan.reformats).toBe(true);
-  expect(plan.text).toBe(text({ model: "opus", hooks: { PreToolUse: [GROUP] } }));
+  expect(plan.text).toBe(text({ model: "opus", hooks: { PreToolUse: [GROUP], SessionStart: [SESSION] } }));
   expect(changed(planGuardInstall('{"model":"opus"}', COMMAND)).reformats).toBe(true);
   expect(changed(planGuardInstall('{\n  "model": "opus"\n}', COMMAND)).reformats).toBe(false);
 });
@@ -106,7 +118,7 @@ test("a user's own hook that ends in guard --claude is not grove's, and is kept"
   const theirs = { matcher: "Bash", hooks: [{ type: "command", command: "my-sec-tool guard --claude" }] };
   const plan = changed(planGuardInstall(text({ hooks: { PreToolUse: [theirs] } }), COMMAND));
   expect(plan.removes).toEqual([]);
-  expect(JSON.parse(plan.text)).toEqual({ hooks: { PreToolUse: [theirs, GROUP] } });
+  expect(JSON.parse(plan.text)).toEqual({ hooks: { PreToolUse: [theirs, GROUP], SessionStart: [SESSION] } });
 });
 
 test("grove's hook under a matcher that matches Bash, *, an empty one, none or a list naming Bash, is replaced, and the rest of that group kept", () => {
@@ -115,7 +127,7 @@ test("grove's hook under a matcher that matches Bash, *, an empty one, none or a
     const group = { ...(matcher === undefined ? {} : { matcher }), hooks: [mine, { type: "command", command: OLD }] };
     const plan = changed(planGuardInstall(text({ hooks: { PreToolUse: [group] } }), COMMAND));
     expect(plan.removes, String(matcher)).toEqual([{ type: "command", command: OLD }]);
-    expect(JSON.parse(plan.text), String(matcher)).toEqual({ hooks: { PreToolUse: [{ ...group, hooks: [mine] }, GROUP] } });
+    expect(JSON.parse(plan.text), String(matcher)).toEqual({ hooks: { PreToolUse: [{ ...group, hooks: [mine] }, GROUP], SessionStart: [SESSION] } });
   }
   const edits = { matcher: "Edit|Write", hooks: [{ type: "command", command: OLD }] };
   expect(changed(planGuardInstall(text({ hooks: { PreToolUse: [edits] } }), COMMAND)).removes).toEqual([]);

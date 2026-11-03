@@ -904,10 +904,10 @@ test("a detached worktree whose folder is gone and whose HEAD object is missing 
   ]);
 });
 
-test("a detached worktree whose folder is gone with nothing of its own can be pruned", async () => {
+test("a detached worktree whose folder is gone with nothing of its own can be forgotten", async () => {
   await goneSandbox("empty", 0);
   const prunable = (await statusJson()).findings.filter((finding) => field(finding, "rule") === "prunable");
-  expect(prunable).toEqual([expect.objectContaining({ severity: "needs-action", action: "git worktree prune" })]);
+  expect(prunable).toEqual([expect.objectContaining({ severity: "needs-action", action: "git grove forget" })]);
 });
 
 test("check remove of an orphan-history worktree with a local commit exits 3 with a reason", async () => {

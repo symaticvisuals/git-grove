@@ -34,7 +34,11 @@ test("an install's plan names the file, its backup, the group it adds, that the 
   await writeFile(path, '{\n  "model": "opus"\n}\n');
   const { plan, edit } = await prepare("install");
   expect(plan).toMatchObject({ change: "install", title: "Install the agent guard", confirm: "Install", settingsPath: path, backupPath: `${path}.grove-backup`, removes: [], warnings: [], blockers: [] });
-  expect(JSON.parse(plan.adds ?? "")).toEqual({ matcher: "Bash", hooks: [{ type: "command", command: COMMAND, timeout: 10 }] });
+  const announce = COMMAND.replace(/ guard --claude$/, " guard --announce");
+  expect(JSON.parse(plan.adds ?? "")).toEqual({
+    PreToolUse: { matcher: "Bash", hooks: [{ type: "command", command: COMMAND, timeout: 10 }] },
+    SessionStart: { hooks: [{ type: "command", command: announce, timeout: 10 }] },
+  });
   expect(plan.lines).toEqual([
     "Your other settings and hooks are kept.",
     "Claude Code reloads this file when it changes, so running sessions normally pick the hook up; new sessions always do.",

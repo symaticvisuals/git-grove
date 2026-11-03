@@ -144,7 +144,16 @@ test("a locked worktree whose folder is gone degrades instead of failing the rea
   await rename(gone, `${gone}-moved`);
   const facts = await readRepoFacts(repo.path);
   const entry = facts.worktrees.find((w) => w.branch === "feat/gone");
-  expect(entry).toMatchObject({ changes: null, operation: null, touchedAt: null, locked: true });
+  expect(entry).toMatchObject({ changes: null, operation: null, touchedAt: null, locked: true, prunable: false });
+});
+
+test("an unlocked worktree whose folder is gone is prunable", async () => {
+  const gone = join(repo.path, ".worktrees", "missing");
+  await repo.worktree(gone, "feat/missing");
+  await rm(gone, { recursive: true, force: true });
+  const facts = await readRepoFacts(repo.path);
+  const entry = facts.worktrees.find((w) => w.branch === "feat/missing");
+  expect(entry).toMatchObject({ prunable: true, locked: false, touchedAt: null, changes: null });
 });
 
 test("untracked files count even when status.showUntrackedFiles is no", async () => {
