@@ -483,9 +483,9 @@ test("when the running server would install the agent guard into another setting
   servers.push(await startServer({ port: 0, home, version: packageVersion(), guard: () => ({ node: process.execPath, bin: BIN, settingsPath: served, home }) }));
   const shell = join(home, "shell-claude", "settings.json");
   const result = await ui(harness(fakeService({ kind: "launchd" }), { claudeSettingsPath: shell }).deps, home);
-  expect(result.out).toContain(`The dashboard installs the agent guard into ${served}, but Claude Code here reads ${shell}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
+  expect(result.out).toContain(`The dashboard reads Claude Code settings in ${served}, but Claude Code here reads ${shell}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
   const same = await ui(harness(fakeService({ kind: "launchd" }), { claudeSettingsPath: served }).deps, home);
-  expect(same.out).not.toContain("installs the agent guard into");
+  expect(same.out).not.toContain("reads Claude Code settings in");
 });
 
 test("from an npx cache, an installed service for another copy is left alone", async () => {

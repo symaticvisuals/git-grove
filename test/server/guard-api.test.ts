@@ -211,7 +211,7 @@ test("a read-only settings file is reported with grove's refusal, its status is 
   await chmod(settingsPath, 0o444);
   expect((await call("GET", "/api/guard")).body).toMatchObject({
     status: "installed",
-    refusal: `grove will not edit ${settingsPath}: it is read-only. To add the hook yourself, run git grove install-guard.`,
+    refusal: `grove will not edit ${settingsPath}: it is read-only. To remove the old hook yourself, edit that file by hand.`,
   });
   const uninstall = await plan();
   expect(uninstall.plan["blockers"]).toEqual([`grove will not edit ${settingsPath}: it is read-only. To take grove's hook out, edit the file yourself.`]);
@@ -242,7 +242,7 @@ test("a settings file grove cannot parse is unreadable, and grove says it will n
 
 test("a server started without a guard setup answers the guard routes with 503", async () => {
   await start(null);
-  expect(await call("GET", "/api/guard")).toEqual({ status: 503, body: { error: "This git grove server cannot install the agent guard" } });
+  expect(await call("GET", "/api/guard")).toEqual({ status: 503, body: { error: "This git grove server cannot read the agent guard setup" } });
 });
 
 function sh(command: string, stdin: string, cwd: string): Promise<{ code: number | null; stderr: string }> {

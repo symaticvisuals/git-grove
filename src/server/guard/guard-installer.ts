@@ -25,7 +25,7 @@ export type GuardInstaller = {
 
 type Read = { setup: GuardSetup; command: string; file: SettingsFile };
 
-const BY_HAND = "To add the hook yourself, run git grove install-guard.";
+const BY_HAND = "To remove the old hook yourself, edit that file by hand.";
 
 /**
  * Reads where the agent guard stands, and takes grove's old hook out of Claude Code's user settings after a review: a
@@ -39,7 +39,7 @@ export function createGuardInstaller(setup: (() => GuardSetup) | null, options: 
   let queue: Promise<unknown> = Promise.resolve();
 
   const read = async (): Promise<Read> => {
-    if (setup === null) throw new HttpError(503, "This git grove server cannot install the agent guard");
+    if (setup === null) throw new HttpError(503, "This git grove server cannot read the agent guard setup");
     const resolved = setup();
     return { setup: resolved, command: guardHookCommand(resolved.node, resolved.bin), file: await readSettingsFile(resolved.settingsPath) };
   };

@@ -163,7 +163,7 @@ test("the card is empty when done, loading, or put off for that phase; a refusal
   expect(guardCard(ready(guard({ installCommands: CMDS })), "absent").text).toBe("");
   expect(guardCard(ready(guard({ phase: "hook", installCommands: CMDS })), "absent").text).not.toBe("");
   expect(guardCard({ status: "loading" }, null).text).toBe("");
-  const refusal = `grove will not edit ${PATH}: it is not valid JSON (Unexpected token '/'). To add the hook yourself, run git grove install-guard.`;
+  const refusal = `grove will not edit ${PATH}: it is not valid JSON (Unexpected token '/'). To remove the old hook yourself, edit that file by hand.`;
   const unreadable = guardCard(ready(guard({ status: "unreadable", refusal })), null).text;
   expect(plain(unreadable)).toContain(refusal);
   expect(plain(guardCard(ready(guard({ refusal: NPX })), null).text)).toContain(NPX);

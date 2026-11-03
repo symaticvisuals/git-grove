@@ -53,7 +53,7 @@ async function warnOnOtherSettings(io: CliIo, deps: UiDeps, port: number, token:
   if (deps.claudeSettingsPath === undefined) return;
   const served = await servedSettingsPath(port, token);
   if (served === null || served === deps.claudeSettingsPath) return;
-  io.out(`The dashboard installs the agent guard into ${served}, but Claude Code here reads ${deps.claudeSettingsPath}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
+  io.out(`The dashboard reads Claude Code settings in ${served}, but Claude Code here reads ${deps.claudeSettingsPath}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
 }
 
 async function guardNotDone(deps: UiDeps): Promise<boolean> {
@@ -163,7 +163,7 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
  * old one still finishing a run after those 15 s is opened instead, saying so. A service that runs another copy keeps
  * its server, and `ui` says how to update it. With no server, the login service is installed (and says how to remove
  * it) or started; on a machine without launchd or systemd, or from an npx cache, the server runs in this process
- * instead, until Ctrl-C. When a running server would install the agent guard into another settings file than this
+ * instead, until Ctrl-C. When a running server reads another Claude Code settings file than this
  * shell's Claude Code reads, `ui` names both. On every run while the agent guard is not really on (`guardDone`), it
  * prints one line with the plugin's install commands. The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`,
  * or when that fails, the address is printed.

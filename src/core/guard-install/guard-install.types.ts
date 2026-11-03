@@ -44,8 +44,8 @@ export type GuardState = {
 };
 
 /**
- * A change to Claude Code's settings, shown before it is made. `adds` and `removes` are the JSON it adds and takes
- * out; `backupPath` is null when the file does not exist yet. `lines` say what else is true, `warnings` what the
+ * A change to Claude Code's settings, shown before it is made. `removes` is the JSON it takes out; `adds` is null,
+ * since grove only removes its old hook. `backupPath` is null when the file does not exist yet. `lines` say what else is true, `warnings` what the
  * change cannot fix, and `blockers` why the change cannot be made; a plan with blockers runs nothing.
  */
 export type GuardPlan = {

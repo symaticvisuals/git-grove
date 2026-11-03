@@ -1,6 +1,7 @@
 {
   "name": "git-grove",
   "owner": { "name": "symaticvisuals" },
+  "metadata": { "description": "Claude Code plugins from git grove." },
   "plugins": [
     {
       "name": "git-grove",
