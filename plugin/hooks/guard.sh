@@ -3,7 +3,7 @@ home="${GIT_GROVE_HOME:-$HOME/.git-grove}"
 
 if [ -r "$home/hook-command" ]; then
   { IFS= read -r node; IFS= read -r bin; } < "$home/hook-command"
-  if [ -x "$node" ] && [ -f "$bin" ]; then
+  if [ -f "$node" ] && [ -x "$node" ] && [ -f "$bin" ]; then
     exec "$node" "$bin" guard --claude
   fi
 fi

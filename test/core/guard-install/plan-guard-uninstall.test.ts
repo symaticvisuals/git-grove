@@ -47,7 +47,7 @@ test("invalid JSON, a file that is not an object, a hooks that is not an object 
 test("a number grove cannot write back exactly, and a byte-order mark, are refused rather than rewritten", () => {
   expect(planGuardUninstall(`{ "x": 12345678901234567890, "hooks": { "PreToolUse": [${JSON.stringify(GROUP)}] } }\n`)).toEqual({ kind: "refused", problem: "holds a number grove cannot write back exactly" });
   expect(planGuardUninstall('{ "y": [1e400] }\n')).toEqual({ kind: "refused", problem: "holds a number grove cannot write back exactly" });
-  expect(planGuardUninstall(`﻿${text({ hooks: { PreToolUse: [GROUP] } })}`)).toEqual({ kind: "refused", problem: "starts with a byte-order mark" });
+  expect(planGuardUninstall(`\uFEFF${text({ hooks: { PreToolUse: [GROUP] } })}`)).toEqual({ kind: "refused", problem: "starts with a byte-order mark" });
 });
 
 test("a file not written as 2-space JSON is rewritten with 2-space indentation, and the plan says so; a missing final newline alone is not", () => {

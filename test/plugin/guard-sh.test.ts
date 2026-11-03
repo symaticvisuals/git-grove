@@ -66,6 +66,24 @@ describe("plugin/hooks/guard.sh", () => {
     expect(result.status).toBe(0);
   });
 
+  test("a recorded node that is a directory falls back to git-grove on PATH", () => {
+    const home = join(dir, "home");
+    const pathDir = join(dir, "path");
+    const folder = join(dir, "node-folder");
+    mkdirSync(home);
+    mkdirSync(pathDir);
+    mkdirSync(folder);
+    const bin = join(dir, "bin.js");
+    writeFileSync(bin, "");
+    writeFileSync(join(home, "hook-command"), `${folder}\n${bin}\n`);
+    script(join(pathDir, "git-grove"), 'echo "$@"');
+
+    const result = run({ HOME: dir, GIT_GROVE_HOME: home, PATH: `${pathDir}:/usr/bin:/bin` }, "{}");
+
+    expect(result.stdout).toBe("guard --claude\n");
+    expect(result.status).toBe(0);
+  });
+
   test("with nothing recorded and nothing on PATH it allows, saying why", () => {
     const result = run({ HOME: dir, GIT_GROVE_HOME: join(dir, "none"), PATH: "/usr/bin:/bin" }, "{}");
 
