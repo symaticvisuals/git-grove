@@ -39,13 +39,26 @@ async function write(value: unknown): Promise<string> {
 test("an uninstall's plan names the file, its backup, the group it removes, that the rest is kept, and when Claude Code drops it", async () => {
   await write({ model: "opus", hooks: { PreToolUse: [GROUP] } });
   const { plan, edit } = await prepare();
-  expect(plan).toMatchObject({ change: "uninstall", title: "Uninstall the agent guard", confirm: "Uninstall", settingsPath: path, backupPath: `${path}.grove-backup`, adds: null, warnings: [], blockers: [] });
+  expect(plan).toMatchObject({ change: "uninstall", title: "Remove the old hook", confirm: "Remove", settingsPath: path, backupPath: `${path}.grove-backup`, adds: null, blockers: [] });
   expect(plan.removes.map((removed) => JSON.parse(removed))).toEqual([GROUP]);
   expect(plan.lines).toEqual([
     "Your other settings and hooks are kept.",
     "Claude Code reloads this file when it changes, so running sessions normally drop the hook; new sessions always do.",
   ]);
   expect(edit?.path).toBe(path);
+});
+
+const NO_PLUGIN = "The Claude Code plugin isn't enabled, so removing this hook leaves no agent guard until you install it.";
+
+test("removing the old hook warns that no guard is left while the plugin is not enabled in that file", async () => {
+  await write({ hooks: { PreToolUse: [GROUP] } });
+  expect((await prepare()).plan.warnings).toEqual([NO_PLUGIN]);
+  await write({ enabledPlugins: { "git-grove@git-grove": false }, hooks: { PreToolUse: [GROUP] } });
+  expect((await prepare()).plan.warnings).toEqual([NO_PLUGIN]);
+  await write({ enabledPlugins: { "git-grove@git-grove": true }, hooks: { PreToolUse: [GROUP] } });
+  expect((await prepare()).plan.warnings).toEqual([]);
+  await write({});
+  expect((await prepare()).plan.warnings).toEqual([]);
 });
 
 test("the plan says when it rewrites the file with 2-space indentation, and offers no backup for a missing file", async () => {
@@ -63,7 +76,7 @@ test("a file grove cannot parse and a file with no grove hook are blocked, with 
   expect(broken.edit).toBeNull();
   expect(broken.plan.blockers[0]).toMatch(new RegExp(`^grove will not edit ${path.replaceAll(".", "\\.")}: it is not valid JSON \\(.*\\)\\. To take grove's hook out, edit the file yourself\\.$`));
   await writeFile(path, "{}\n");
-  expect((await prepare()).plan.blockers).toEqual(["The agent guard is not installed."]);
+  expect((await prepare()).plan.blockers).toEqual(["There is no old hook in this file."]);
   const receipt = await runGuardChange(await prepare());
   expect(receipt).toMatchObject({ ok: false, refused: true, title: "Not run", undo: null });
   expect(await readFile(path, "utf8")).toBe("{}\n");
@@ -72,16 +85,16 @@ test("a file grove cannot parse and a file with no grove hook are blocked, with 
 test("an uninstall's receipt offers no undo, and the uninstall, planned against the file as it is, keeps a key the user added", async () => {
   await write({ theme: "dark", hooks: { PreToolUse: [GROUP] } });
   const undone = await runGuardChange(await prepare());
-  expect(undone).toMatchObject({ change: "uninstall", ok: true, refused: false, title: "Uninstalled the agent guard", undo: null });
+  expect(undone).toMatchObject({ change: "uninstall", ok: true, refused: false, title: "Removed the old hook", undo: null });
   expect(await settings()).toEqual({ theme: "dark" });
-  expect((await prepare()).plan.blockers).toEqual(["The agent guard is not installed."]);
+  expect((await prepare()).plan.blockers).toEqual(["There is no old hook in this file."]);
 });
 
 test("a stale grove hook, running another command, is taken out too", async () => {
   await write({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "/old/node /old/git-grove/dist/cli/bin.js guard --claude" }] }] } });
   const prepared = await prepare();
   expect(prepared.plan.removes).toHaveLength(1);
-  expect(await runGuardChange(prepared)).toMatchObject({ ok: true, title: "Uninstalled the agent guard" });
+  expect(await runGuardChange(prepared)).toMatchObject({ ok: true, title: "Removed the old hook" });
   expect(await settings()).toEqual({});
 });
 

@@ -119,10 +119,10 @@ test("read, plan, uninstall the old hook planned against the file as it is, then
 
   await writeFile(settingsPath, before.replace('"model": "opus",', '"model": "opus",\n  "theme": "dark",'));
   const uninstall = await plan();
-  expect(uninstall.plan).toMatchObject({ change: "uninstall", confirm: "Uninstall", settingsPath, backupPath: `${settingsPath}.grove-backup`, adds: null, blockers: [] });
+  expect(uninstall.plan).toMatchObject({ change: "uninstall", confirm: "Remove", settingsPath, backupPath: `${settingsPath}.grove-backup`, adds: null, blockers: [] });
   const ran = await runPlan(uninstall.planId);
   expect(ran.status).toBe(200);
-  expect(record(ran.body["receipt"])).toMatchObject({ change: "uninstall", ok: true, title: "Uninstalled the agent guard", undo: null });
+  expect(record(ran.body["receipt"])).toMatchObject({ change: "uninstall", ok: true, title: "Removed the old hook", undo: null });
   expect(await settings()).toEqual({ model: "opus", theme: "dark" });
   expect(JSON.parse(await readFile(`${settingsPath}.grove-backup`, "utf8"))).toMatchObject({ theme: "dark", hooks: { PreToolUse: [{ matcher: "Bash" }] } });
   expect((await call("GET", "/api/guard")).body["status"]).toBe("absent");
@@ -201,7 +201,7 @@ test("two changes run at once are made one at a time: the second sees the file c
   await writeOldHook({ model: "opus" });
   const [one, two] = [await plan(), await plan()];
   const receipts = await Promise.all([runPlan(one.planId), runPlan(two.planId)]);
-  expect(receipts.map((reply) => record(reply.body["receipt"])["title"]).sort()).toEqual(["Changed since you looked", "Uninstalled the agent guard"]);
+  expect(receipts.map((reply) => record(reply.body["receipt"])["title"]).sort()).toEqual(["Changed since you looked", "Removed the old hook"]);
   expect(await settings()).toEqual({ model: "opus" });
 });
 
@@ -227,7 +227,7 @@ test("from a package runner's cache the state carries install-guard's refusal, a
   await writeOldHook({}, "/opt/node /opt/git-grove/dist/cli/bin.js guard --claude");
   const uninstall = await plan();
   expect(uninstall.plan["blockers"]).toEqual([]);
-  expect(record((await runPlan(uninstall.planId)).body["receipt"])).toMatchObject({ ok: true, title: "Uninstalled the agent guard" });
+  expect(record((await runPlan(uninstall.planId)).body["receipt"])).toMatchObject({ ok: true, title: "Removed the old hook" });
   expect(await settings()).toEqual({});
 });
 

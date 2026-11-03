@@ -89,10 +89,10 @@ test("the main view and sidebar route to the setup page", () => {
   expect(side).toContain('href="#/setup"');
 });
 
-test("the guard status button goes to setup unless an old hook can be removed", () => {
+test("the guard status button goes to setup unless the plugin runs and an old hook can be removed", () => {
   expect(guardStatusTarget("plugin")).toBe("setup");
   expect(guardStatusTarget("absent")).toBe("setup");
-  expect(guardStatusTarget("hook")).toBe("uninstall");
+  expect(guardStatusTarget("hook")).toBe("setup");
   expect(guardStatusTarget("plugin-and-hook")).toBe("uninstall");
   expect(guardStatusTarget(null)).toBe("setup");
 });

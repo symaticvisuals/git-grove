@@ -9,7 +9,7 @@ import { timeAgo } from "./time-ago.js";
 
 export type GuardDialogParts = { head: SafeHtml; body: SafeHtml; foot: SafeHtml };
 
-const HEADING = "Uninstall the agent guard";
+const HEADING = "Remove the old hook";
 const CHECKING = html`<section><div class="async"><span class="spin" aria-hidden="true"></span>Reading the settings file…</div></section>`;
 
 function file(plan: GuardPlan): SafeHtml {
@@ -28,7 +28,7 @@ function review(dialog: GuardDialogState, now: number): SafeHtml {
   const { plan } = dialog;
   if (plan === null) return html`${notice}${dialog.planning ? CHECKING : ""}`;
   const blockers = plan.blockers.length === 0 ? "" : html`<section><div class="h3">Checks <span class="t">read ${timeAgo(plan.readAt, now, "long")}</span></div><div class="checks">${plan.blockers.map((text) => checkRow({ ok: false, text, why: null }))}</div></section>`;
-  const warnings = plan.warnings.map((text) => html`<section>${banner("warn", "Hooks are turned off", text)}</section>`);
+  const warnings = plan.warnings.map((text) => html`<section>${banner("warn", "Before you confirm", text)}</section>`);
   if (plan.blockers.length > 0) return html`${notice}${blockers}${warnings}`;
   const lines = html`<section><ul>${plan.lines.map((line) => html`<li>${ICONS.tick}<span>${line}</span></li>`)}</ul></section>`;
   return html`${notice}${warnings}${file(plan)}${json(plan)}${lines}`;
@@ -46,7 +46,7 @@ function reviewFoot(dialog: GuardDialogState): SafeHtml {
       : html`<span class="note" id="dlg-note">${ICONS.shield}<span>${safety}</span></span>`;
   const again = dialog.error === null || dialog.planning ? "" : html`<button class="btn" data-guard="again" data-key="guard:again">Preview again</button>`;
   const id = dialog.planId === null ? "" : html` data-plan="${dialog.planId}"`;
-  return html`${note}${again}<button class="btn" data-guard="close" data-key="guard:close">Cancel <kbd>Esc</kbd></button><button class="btn primary" data-guard="confirm" data-key="guard:confirm"${id} aria-describedby="dlg-note"${ready ? "" : html` disabled`}>${plan?.confirm ?? "Uninstall"} <kbd>↵</kbd></button>`;
+  return html`${note}${again}<button class="btn" data-guard="close" data-key="guard:close">Cancel <kbd>Esc</kbd></button><button class="btn primary" data-guard="confirm" data-key="guard:confirm"${id} aria-describedby="dlg-note"${ready ? "" : html` disabled`}>${plan?.confirm ?? "Remove"} <kbd>↵</kbd></button>`;
 }
 
 function doneFoot(dialog: GuardDialogState): SafeHtml {
