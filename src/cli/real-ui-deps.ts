@@ -23,10 +23,10 @@ export function realUiDeps(): UiDeps {
     serveForeground,
     bin: binPath(),
     claudeSettingsPath: settingsPath,
-    guardDone: async () => {
+    guardPhase: async () => {
       const file = await readSettingsFile(settingsPath);
       const reading = readGuardStatus(file.text, guardHookCommand(stableNodePath(), binPath()), file.problem);
-      return guardPhaseOf({ reading, hookCommand: (await readHookCommand(groveHome())) !== null }).done;
+      return { ...guardPhaseOf({ reading, hookCommand: (await readHookCommand(groveHome())) !== null }), hooksDisabled: reading.hooksDisabled };
     },
   };
 }

@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { GuardPhase } from "../../core/guard-install/guard-install.types.js";
 import { writeHookCommand } from "../../core/guard-install/hook-command.js";
 import { PLUGIN_INSTALL } from "../../core/guard-install/plugin-commands.js";
 import { groveHome } from "../../core/grove-home.js";
@@ -32,8 +33,8 @@ export type UiDeps = {
   waitMs?: number;
   /** How long to wait for an older server asked to exit: for its service to start this version, or for it to stop; 15 s by default. */
   restartWaitMs?: number;
-  /** Whether the agent guard is really on (`guardPhaseOf`); without it, `ui` never mentions the guard. */
-  guardDone?(): Promise<boolean>;
+  /** Which guard Claude Code runs, whether it is really on (`guardPhaseOf`), and whether its settings turn hooks off; without it, `ui` never mentions the guard. */
+  guardPhase?(): Promise<{ phase: GuardPhase; done: boolean; hooksDisabled: boolean }>;
   /** The Node the dashboard records for the plugin's hook; this process's stable Node by default. */
   node?: string;
   /** The settings file Claude Code reads from this shell; when given, `ui` says so if the dashboard would install the guard elsewhere. */
@@ -42,6 +43,8 @@ export type UiDeps = {
 
 const WAIT_MS = 5000;
 const PROTECT = `Protect your worktrees from Claude Code: ${PLUGIN_INSTALL.join(", then ")}\n`;
+const TWICE = "The agent guard runs twice: remove the old hook on the dashboard (git grove ui, then Remove the old hook…).\n";
+const HOOKS_OFF = "The agent guard is installed, but Claude Code's settings turn hooks off (disableAllHooks).\n";
 const RESTART_WAIT_MS = 15_000;
 
 function firstLine(error: unknown): string {
@@ -56,9 +59,12 @@ async function warnOnOtherSettings(io: CliIo, deps: UiDeps, port: number, token:
   io.out(`The dashboard reads Claude Code settings in ${served}, but Claude Code here reads ${deps.claudeSettingsPath}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
 }
 
-async function guardNotDone(deps: UiDeps): Promise<boolean> {
-  if (deps.guardDone === undefined) return false;
-  return !(await deps.guardDone().catch(() => true));
+async function guardLine(deps: UiDeps): Promise<string | null> {
+  const guard = await deps.guardPhase?.().catch(() => null);
+  if (guard === undefined || guard === null || guard.done) return null;
+  if (guard.phase === "absent" || guard.phase === "hook") return PROTECT;
+  if (guard.phase === "plugin-and-hook") return TWICE;
+  return guard.hooksDisabled ? HOOKS_OFF : null;
 }
 
 function runsWanted(program: ServiceStatus["program"], wanted: ServiceProgram): boolean {
@@ -164,9 +170,11 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
  * its server, and `ui` says how to update it. With no server, the login service is installed (and says how to remove
  * it) or started; on a machine without launchd or systemd, or from an npx cache, the server runs in this process
  * instead, until Ctrl-C. When a running server reads another Claude Code settings file than this
- * shell's Claude Code reads, `ui` names both. On every run while the agent guard is not really on (`guardDone`), it
- * prints one line with the plugin's install commands. The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`,
- * or when that fails, the address is printed.
+ * shell's Claude Code reads, `ui` names both. On every run while the agent guard is not really on (`guardPhase`), it
+ * prints one line on what it needs: the plugin's install commands with no plugin, removing the old hook when both run,
+ * or that hooks are turned off; nothing more when only the `hook-command` record was missing, since `ui` has just
+ * written it. The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`, or when that fails, the address is
+ * printed.
  */
 export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   const home = groveHome();
@@ -179,7 +187,8 @@ export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   if (info === null) info = await startService(io, deps, home, waitMs);
   const server = info === null ? await serveHere(io, deps, home, waitMs) : { port: info.port, token: await readOrCreateToken(home), foreground: false };
   if (!server.foreground) await warnOnOtherSettings(io, deps, server.port, server.token);
-  if (await guardNotDone(deps)) io.out(PROTECT);
+  const guard = await guardLine(deps);
+  if (guard !== null) io.out(guard);
   const url = dashboardUrl(server.port, server.token, target);
   const opened = process.env["GIT_GROVE_NO_OPEN"] !== "1" && (await deps.openUrl(url));
   io.out(opened ? `Opened the dashboard at http://127.0.0.1:${server.port}/\n` : `Open the dashboard: ${url}\n`);
