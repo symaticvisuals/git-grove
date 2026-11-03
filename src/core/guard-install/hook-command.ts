@@ -35,7 +35,7 @@ export async function writeHookCommand(home: string, node: string, bin: string):
   const path = hookCommandPath(home);
   const text = `${node}\n${bin}\n`;
   if ((await currentText(path)) === text) return "unchanged";
-  await mkdir(home, { recursive: true });
+  await mkdir(home, { recursive: true, mode: 0o700 });
   const temp = `${path}.${process.pid}.${randomUUID()}`;
   try {
     await writeFile(temp, text, { flag: "wx", mode: 0o600 });

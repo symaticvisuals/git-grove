@@ -60,3 +60,9 @@ test("readHookCommand is null when either path is gone, or the file has fewer th
   await writeFile(hookCommandPath(home), `${node}\n`);
   expect(await readHookCommand(home)).toBeNull();
 });
+
+test("a home folder it creates is 0700", async () => {
+  const fresh = join(home, "fresh", "grove");
+  await writeHookCommand(fresh, node, bin);
+  expect((await stat(fresh)).mode & 0o777).toBe(0o700);
+});

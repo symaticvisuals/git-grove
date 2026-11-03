@@ -171,7 +171,7 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
  */
 export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   const home = groveHome();
-  await writeHookCommand(home, deps.node ?? stableNodePath(), deps.bin).catch((error: unknown) => io.err(`${firstLine(error)}\n`));
+  await writeHookCommand(home, deps.node ?? stableNodePath(), deps.bin).catch((error: unknown) => io.err(`git-grove: could not record hook-command: ${firstLine(error)}\n`));
   const waitMs = deps.waitMs ?? WAIT_MS;
   const target = await dashboardTarget(io.cwd, home);
   const updated = await alignService(io, deps, home);
