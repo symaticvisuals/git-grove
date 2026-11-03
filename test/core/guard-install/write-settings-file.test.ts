@@ -151,7 +151,7 @@ test("a byte-order mark is kept in the text, so the strict parse refuses it, and
   const file = await readSettingsFile(path);
   expect(file.text?.startsWith("\uFEFF")).toBe(true);
   expect(Buffer.from(file.bytes ?? new Uint8Array()).equals(raw)).toBe(true);
-  expect(readGuardStatus(file.text, "x", file.problem)).toEqual({ status: "unreadable", hooksDisabled: false, problem: "starts with a byte-order mark" });
+  expect(readGuardStatus(file.text, "x", file.problem)).toEqual({ status: "unreadable", pluginEnabled: false, hooksDisabled: false, problem: "starts with a byte-order mark" });
 });
 
 test("a file that is not UTF-8 text cannot be read", async () => {

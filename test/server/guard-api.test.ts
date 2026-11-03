@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { writeHookCommand } from "../../src/core/guard-install/hook-command.js";
 import { createGuardInstaller } from "../../src/server/guard/guard-installer.js";
 import type { GuardSetup } from "../../src/server/guard/guard-setup.types.js";
 import { type RunningServer, startServer } from "../../src/server/start-server.js";
@@ -100,6 +101,12 @@ test("read, plan, install, read again, then undo the install by an uninstall pla
   await writeFile(settingsPath, '{\n  "model": "opus"\n}\n');
   expect((await call("GET", "/api/guard")).body).toEqual({
     status: "absent",
+    plugin: false,
+    hookCommand: true,
+    ephemeral: false,
+    phase: "absent",
+    done: false,
+    installCommands: ["claude plugin marketplace add symaticvisuals/git-grove", "claude plugin install git-grove@git-grove"],
     settingsPath,
     command,
     hooksDisabled: false,
@@ -119,6 +126,21 @@ test("read, plan, install, read again, then undo the install by an uninstall pla
   expect((await runPlan(undo.planId)).body["receipt"]).toMatchObject({ ok: true, title: "Uninstalled the agent guard", undo: "install" });
   expect(await settings()).toEqual({ model: "opus", theme: "dark" });
   expect((await call("GET", "/api/guard")).body["status"]).toBe("absent");
+});
+
+test("with the plugin enabled and a usable hook-command, the guard is in the plugin phase and done", async () => {
+  await start();
+  await mkdir(join(claude, ".claude"));
+  await writeFile(settingsPath, JSON.stringify({ enabledPlugins: { "git-grove@git-grove": true } }));
+  await writeHookCommand(home, process.execPath, BIN);
+  expect((await call("GET", "/api/guard")).body).toMatchObject({
+    status: "absent",
+    plugin: true,
+    hookCommand: true,
+    phase: "plugin",
+    done: true,
+    installCommands: ["claude plugin marketplace add symaticvisuals/git-grove", "claude plugin install git-grove@git-grove"],
+  });
 });
 
 test("a plan runs once: the second run is a 409, and an unknown plan a 410", async () => {

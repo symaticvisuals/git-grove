@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { writeHookCommand } from "../../core/guard-install/hook-command.js";
 import { groveHome } from "../../core/grove-home.js";
-import type { GuardStatus } from "../../core/guard-install/guard-install.types.js";
 import { isEphemeralBin } from "../../core/is-ephemeral-bin.js";
 import type { ServiceManager, ServiceStatus } from "../../core/service/service-manager.js";
 import type { ServiceProgram } from "../../core/service/service-program.types.js";
@@ -32,8 +31,8 @@ export type UiDeps = {
   waitMs?: number;
   /** How long to wait for an older server asked to exit: for its service to start this version, or for it to stop; 15 s by default. */
   restartWaitMs?: number;
-  /** Where the agent guard stands in Claude Code's settings; without it, `ui` never mentions the guard. */
-  guardStatus?(): Promise<GuardStatus>;
+  /** Whether the agent guard is really on (`guardPhaseOf`); without it, `ui` never mentions the guard. */
+  guardDone?(): Promise<boolean>;
   /** The Node the dashboard records for the plugin's hook; this process's stable Node by default. */
   node?: string;
   /** The settings file Claude Code reads from this shell; when given, `ui` says so if the dashboard would install the guard elsewhere. */
@@ -56,9 +55,9 @@ async function warnOnOtherSettings(io: CliIo, deps: UiDeps, port: number, token:
   io.out(`The dashboard installs the agent guard into ${served}, but Claude Code here reads ${deps.claudeSettingsPath}: the server and this shell differ in CLAUDE_CONFIG_DIR.\n`);
 }
 
-async function guardAbsent(deps: UiDeps): Promise<boolean> {
-  if (deps.guardStatus === undefined) return false;
-  return (await deps.guardStatus().catch(() => null)) === "absent";
+async function guardNotDone(deps: UiDeps): Promise<boolean> {
+  if (deps.guardDone === undefined) return false;
+  return !(await deps.guardDone().catch(() => true));
 }
 
 function runsWanted(program: ServiceStatus["program"], wanted: ServiceProgram): boolean {
@@ -132,7 +131,7 @@ async function startService(io: CliIo, deps: UiDeps, home: string, waitMs: numbe
       await privateHome(home);
       const installed = await deps.service.install(serviceProgramOf(deps.bin));
       io.out(`Installed a login service: ${installed.wrote}\nRemove it with: ${installed.removeWith}\n`);
-      if (await guardAbsent(deps)) io.out(OFFER_GUARD);
+      if (await guardNotDone(deps)) io.out(OFFER_GUARD);
     }
   } catch (error) {
     io.err(`${firstLine(error)}\n`);

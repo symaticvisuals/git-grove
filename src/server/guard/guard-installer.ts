@@ -1,11 +1,15 @@
 import { ephemeralRefusal } from "../../core/guard-install/ephemeral-refusal.js";
+import { guardPhaseOf } from "../../core/guard-install/guard-phase-of.js";
 import { guardHookCommand } from "../../core/guard-install/guard-hook-command.js";
 import type { GuardChange, GuardPlan, GuardReceipt, GuardState, PreparedGuardChange, SettingsFile } from "../../core/guard-install/guard-install.types.js";
+import { readHookCommand } from "../../core/guard-install/hook-command.js";
+import { PLUGIN_INSTALL } from "../../core/guard-install/plugin-commands.js";
 import { prepareGuardChange } from "../../core/guard-install/prepare-guard-change.js";
 import { readGuardStatus } from "../../core/guard-install/read-guard-status.js";
 import { readSettingsFile } from "../../core/guard-install/read-settings-file.js";
 import { runGuardChange } from "../../core/guard-install/run-guard-change.js";
 import { willNotEdit } from "../../core/guard-install/will-not-edit.js";
+import { isEphemeralBin } from "../../core/is-ephemeral-bin.js";
 import { createPlanCache, type PlanCacheOptions } from "../actions/plan-cache.js";
 import { HttpError } from "../http/http.error.js";
 import type { GuardSetup } from "./guard-setup.types.js";
@@ -46,8 +50,14 @@ export function createGuardInstaller(setup: (() => GuardSetup) | null, options: 
       const reading = readGuardStatus(file.text, command, file.problem);
       const leftAlone = reading.problem ?? (file.readOnly ? "is read-only" : null);
       const unreadable = leftAlone === null ? null : `${willNotEdit(resolved.settingsPath, leftAlone)} ${BY_HAND}`;
+      const hookCommand = (await readHookCommand(resolved.home)) !== null;
       return {
         status: reading.status,
+        plugin: reading.pluginEnabled,
+        hookCommand,
+        ephemeral: isEphemeralBin(resolved.bin),
+        ...guardPhaseOf({ reading, hookCommand }),
+        installCommands: [...PLUGIN_INSTALL],
         settingsPath: resolved.settingsPath,
         command,
         hooksDisabled: reading.hooksDisabled,

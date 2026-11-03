@@ -19,7 +19,20 @@ const COMMAND = "/opt/homebrew/bin/node /opt/grove/dist/cli/bin.js guard --claud
 const NPX = "This git grove runs from a package runner's cache (npx, pnpm dlx, bunx, yarn dlx), which may be cleared under the hook; install it first: npm i -g @deepanshugoel/git-grove";
 
 function guard(overrides: Partial<GuardState> = {}): GuardState {
-  return { status: "absent", settingsPath: PATH, command: COMMAND, hooksDisabled: false, refusal: null, ...overrides };
+  return {
+    status: "absent",
+    plugin: false,
+    hookCommand: false,
+    ephemeral: false,
+    phase: "absent",
+    done: false,
+    installCommands: [],
+    settingsPath: PATH,
+    command: COMMAND,
+    hooksDisabled: false,
+    refusal: null,
+    ...overrides,
+  };
 }
 
 function ready(state: GuardState): Load<GuardState> {
