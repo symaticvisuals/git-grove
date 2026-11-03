@@ -5,6 +5,7 @@ import { evaluateCommandLine } from "../core/guard/evaluate-command-line.js";
 import type { CliIo } from "./cli-io.types.js";
 import { guardCommand } from "./commands/guard.js";
 import { recordGuardActivity } from "./record-guard-activity.js";
+import { trustsKnownBare } from "./trusts-known-bare.js";
 
 const DEADLINE_MS = 3000;
 const USAGE = `Usage: git grove guard --claude
@@ -29,5 +30,10 @@ export async function runGuard(args: readonly string[], io: CliIo): Promise<numb
     return 1;
   }
   const stdin = await text(process.stdin);
-  return guardCommand(io, stdin, { evaluate: evaluateCommandLine, record: recordGuardActivity, home: homedir(), deadlineMs: DEADLINE_MS });
+  return guardCommand(io, stdin, {
+    evaluate: (input) => evaluateCommandLine({ ...input, trustsBare: trustsKnownBare }),
+    record: recordGuardActivity,
+    home: homedir(),
+    deadlineMs: DEADLINE_MS,
+  });
 }

@@ -1,7 +1,10 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { devNull } from "node:os";
 import { GitError } from "./git.error.js";
+import { type GitLockdown, gitLockdown } from "./git-lockdown.js";
 import { gitSignal } from "./git-signal.js";
+import { UntrustedRepoError } from "./untrusted-repo.error.js";
 
 export type RunGitOptions = {
   cwd: string;
@@ -44,6 +47,11 @@ function abortReason(error: Error, cwd: string, limit: number): string | null {
   return null;
 }
 
+/** Turns off what lets a repository's own config run commands: an fsmonitor and hooks. */
+const LOCKED = ["-c", "core.fsmonitor=false", "-c", `core.hooksPath=${devNull}`];
+const NO_IMPLICIT_BARE = ["-c", "safe.bareRepository=explicit"];
+const BARE_REFUSED = "cannot use bare repository";
+
 /**
  * Runs git with the inherited environment and resolves with its output. Git never fetches missing objects
  * of a partial clone (`GIT_NO_LAZY_FETCH=1`).
@@ -52,9 +60,36 @@ function abortReason(error: Error, cwd: string, limit: number): string | null {
  * Rejects with GitError on a non-zero exit unless `allowFailure` is set, and always when git could not finish:
  * `cwd` does not exist, git was killed, it printed more than grove reads, or `signal` (by default the one
  * `gitSignal` holds) aborted it.
+ * Inside `gitLockdown.run(…)` git runs no fsmonitor and no hooks, and a bare repository found by searching upward is
+ * used only when the lockdown trusts it; otherwise the call rejects with UntrustedRepoError.
  */
-export function runGit(args: readonly string[], options: RunGitOptions): Promise<RunGitResult> {
-  const fullArgs = options.write ? [...args] : ["--no-optional-locks", ...args];
+export async function runGit(args: readonly string[], options: RunGitOptions): Promise<RunGitResult> {
+  const lockdown = gitLockdown.getStore();
+  if (lockdown === undefined) return execGit(args, [], options);
+  const strict = await execGit(args, [...LOCKED, ...NO_IMPLICIT_BARE], { ...options, allowFailure: true });
+  if (strict.code === 0 || !strict.stderr.includes(BARE_REFUSED)) return finish(args, strict, options);
+  if (!(await trustedBare(lockdown, options))) throw new UntrustedRepoError(options.cwd);
+  return execGit(args, LOCKED, options);
+}
+
+function finish(args: readonly string[], result: RunGitResult, options: RunGitOptions): RunGitResult {
+  if (result.code !== 0 && !options.allowFailure) throw new GitError(args, result.code, result.stderr);
+  return result;
+}
+
+function trustedBare(lockdown: GitLockdown, options: RunGitOptions): Promise<boolean> {
+  const known = lockdown.verdicts.get(options.cwd);
+  if (known !== undefined) return known;
+  const probe: RunGitOptions = { cwd: options.cwd, allowFailure: true, ...(options.signal ? { signal: options.signal } : {}) };
+  const verdict = execGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], LOCKED, probe)
+    .then((result) => (result.code === 0 ? lockdown.trustsBare(result.stdout.trim()) : false))
+    .catch(() => false);
+  lockdown.verdicts.set(options.cwd, verdict);
+  return verdict;
+}
+
+function execGit(args: readonly string[], config: readonly string[], options: RunGitOptions): Promise<RunGitResult> {
+  const fullArgs = [...config, ...(options.write ? [] : ["--no-optional-locks"]), ...args];
   const limit = maxBuffer();
   return new Promise((resolve, reject) => {
     const child = execFile(
