@@ -6,11 +6,11 @@ import { parseWorktreeList } from "../../git/parse-worktree-list.js";
 import { runGit } from "../../git/run-git.js";
 import { appCommand } from "../../open/app-command.js";
 import { launchDetached } from "../../open/launch-detached.js";
-import { plural } from "../../rules/plural.js";
 import type { ExecuteResult, RunContext } from "../action.types.js";
 import { displayPath } from "../display-path.js";
 import { shellWord } from "../shell-word.js";
 import { errorLine } from "../error-line.js";
+import { copiedLine } from "./copied-line.js";
 import { copyEnvFiles } from "./copy-env-files.js";
 import { levelSteps } from "./level-steps.js";
 import type { NewLevel } from "./new-level.types.js";
@@ -113,8 +113,8 @@ export async function runCreateLevel(level: NewLevel, run: RunContext): Promise<
     } else if (key === "env") {
       await run.step(index, async () => {
         try {
-          const { copied, kept } = await copyEnvFiles(level.mainPath, level.folder, level.envFiles);
-          const detail = `${plural(copied.length, "env file")} copied${kept.length > 0 ? `, ${kept.length} already there` : ""}`;
+          const { copied, kept, skipped } = await copyEnvFiles(level.mainPath, level.folder, level.envFiles);
+          const detail = copiedLine(copied, kept, skipped);
           lines.push(detail);
           return detail;
         } catch (error) {

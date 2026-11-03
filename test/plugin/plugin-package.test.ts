@@ -24,7 +24,7 @@ describe("the Claude Code plugin package", () => {
     expect(plugin.version).toBe(pkg.version);
   });
 
-  test("the hook runs guard.sh on Bash with a 10 s timeout", () => {
+  test("the hook runs guard.sh on Bash, and with --announce when a session starts, each with a 10 s timeout", () => {
     expect(readJson("plugin/hooks/hooks.json")).toEqual({
       hooks: {
         PreToolUse: [
@@ -34,6 +34,9 @@ describe("the Claude Code plugin package", () => {
               { type: "command", command: '"${CLAUDE_PLUGIN_ROOT}"/hooks/guard.sh', timeout: 10 },
             ],
           },
+        ],
+        SessionStart: [
+          { hooks: [{ type: "command", command: '"${CLAUDE_PLUGIN_ROOT}"/hooks/guard.sh --announce', timeout: 10 }] },
         ],
       },
     });

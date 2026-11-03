@@ -5,7 +5,7 @@ import type { Load } from "../state.js";
 import { commandRow } from "./command-row.js";
 import { removeHook } from "./remove-hook.js";
 
-const BODY = "Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.";
+const BODY = "Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost. A new session is told this agent is bounded by the guard.";
 
 function commands(state: GuardState): SafeHtml {
   return html`${state.installCommands.map((command, index) => commandRow(command, `guard:copy:${index}`))}`;

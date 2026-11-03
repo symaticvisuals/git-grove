@@ -18,6 +18,11 @@ verdict says it is safe.
 Ignored files (local config, seed data) exist only in that worktree. Use `git grove rm --rescue <path>`: it copies them
 into the main worktree, checks the copies, then removes the worktree.
 
+## A worktree whose folder is already gone
+
+When the folder was deleted but git still lists the worktree, use `git grove forget <path>`. It drops git's record and
+keeps the branch, and it refuses a folder that is still there.
+
 ## When the guard blocks a command
 
 A blocked command exits 2 and prints a reason and a safe alternative. Do not work around it, by another spelling, a

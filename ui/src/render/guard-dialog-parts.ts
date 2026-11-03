@@ -18,7 +18,7 @@ function file(plan: GuardPlan): SafeHtml {
 }
 
 function json(plan: GuardPlan): SafeHtml {
-  const adds = plan.adds === null ? "" : html`<div class="h3">Adds to hooks.PreToolUse</div><pre>${plan.adds}</pre>`;
+  const adds = plan.adds === null ? "" : html`<div class="h3">Adds</div><pre>${plan.adds}</pre>`;
   const removes = plan.removes.length === 0 ? "" : html`<div class="h3">Removes</div>${plan.removes.map((removed) => html`<pre>${removed}</pre>`)}`;
   return adds === "" && removes === "" ? html`` : html`<section>${adds}${removes}</section>`;
 }

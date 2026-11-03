@@ -1,14 +1,16 @@
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from "vitest";
 import type { ActionContext } from "../../../src/core/actions/action.types.js";
+import { copyEnvFiles } from "../../../src/core/actions/create/copy-env-files.js";
 import { levelFolder } from "../../../src/core/actions/create/level-folder.js";
 import { InvalidInputError } from "../../../src/core/actions/invalid-input.error.js";
 import type { ActionName, Plan, Receipt } from "../../../src/core/actions/plan.types.js";
 import { prepareAction } from "../../../src/core/actions/registry.js";
 import { runPrepared } from "../../../src/core/actions/run-prepared.js";
+import { readEnvMissing } from "../../../src/core/facts/read-env-missing.js";
 import { readRepoFacts } from "../../../src/core/facts/read-repo-facts.js";
 import { openStore } from "../../../src/core/journal/open-store.js";
 import type { Store } from "../../../src/core/journal/store.types.js";
@@ -225,6 +227,53 @@ test("copy-env shows each copy as a quoted cp -n that never overwrites", async (
   await repo.worktree(folder, "feat/copy");
   const plan = await prepare("copy-env", { worktree: folder });
   expect(plan.commands).toEqual(["cp -n .env '.worktrees/my copy/.env'", "cp -n apps/web/.env.local '.worktrees/my copy/apps/web/.env.local'"]);
+});
+
+/** A worktree on a branch whose tracked `apps` is a symlink to a tracked, unignored `leak` folder. */
+async function worktreeWithSymlinkedApps(): Promise<string> {
+  const folder = join(repo.path, ".worktrees", "evil");
+  await repo.worktree(folder, "feat/evil");
+  await mkdir(join(folder, "leak"), { recursive: true });
+  await writeFile(join(folder, "leak", "keep.txt"), "tracked\n");
+  await symlink("leak", join(folder, "apps"));
+  await repo.git("-C", folder, "add", "leak", "apps");
+  await repo.git("-C", folder, "commit", "-m", "apps is a symlink");
+  return folder;
+}
+
+test("copy-env never copies through a symlinked folder of the worktree", async () => {
+  const folder = await worktreeWithSymlinkedApps();
+  const { plan, receipt } = await run("copy-env", { worktree: folder });
+  expect(plan.commands).toEqual(["cp -n .env .worktrees/evil/.env"]);
+  expect(plan.checks).toContainEqual({ ok: false, text: "1 file not copied", why: "apps/web/.env.local: a folder on the way is a symlink, so it would land outside where it belongs" });
+  expect(receipt.ok).toBe(true);
+  expect(await readFile(join(folder, ".env"), "utf8")).toBe("SECRET=1\n");
+  expect(existsSync(join(folder, "leak", "web", ".env.local"))).toBe(false);
+});
+
+test("a worktree whose env file would go through a symlinked folder is not missing it", async () => {
+  const folder = await worktreeWithSymlinkedApps();
+  await writeFile(join(folder, ".env"), "SECRET=1\n");
+  const facts = await readRepoFacts(repo.path);
+  const missing = await readEnvMissing(repo.path, facts);
+  expect([...missing.entries()].find(([path]) => path.endsWith("/.worktrees/evil"))?.[1]).toEqual([]);
+  expect((await prepare("copy-env", { worktree: folder })).blockers.join(" ")).toContain("already has every env file it can take");
+});
+
+test("copyEnvFiles skips a file whose folder on the way is a symlink", async () => {
+  const main = await mkdtemp(join(tmpdir(), "git-grove-main-"));
+  const target = await mkdtemp(join(tmpdir(), "git-grove-target-"));
+  const outside = await mkdtemp(join(tmpdir(), "git-grove-outside-"));
+  try {
+    await mkdir(join(main, "apps", "web"), { recursive: true });
+    await writeFile(join(main, "apps", "web", ".env.local"), "WEB=1\n");
+    await writeFile(join(main, ".env"), "SECRET=1\n");
+    await symlink(outside, join(target, "apps"));
+    expect(await copyEnvFiles(main, target, [".env", "apps/web/.env.local"])).toEqual({ copied: [".env"], kept: [], skipped: ["apps/web/.env.local"] });
+    expect(existsSync(join(outside, "web", ".env.local"))).toBe(false);
+  } finally {
+    await Promise.all([main, target, outside].map((path) => rm(path, { recursive: true, force: true })));
+  }
 });
 
 test("copy-env refuses the main checkout", async () => {

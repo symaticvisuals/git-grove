@@ -6,7 +6,7 @@ import type { DialogContext } from "../dialogs/dialog-specs.js";
 import type { Route } from "../parse-route.js";
 import { plural } from "../plural.js";
 import type { State } from "../state.js";
-import { worstFinding } from "../worst-finding.js";
+import { parentNeedsRestack, worstFinding } from "../worst-finding.js";
 
 export type PaletteRun = { open: ActionName; ctx: DialogContext } | { route: Route } | { scan: number } | { guard: GuardChange };
 
@@ -35,16 +35,18 @@ function levelActions(repo: WireRepoView, feature: WireFeature, level: WireLevel
       return path === undefined ? [] : [action(repo, level.precious > 0 ? `Copy the files, then remove ${level.branch}` : `Clean up ${level.branch}`, "R", "remove", { ...data, path })];
     case "env-missing":
       return path === undefined ? [] : [action(repo, `Copy env files into ${level.branch}`, null, "copy-env", { ...data, path })];
+    case "prunable": {
+      if (path === undefined) return [];
+      const loses = level.findings.some((item) => item.rule === "prunable" && item.severity === "loses-work");
+      return [action(repo, loses ? `Force forget ${level.branch}` : `Forget ${level.branch}`, "R", "forget", { ...data, path })];
+    }
     default:
       return [];
   }
 }
 
 function needsRestack(feature: WireFeature): boolean {
-  return feature.levels.some((level) => {
-    const rule = worstFinding(level.findings)?.rule;
-    return rule === "parent-moved" || rule === "parent-merged";
-  });
+  return feature.levels.some((level) => parentNeedsRestack(level.findings));
 }
 
 function actions(repo: WireRepoView): PaletteItem[] {
@@ -60,6 +62,8 @@ function actions(repo: WireRepoView): PaletteItem[] {
   }
   const offered = repo.cleanupCount + repo.rescueCount;
   if (offered > 0) items.push(action(repo, "Clean up worktrees", repo.rescueCount === 0 ? `${repo.cleanupCount} safe` : `${offered}, ${repo.rescueCount} to rescue`, "cleanup"));
+  const gone = repo.findings.filter((item) => item.rule === "prunable" && item.severity !== "loses-work").length;
+  if (gone > 0) items.push(action(repo, `Forget ${plural(gone, "gone worktree")}`, null, "forget"));
   items.push({ kind: "Actions", text: "Scan now", hint: null, run: { scan: repo.project.id } });
   return items;
 }

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { crossesSymlink } from "../../facts/crosses-symlink.js";
 import { findWorktree } from "../../facts/find-worktree.js";
 import { listMainEnvFiles } from "../../facts/list-main-env-files.js";
 import { readRepoFacts } from "../../facts/read-repo-facts.js";
@@ -10,9 +11,11 @@ import { InvalidInputError } from "../invalid-input.error.js";
 import { listPaths } from "../list-paths.js";
 import type { Plan } from "../plan.types.js";
 import { shellWord } from "../shell-word.js";
+import { copiedLine, THROUGH_LINK } from "./copied-line.js";
 import { copyEnvFiles } from "./copy-env-files.js";
 
 const SHAPE = "copy-env takes { worktree }";
+
 
 function parseWorktree(raw: unknown): string {
   const worktree = typeof raw === "object" && raw !== null && "worktree" in raw ? raw.worktree : undefined;
@@ -27,8 +30,10 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
   if (worktree.isMain) throw new InvalidInputError("the main checkout is where the env files come from");
   const shown = displayPath(facts.root, worktree.path);
   const files = await listMainEnvFiles(facts);
-  const missing = files.filter((file) => !existsSync(join(worktree.path, file)));
-  const present = files.length - missing.length;
+  const linked: string[] = [];
+  for (const file of files) if (await crossesSymlink(worktree.path, file)) linked.push(file);
+  const missing = files.filter((file) => !linked.includes(file) && !existsSync(join(worktree.path, file)));
+  const present = files.length - missing.length - linked.length;
 
   const plan: Plan = {
     action: "copy-env",
@@ -43,6 +48,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
     checks: [
       ...(missing.length > 0 ? [{ ok: true, text: `${plural(missing.length, "file")} to copy`, why: listPaths(missing) }] : []),
       ...(present > 0 ? [{ ok: true, text: `${plural(present, "file")} already there`, why: "Left as they are" }] : []),
+      ...(linked.length > 0 ? [{ ok: false, text: `${plural(linked.length, "file")} not copied`, why: `${listPaths(linked)}: ${THROUGH_LINK}` }] : []),
     ],
     effects: [],
     commands: missing.map((file) => `cp -n ${shellWord(file)} ${shellWord(`${shown}/${file}`)}`),
@@ -50,7 +56,7 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
       { title: "Check nothing moved since you looked", detail: `${plural(missing.length, "file")} still missing` },
       { title: `Copy ${plural(missing.length, "env file")}`, detail: "Never overwriting" },
     ],
-    blockers: files.length === 0 ? ["The main checkout has no ignored .env files"] : missing.length === 0 ? [`${shown} already has every env file`] : [],
+    blockers: files.length === 0 ? ["The main checkout has no ignored .env files"] : missing.length === 0 ? [`${shown} already has every env file${linked.length > 0 ? " it can take" : ""}`] : [],
     note: "Nothing already in the worktree is overwritten.",
     undoable: false,
     moves: [],
@@ -62,8 +68,8 @@ async function prepare(ctx: ActionContext, raw: unknown): Promise<Prepared> {
     plan,
     async execute(run) {
       const result = await run.step(run.firstStep, async () => {
-        const { copied, kept } = await copyEnvFiles(run.facts.root, worktree.path, files);
-        return `${plural(copied.length, "env file")} copied${kept.length > 0 ? `, ${kept.length} already there` : ""}`;
+        const { copied, kept, skipped } = await copyEnvFiles(run.facts.root, worktree.path, files);
+        return copiedLine(copied, kept, skipped);
       });
       return { ok: true, title: `Copied env files into ${shown}`, lines: [result], undo: null };
     },

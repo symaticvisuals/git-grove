@@ -85,7 +85,9 @@ claude plugin install git-grove@git-grove
 
 The plugin holds two things. Its hook runs the guard on each Bash command, and its `git-grove` skill tells Claude what
 to do around the guard: run `git grove check remove <path>` before removing a worktree, use `git grove rm --rescue`
-for one that holds ignored files, stash before a blocked discard, and never run the people-only commands.
+for one that holds ignored files, use `git grove forget <path>` when the folder is already gone, stash before a
+blocked discard, and never run the people-only commands. When a session starts, the plugin also tells Claude that
+this agent is bounded by the guard.
 
 The hook finds git grove through `$GIT_GROVE_HOME/hook-command` (by default `~/.git-grove/hook-command`), which holds
 the Node and the `dist/cli/bin.js` it runs. Run `git grove ui` once, with git grove installed globally
@@ -107,7 +109,7 @@ Upgrading from 0.2.0, which wrote a hook into `~/.claude/settings.json` (or `$CL
 that hook still there and the plugin on, the guard would run twice. While the old hook is present the dashboard offers
 "Remove the old hook…". Install the plugin first: removing the hook without it leaves no guard, and the review says
 so. It opens a review like every other dashboard change, showing the file, the backup it keeps
-(`settings.json.grove-backup`) and the exact JSON it takes out, and removes only grove's entry. grove writes nothing
+(`settings.json.grove-backup`) and the exact JSON it takes out (its `hooks.PreToolUse` and `hooks.SessionStart` entries), and removes only grove's entry. grove writes nothing
 else to Claude Code's settings. Settings files are strict JSON, so grove will not touch one that does not parse, is
 read-only or has a `hooks` of the wrong type; the dialog then says so and you can delete the entry yourself. When your
 settings set `"disableAllHooks": true`, no hook runs, and the dashboard says so.
@@ -120,11 +122,17 @@ line that runs `eval` or `bash -c` around `git` or `rm`, leaves a `$(` unclosed,
 `$( … )`. Blocks and the pins the guard
 takes appear in the dashboard's activity, for repositories grove already knows, the next time it loads the activity.
 
+The guard runs git before you approve the command, so it never lets a repository's own config run anything: its git
+calls run with `core.fsmonitor` off and no hooks. A command in a bare repository grove does not watch, such as one a
+clone carries inside its files, is allowed unchecked, because its config came with the clone; once grove watches that
+repository, its commands are checked like any other.
+
 The plugin's `git-grove` skill tells agents what the guard expects, so nothing needs adding to your `CLAUDE.md`.
 
 Known limit: the guard sees only the commands Claude Code runs through its Bash tool. A command inside a script that
 Claude runs, a git alias, a wrapper such as `xargs`, `find -exec`, `sudo` or `timeout`, another agent's tool and your
-own terminal are not checked. For those, the watcher still pins every branch tip it sees replaced. "Not yet" below
+own terminal are not checked. Cursor, Codex and other agents are not hooked, so they are not told they are bounded.
+For those, the watcher still pins every branch tip it sees replaced. "Not yet" below
 lists the commands the guard reads but does not check yet.
 
 ## How it works
@@ -242,14 +250,20 @@ git grove add-level <feature> <branch>       # add the next level on the deepest
 git grove restack <feature> [--stash]        # move each level of a stack onto its parent, pinning every tip first
 git grove stack plan <feature> [--json]      # show what restack would do, changing nothing
 git grove rm <worktree> [--rescue]           # remove a worktree's folder when nothing would be lost, keeping its branch
+git grove forget <worktree>                  # drop git's record of a worktree whose folder is already gone, keeping its branch
 git grove install-guard                      # print the two commands that install the agent guard plugin; writes nothing
 git grove guard --claude                     # the agent guard itself: reads the hook's JSON, exits 2 to block
+git grove guard --announce                   # tells a new Claude Code session that this agent is bounded by the guard
 ```
 
-`new` and `add-level` copy the main worktree's env files into the new level (`--skip-env` to skip), and take
+`new` and `add-level` copy the main worktree's env files into the new level (`--skip-env` to skip), and so does
+`copy-env` for a worktree that lacks them. An env file a symlinked folder of the worktree would send elsewhere is never
+copied, and the plan says so. `new` and `add-level` take
 `--install` to install dependencies and `--open` to open it in your editor. `rm --rescue` first copies the ignored
-files only that worktree has into the main worktree, and checks the copies. `restore`, `ack`, `new`, `add-level`,
-`restack` and `rm` go through the same core the dashboard uses: each prints its plan, each step and the receipt,
+files only that worktree has into the main worktree, and checks the copies. `forget` refuses a folder that is still
+there. A detached HEAD that still holds commits is refused too, and the refusal names the rescue branch that keeps them.
+`restore`, `ack`, `new`, `add-level`,
+`restack`, `rm` and `forget` go through the same core the dashboard uses: each prints its plan, each step and the receipt,
 shows the plan and changes nothing with `--dry-run`, and prints JSON with `--json`. With no alert that status still
 shows to say which pin you mean, `restore` lists the branch's newest pins and asks you to name one. No command pushes.
 

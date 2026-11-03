@@ -3,7 +3,7 @@ import { html, type SafeHtml } from "../html.js";
 import type { Load } from "../state.js";
 
 function label(state: GuardState): string {
-  if (state.done) return "Agent guard on";
+  if (state.done) return "Agents bounded";
   switch (state.phase) {
     case "plugin-and-hook":
       return "Agent guard runs twice";

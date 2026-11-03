@@ -190,7 +190,7 @@ test("the main, a locked and a prunable worktree are blocked with their reason",
   await repo.worktree(gone, "gone");
   await rm(gone, { recursive: true, force: true });
   expect((await prepare("remove", { worktree: ".worktrees/gone" })).blockers).toContain(
-    "its folder is gone; run git worktree prune",
+    "its folder is gone; run git grove forget",
   );
 });
 

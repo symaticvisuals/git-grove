@@ -2,7 +2,9 @@ import { expect, test } from "vitest";
 import { planGuardUninstall } from "../../../src/core/guard-install/plan-guard-uninstall.js";
 
 const COMMAND = "/opt/homebrew/bin/node /opt/grove/dist/cli/bin.js guard --claude";
+const ANNOUNCE = COMMAND.replace(/ guard --claude$/, " guard --announce");
 const GROUP = { matcher: "Bash", hooks: [{ type: "command", command: COMMAND, timeout: 10 }] };
+const SESSION = { hooks: [{ type: "command", command: ANNOUNCE, timeout: 10 }] };
 
 function text(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
@@ -27,6 +29,13 @@ test("uninstalling drops only the groups and keys it emptied", () => {
   const alreadyEmpty = { matcher: "Bash", hooks: [] };
   const kept = planGuardUninstall(text({ hooks: { PreToolUse: [alreadyEmpty, GROUP] } }));
   expect(kept.kind === "change" ? JSON.parse(kept.text) : null).toEqual({ hooks: { PreToolUse: [alreadyEmpty] } });
+});
+
+test("uninstalling drops the session notice and keeps a user's own SessionStart hook", () => {
+  const user = { matcher: "startup", hooks: [{ type: "command", command: "~/bin/hello.sh" }] };
+  const plan = planGuardUninstall(text({ hooks: { PreToolUse: [GROUP], SessionStart: [user, SESSION] } }));
+  expect(plan).toMatchObject({ kind: "change", removes: [GROUP, SESSION] });
+  expect(plan.kind === "change" ? JSON.parse(plan.text) : null).toEqual({ hooks: { SessionStart: [user] } });
 });
 
 test("a file with no grove hook, or none at all, is unchanged; an unreadable one is refused", () => {

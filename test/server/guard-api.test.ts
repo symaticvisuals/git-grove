@@ -74,7 +74,12 @@ async function settings(): Promise<unknown> {
 /** Writes a settings file holding grove's old hook, which runs `command`, after `rest`. */
 async function writeOldHook(rest: Json = {}, command = `${process.execPath} ${BIN} guard --claude`): Promise<string> {
   await mkdir(join(claude, ".claude"), { recursive: true });
-  const text = `${JSON.stringify({ ...rest, hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }] } }, null, 2)}\n`;
+  const announce = command.replace(/ guard --claude$/, " guard --announce");
+  const hooks = {
+    PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command, timeout: 10 }] }],
+    SessionStart: [{ hooks: [{ type: "command", command: announce, timeout: 10 }] }],
+  };
+  const text = `${JSON.stringify({ ...rest, hooks }, null, 2)}\n`;
   await writeFile(settingsPath, text);
   return text;
 }

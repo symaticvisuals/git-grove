@@ -71,7 +71,8 @@ async function readWorktree(raw: RawWorktree, isMain: boolean, commonDir: string
       branch: raw.branch,
       isMain,
       locked: raw.locked,
-      prunable: raw.prunable,
+      // A missing unlocked folder is prunable even when git has not said so; a lock keeps it until `git worktree unlock`.
+      prunable: raw.prunable || (!isMain && !raw.locked),
       operation: null,
       operationBranch: null,
       changes: null,

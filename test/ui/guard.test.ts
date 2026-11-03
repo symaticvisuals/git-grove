@@ -111,6 +111,7 @@ test("absent: the card protects worktrees, lists each install command with Copy,
   const text = plain(card);
   expect(text).toContain("Protect worktrees from Claude Code");
   expect(text).toContain("Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.");
+  expect(text).toContain("A new session is told this agent is bounded by the guard.");
   for (const command of CMDS) expect(card).toContain(`data-copy="${command}"`);
   expect(card.match(/data-ui="copy"/g)).toHaveLength(2);
   expect(text).toContain("Not now");
@@ -189,7 +190,7 @@ test("the card sits at the top of the projects view only", () => {
 
 test("the sidebar status names the phase quietly, and is lit only when the guard is done", () => {
   const on = guardStatus(ready(guard({ plugin: true, phase: "plugin", done: true, hookCommand: true }))).text;
-  expect(plain(on)).toBe("Agent guard on");
+  expect(plain(on)).toBe("Agents bounded");
   expect(on).toContain('class="guard-state on"');
   expect(on).toContain('data-ui="guard"');
   const labels: [Partial<GuardState>, string][] = [

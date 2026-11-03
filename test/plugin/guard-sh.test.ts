@@ -22,8 +22,8 @@ function script(path: string, body: string): string {
   return path;
 }
 
-function run(env: Record<string, string>, input: string) {
-  return spawnSync("/bin/sh", [guard], {
+function run(env: Record<string, string>, input: string, args: string[] = []) {
+  return spawnSync("/bin/sh", [guard, ...args], {
     env,
     input,
     encoding: "utf8",
@@ -109,5 +109,26 @@ describe("plugin/hooks/guard.sh", () => {
     writeFileSync(join(spaced, ".git-grove", "hook-command"), `${fakeNode}\n${bin}\n`);
     const viaDefault = run({ HOME: spaced, PATH: "/usr/bin:/bin" }, "{}");
     expect(viaDefault.stdout).toBe(`${bin} guard --claude\n`);
+  });
+
+  test("with --announce it runs the recorded grove's guard --announce", () => {
+    const home = join(dir, "home");
+    mkdirSync(home);
+    const fakeNode = script(join(dir, "fake-node"), 'echo "$@"');
+    const bin = join(dir, "bin.js");
+    writeFileSync(bin, "");
+    writeFileSync(join(home, "hook-command"), `${fakeNode}\n${bin}\n`);
+
+    const result = run({ HOME: dir, GIT_GROVE_HOME: home, PATH: "/usr/bin:/bin" }, "{}", ["--announce"]);
+
+    expect(result.stdout).toBe(`${bin} guard --announce\n`);
+    expect(result.status).toBe(0);
+  });
+
+  test("with --announce and no grove it says nothing and exits 0", () => {
+    const result = run({ HOME: dir, PATH: "/usr/bin:/bin" }, "{}", ["--announce"]);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
   });
 });

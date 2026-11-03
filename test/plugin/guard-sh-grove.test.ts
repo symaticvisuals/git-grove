@@ -34,3 +34,11 @@ test("the plugin's hook runs the built grove from hook-command: it allows ls", (
   expect(result.status).toBe(0);
   expect(result.stderr).toBe("");
 });
+
+test("the plugin's session hook runs the built grove's announce: it tells the session the agent is bounded", () => {
+  const result = spawnSync("/bin/sh", [GUARD, "--announce"], { cwd: dir, env: { HOME: dir, GIT_GROVE_HOME: dir, PATH: "/usr/bin:/bin" }, input: "{}", encoding: "utf8" });
+  expect(result.status).toBe(0);
+  const output = JSON.parse(result.stdout) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+  expect(output.hookSpecificOutput.hookEventName).toBe("SessionStart");
+  expect(output.hookSpecificOutput.additionalContext.length).toBeGreaterThan(0);
+});

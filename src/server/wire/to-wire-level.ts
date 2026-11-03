@@ -1,15 +1,14 @@
 import { relative } from "node:path";
 import type { Snapshot } from "../../core/snapshot/read-snapshot.js";
-import { worst } from "../../core/rules/needs-you.js";
-import { SEVERITY_RANK, type Finding } from "../../core/rules/rule.types.js";
+import { worst, worstFinding } from "../../core/rules/needs-you.js";
+import type { Finding } from "../../core/rules/rule.types.js";
 import type { Feature, Level } from "../../core/stacks/stacks.types.js";
 import { findingsOfLevel } from "./findings-of-level.js";
 import { healthOf } from "./health-of.js";
 import type { WireLevel } from "./wire.types.js";
 
 function worstTitle(findings: Finding[]): string {
-  const [top] = [...findings].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
-  return top?.title ?? "In sync";
+  return worstFinding(findings)?.title ?? "In sync";
 }
 
 /** A level as the browser receives it; `number` is the depth padded to two digits, for a level of a stack only. */
