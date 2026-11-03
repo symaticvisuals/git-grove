@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -437,4 +438,48 @@ test("commands that are not guarded run no git at all", async () => {
   } finally {
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+/**
+ * A bare repository committed inside the clone, the only way a clone can ship a repository's config: its
+ * `core.fsmonitor` runs a command whenever git checks the worktree for changes.
+ */
+async function embeddedBareRepo(marker: string): Promise<string> {
+  const bare = join(root, "fixtures", "evil");
+  await mkdir(bare, { recursive: true });
+  await repo.git("init", "--bare", "-b", "main", bare);
+  await repo.git("--git-dir", bare, "config", "core.bare", "false");
+  await repo.git("--git-dir", bare, "config", "core.worktree", "..");
+  await repo.git("--git-dir", bare, "config", "core.fsmonitor", `touch ${marker}; true #`);
+  return bare;
+}
+
+test("a bare repository grove does not know is never checked, so its config runs nothing", async () => {
+  const marker = join(root, "fsmonitor-ran");
+  await embeddedBareRepo(marker);
+  for (const command of ["git -C fixtures/evil checkout .", "cd fixtures/evil && git reset --hard", "git -C fixtures/evil restore README"]) {
+    expect(await expectAllowed(command)).toMatchObject({ unchecked: true, pins: [] });
+  }
+  expect(existsSync(marker)).toBe(false);
+});
+
+test("a bare repository grove knows is still checked, with its fsmonitor off", async () => {
+  const marker = join(root, "fsmonitor-ran");
+  const bare = await realpath(await embeddedBareRepo(marker));
+  const decision = await evaluateCommandLine({ command: "git -C fixtures/evil checkout .", cwd: root, home: HOME, trustsBare: async (commonDir) => commonDir === bare });
+  expect(decision).toMatchObject({ verdict: "allow", unchecked: false });
+  expect(existsSync(marker)).toBe(false);
+});
+
+test("the guard's own git calls run neither the repository's fsmonitor nor its hooks", async () => {
+  const marker = join(root, "ran");
+  await repo.git("config", "core.fsmonitor", `touch ${marker}-fsmonitor; true #`);
+  const hooks = join(root, ".git", "hooks");
+  await mkdir(hooks, { recursive: true });
+  await writeFile(join(hooks, "reference-transaction"), `#!/bin/sh\ntouch ${marker}-hook\n`, { mode: 0o755 });
+  await writeFile(join(root, "base.txt"), "changed\n");
+  expect(await expectBlocked("git checkout .")).toContain("1 uncommitted change");
+  expect((await expectAllowed("git commit --amend --no-edit")).pins).toHaveLength(1);
+  expect(existsSync(`${marker}-fsmonitor`)).toBe(false);
+  expect(existsSync(`${marker}-hook`)).toBe(false);
 });

@@ -89,7 +89,7 @@ test("copyFiles and copyEnvFiles create folders and never overwrite", async () =
   await writeFile(join(main, "apps/web/.env.local"), "web\n");
   await writeFile(join(target, ".env"), "mine\n");
   const result = await copyEnvFiles(main, target, [".env", "apps/web/.env.local"]);
-  expect(result).toEqual({ copied: ["apps/web/.env.local"], kept: [".env"] });
+  expect(result).toEqual({ copied: ["apps/web/.env.local"], kept: [".env"], skipped: [] });
   const direct = await copyFiles([{ from: join(main, ".env"), to: join(target, ".env") }], { overwrite: false });
   expect(direct).toEqual({ copied: [], kept: [join(target, ".env")] });
   await expect(copyFiles([{ from: join(main, "gone"), to: join(target, "gone") }], { overwrite: false })).rejects.toThrow();
