@@ -118,6 +118,19 @@ test("R is the selected row's primary fix: bring back, restack or copy then remo
   expect(shortcutTarget(repo, null, "quick")).toBeNull();
 });
 
+test("R forgets a gone worktree, and S still restacks when its parent also merged", () => {
+  const gone = level({
+    branch: "feat/gone-folder",
+    findings: [finding("prunable"), finding("parent-merged")],
+    worktree: { path: "/w/gone", rel: "gone", dirty: 0, operation: null, touchedAt: null },
+  });
+  const feat = feature({ id: "1.gg", name: "gone", levels: [gone] });
+  const view = repoView({ features: [feat] });
+  const row = { kind: "feature" as const, feature: "1.gg", branch: "feat/gone-folder" };
+  expect(shortcutTarget(view, row, "quick")).toEqual({ action: "forget", data: { feature: "1.gg", branch: "feat/gone-folder", path: "/w/gone" } });
+  expect(shortcutTarget(view, row, "restack")).toEqual({ action: "restack", data: { feature: "1.gg" } });
+});
+
 test("S restacks the selected row's stack when one of its levels needs it; A keeps a rewrite or a deletion", () => {
   expect(shortcutTarget(repo, { kind: "feature", feature: "1.cw", branch: "feat/model" }, "restack")).toEqual({ action: "restack", data: { feature: "1.cw" } });
   expect(shortcutTarget(repo, { kind: "feature", feature: "1.Yw", branch: "feat/fine" }, "restack")).toBeNull();

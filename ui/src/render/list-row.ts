@@ -38,7 +38,7 @@ function cells(row: ListRow, now: number): { name: SafeHtml; state: string; pill
       pills: html`${shown.pills.map((entry) => pill(entry.text, entry.pin))}`,
       num: shown.num,
       when: touched === null ? html`` : timeAgo(touched, now),
-      path: level.worktree?.path ?? null,
+      path: level.findings.some((finding) => finding.rule === "prunable") ? null : (level.worktree?.path ?? null),
     };
   }
   if (row.kind === "deleted") {

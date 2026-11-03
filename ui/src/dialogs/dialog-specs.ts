@@ -169,6 +169,27 @@ const remove: DialogSpec = {
   toInput: (values) => ({ worktree: text(values, "worktree"), rescue: flag(values, "rescue") }),
 };
 
+const forget: DialogSpec = {
+  action: "forget",
+  fields: [],
+  heading: (ctx) => {
+    const branch = ctx.level?.branch ?? ctx.branch;
+    if (ctx.worktree !== null && ctx.worktree !== "") {
+      return heading(ctx.feature?.name ?? ctx.repo.project.name, branch === null ? "Forget the worktree" : `Forget ${branch}`, "Drops git's record of a folder that is already gone. The branch stays.");
+    }
+    return heading(ctx.repo.project.name, "Forget gone worktrees", "Drops git's record of each folder that is already gone. Branches stay.");
+  },
+  initial: (ctx) => ({
+    worktree: ctx.worktree ?? "",
+    force: ctx.level?.findings.some((finding) => finding.rule === "prunable" && finding.severity === "loses-work") ?? false,
+  }),
+  toInput: (values) => {
+    const worktree = text(values, "worktree");
+    if (worktree === "") return { all: true };
+    return flag(values, "force") ? { worktree, force: true } : { worktree };
+  },
+};
+
 const cleanup: DialogSpec = {
   action: "cleanup",
   fields: [{ kind: "picks", name: "paths", label: "Worktrees" }],
@@ -191,4 +212,5 @@ export const DIALOGS: Record<ActionName, DialogSpec> = {
   "copy-env": copyEnv,
   remove,
   cleanup,
+  forget,
 };

@@ -4,7 +4,7 @@ import type { WireSandbox } from "../../src/server/wire/wire.types.js";
 import { dialogContext } from "../../ui/src/dialogs/dialog-context.js";
 import { DIALOGS, type DialogContext } from "../../ui/src/dialogs/dialog-specs.js";
 import { pickGroups } from "../../ui/src/dialogs/pick-groups.js";
-import { feature, level, repoView } from "./wire-fixtures.js";
+import { feature, finding, level, repoView } from "./wire-fixtures.js";
 
 const stack = feature({
   id: "1.Y291cG9ucw",
@@ -108,6 +108,16 @@ test("restore takes its targets, a missing pin left for grove to find", () => {
   const spec = DIALOGS.restore;
   const values = spec.initial(context({ targets: [{ branch: "feat/a", pinRef: "refs/grove/pins/feat/a/1" }, { branch: "feat/b" }] }));
   expect(spec.toInput(values)).toEqual({ targets: [{ branch: "feat/a", pinRef: "refs/grove/pins/feat/a/1" }, { branch: "feat/b" }] });
+});
+
+test("forget takes the worktree, forces only a loses-work gone folder, and forgets every safe one when no path is named", () => {
+  const spec = DIALOGS.forget;
+  const path = "/src/acme-shop/.worktrees/x/01-x";
+  expect(spec.toInput(spec.initial(context({ worktree: path })))).toEqual({ worktree: path });
+  const loses = level({ findings: [finding("prunable", { severity: "loses-work" })] });
+  expect(spec.toInput(spec.initial(context({ worktree: path, level: loses })))).toEqual({ worktree: path, force: true });
+  expect(spec.toInput(spec.initial(context()))).toEqual({ all: true });
+  expect(spec.toInput({ worktree: "", force: true })).toEqual({ all: true });
 });
 
 test("ack, remove and copy-env take their branch or worktree", () => {

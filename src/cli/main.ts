@@ -76,6 +76,8 @@ const USAGE = `Usage: git grove [<command>] [options]
   rm <worktree> [--rescue]          remove a worktree's folder when nothing would
           [--dry-run] [--json]        be lost, keeping its branch; --rescue first
                                     copies ignored files only it has into main
+  forget <worktree>                 drop git's record of a worktree whose folder
+          [--dry-run] [--json]        is already gone, keeping its branch
   serve [--port <n>]                run the dashboard server in the foreground,
                                     on port 47683 or the next free one
   service install|uninstall|status  the login service that keeps the dashboard
@@ -84,9 +86,11 @@ const USAGE = `Usage: git grove [<command>] [options]
                                     guard, for ~/.claude/settings.json; writes nothing
                                     (the dashboard installs it after a review)
   guard --claude                    the agent guard itself, run by that hook
+  guard --announce                  tell a new Claude Code session that this
+                                    agent is bounded by the guard
 `;
 
-const COMMANDS = new Set(["ui", "status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm", "serve", "service", "install-guard"]);
+const COMMANDS = new Set(["ui", "status", "restore", "ack", "pins", "check", "restack", "stack", "new", "add-level", "rm", "forget", "serve", "service", "install-guard"]);
 
 function parsePort(text: string | undefined): number | undefined {
   if (text === undefined) return undefined;
@@ -147,6 +151,11 @@ function route(positionals: string[], flags: Flags, deps: () => UiDeps): Command
   if (name === "rm") {
     return first !== undefined && second === undefined && !stash
       ? (io) => runActionCommand(io, "remove", { worktree: resolve(io.cwd, first), rescue: flags.rescue }, { dryRun, json })
+      : null;
+  }
+  if (name === "forget") {
+    return first !== undefined && second === undefined && !stash
+      ? (io) => runActionCommand(io, "forget", { worktree: resolve(io.cwd, first) }, { dryRun, json })
       : null;
   }
   if (name === "restack") {

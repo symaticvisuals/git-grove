@@ -5,7 +5,7 @@ import type { Load } from "../state.js";
 function label(state: GuardState): string {
   switch (state.status) {
     case "installed":
-      return state.hooksDisabled ? "Agent guard on, hooks off" : "Agent guard on";
+      return state.hooksDisabled ? "Agent guard on, hooks off" : "Agents bounded";
     case "stale":
       return "Agent guard out of date";
     case "absent":

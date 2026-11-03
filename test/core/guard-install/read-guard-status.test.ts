@@ -2,9 +2,19 @@ import { expect, test } from "vitest";
 import { readGuardStatus } from "../../../src/core/guard-install/read-guard-status.js";
 
 const COMMAND = "/opt/homebrew/bin/node /opt/grove/dist/cli/bin.js guard --claude";
+const ANNOUNCE = COMMAND.replace(/ guard --claude$/, " guard --announce");
 
 function settings(...commands: string[]): string {
   return JSON.stringify({ hooks: { PreToolUse: commands.map((command) => ({ matcher: "Bash", hooks: [{ type: "command", command }] })) } });
+}
+
+function both(announce = ANNOUNCE): string {
+  return JSON.stringify({
+    hooks: {
+      PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: COMMAND }] }],
+      SessionStart: [{ hooks: [{ type: "command", command: announce }] }],
+    },
+  });
 }
 
 test("no file, or no grove hook, is absent; a group whose matcher is not Bash does not count", () => {
@@ -14,8 +24,11 @@ test("no file, or no grove hook, is absent; a group whose matcher is not Bash do
   expect(readGuardStatus(edit, COMMAND).status).toBe("absent");
 });
 
-test("one grove hook running the wanted command is installed; another command, or two hooks, is stale", () => {
-  expect(readGuardStatus(settings(COMMAND), COMMAND).status).toBe("installed");
+test("the wanted Bash hook and the matching session notice together are installed; either one alone, another command, or two hooks, is stale", () => {
+  expect(readGuardStatus(both(), COMMAND).status).toBe("installed");
+  expect(readGuardStatus(settings(COMMAND), COMMAND).status).toBe("stale");
+  expect(readGuardStatus(JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: ANNOUNCE }] }] } }), COMMAND).status).toBe("stale");
+  expect(readGuardStatus(both("/old/node /old/git-grove/dist/cli/bin.js guard --announce"), COMMAND).status).toBe("stale");
   expect(readGuardStatus(settings("/old/node /old/git-grove/dist/cli/bin.js guard --claude"), COMMAND).status).toBe("stale");
   expect(readGuardStatus(settings(COMMAND, COMMAND), COMMAND).status).toBe("stale");
 });
@@ -37,10 +50,18 @@ test("grove's hook is known by what grove writes: a dist/cli/bin.js path, or git
   expect(readGuardStatus(settings("my-sec-tool guard --claude"), COMMAND).status).toBe("absent");
 });
 
-test("grove's hook under a matcher of *, none, or a list naming Bash counts; under Edit it does not", () => {
-  const under = (group: Record<string, unknown>): string => JSON.stringify({ hooks: { PreToolUse: [{ ...group, hooks: [{ type: "command", command: COMMAND }] }] } });
+test("grove's hook under a matcher of *, none, or a list naming Bash counts when the session notice is there; under Edit the Bash hook does not count", () => {
+  const under = (group: Record<string, unknown>): string =>
+    JSON.stringify({
+      hooks: {
+        PreToolUse: [{ ...group, hooks: [{ type: "command", command: COMMAND }] }],
+        SessionStart: [{ hooks: [{ type: "command", command: ANNOUNCE }] }],
+      },
+    });
   expect(readGuardStatus(under({ matcher: "*" }), COMMAND).status).toBe("installed");
   expect(readGuardStatus(under({}), COMMAND).status).toBe("installed");
   expect(readGuardStatus(under({ matcher: "Write|Bash" }), COMMAND).status).toBe("installed");
-  expect(readGuardStatus(under({ matcher: "Edit" }), COMMAND).status).toBe("absent");
+  expect(readGuardStatus(under({ matcher: "Edit" }), COMMAND).status).toBe("stale");
+  const startup = JSON.stringify({ hooks: { SessionStart: [{ matcher: "startup", hooks: [{ type: "command", command: "~/bin/hello.sh" }] }] } });
+  expect(readGuardStatus(startup, COMMAND).status).toBe("absent");
 });

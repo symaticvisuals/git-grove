@@ -32,7 +32,7 @@ export const prunable: Rule = {
         subject: { kind: "worktree", id: w.path },
         title: "Worktree folder is gone",
         detail: `${w.path} no longer exists on disk`,
-        action: "git worktree prune",
+        action: "git grove forget",
       });
     }
     return out;

@@ -97,6 +97,16 @@ test("install-guard writes nothing under HOME", async () => {
   expect(await readdir(home, { recursive: true })).toEqual(before);
 });
 
+test("install-guard also prints the session notice that tells a new session the agent is bounded", () => {
+  const result = install("/usr/local/bin/node", "/opt/grove/dist/cli/bin.js");
+  expect(result.code).toBe(0);
+  expect(result.out).toContain('"SessionStart"');
+  const block = jsonBlock(result.out);
+  expect(at(block, "hooks", "SessionStart", 0, "hooks", 0, "command")).toBe("/usr/local/bin/node /opt/grove/dist/cli/bin.js guard --announce");
+  expect(at(block, "hooks", "SessionStart", 0, "hooks", 0, "timeout")).toBe(10);
+  expect(at(block, "hooks", "SessionStart", 0, "matcher")).toBeUndefined();
+});
+
 test("install-guard quotes paths that hold spaces or quotes", () => {
   expect(hookCommand(install("/opt/my node/bin/node", "/Users/Robin Example/lib/git-grove/dist/cli/bin.js").out)).toBe(
     "'/opt/my node/bin/node' '/Users/Robin Example/lib/git-grove/dist/cli/bin.js' guard --claude",

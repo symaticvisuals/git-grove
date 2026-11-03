@@ -93,13 +93,14 @@ test("the card shows while the guard is absent or stale, and hides once it is in
   const absent = plain(guardCard(ready(guard()), null).text);
   expect(absent).toContain("Protect worktrees from Claude Code");
   expect(absent).toContain("Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.");
+  expect(absent).toContain("A new session is told this agent is bounded by the guard.");
   expect(absent).toContain("Not now");
   expect(absent).toContain("Install…");
   expect(guardCard(ready(guard({ status: "installed" })), null).text).toBe("");
   expect(guardCard(ready(guard()), "absent").text).toBe("");
   expect(guardCard({ status: "loading" }, null).text).toBe("");
   const stale = plain(guardCard(ready(guard({ status: "stale" })), null).text);
-  expect(stale).toContain("The agent guard points at an old Node or grove path.");
+  expect(stale).toContain("The agent guard is missing the notice a new session gets, or it points at an old Node or grove path.");
   expect(stale).toContain("Update…");
   expect(stale).not.toContain("Install…");
 });
@@ -128,7 +129,7 @@ test("the card sits at the top of the projects view only", () => {
 });
 
 test("the header status says on or off, quietly, and opens the dialog", () => {
-  expect(plain(guardStatus(ready(guard({ status: "installed" }))).text)).toBe("Agent guard on");
+  expect(plain(guardStatus(ready(guard({ status: "installed" }))).text)).toBe("Agents bounded");
   expect(guardStatus(ready(guard({ status: "installed" }))).text).toContain('class="guard-state on"');
   expect(guardStatus(ready(guard({ status: "installed" }))).text).toContain('data-ui="guard"');
   expect(plain(guardStatus(ready(guard({ status: "installed", hooksDisabled: true }))).text)).toBe("Agent guard on, hooks off");

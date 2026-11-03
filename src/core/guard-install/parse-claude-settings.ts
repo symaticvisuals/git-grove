@@ -9,8 +9,8 @@ function inexact(value: unknown): boolean {
 /**
  * Reads a settings file's text as strict JSON, the way Claude Code does. No file, or one holding only whitespace, is
  * `{}`. Anything else must be a JSON object, with no byte-order mark, no number grove cannot write back exactly (not
- * finite, or an integer past the safe range), a `hooks`, when present, that is an object and a `hooks.PreToolUse`,
- * when present, that is a list; otherwise `problem` says what is wrong, as a phrase that follows "It".
+ * finite, or an integer past the safe range), a `hooks`, when present, that is an object and a `hooks.PreToolUse` or
+ * `hooks.SessionStart`, when present, that is a list; otherwise `problem` says what is wrong, as a phrase that follows "It".
  */
 export function parseClaudeSettings(text: string | null): ParsedSettings {
   if (text?.startsWith("\uFEFF") === true) return { ok: false, problem: "starts with a byte-order mark" };
@@ -31,6 +31,9 @@ export function parseClaudeSettings(text: string | null): ParsedSettings {
   if (hooks !== undefined && !isJsonObject(hooks)) return { ok: false, problem: 'has a "hooks" that is not an object' };
   if (hooks !== undefined && hooks["PreToolUse"] !== undefined && !Array.isArray(hooks["PreToolUse"])) {
     return { ok: false, problem: 'has a "hooks.PreToolUse" that is not a list' };
+  }
+  if (hooks !== undefined && hooks["SessionStart"] !== undefined && !Array.isArray(hooks["SessionStart"])) {
+    return { ok: false, problem: 'has a "hooks.SessionStart" that is not a list' };
   }
   return { ok: true, settings: value };
 }

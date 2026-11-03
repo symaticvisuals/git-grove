@@ -1,6 +1,6 @@
 import type { Operation, Sha } from "../facts/facts.types.js";
 
-export type ActionName = "restore" | "ack" | "restack" | "new" | "add-level" | "copy-env" | "remove" | "cleanup";
+export type ActionName = "restore" | "ack" | "restack" | "new" | "add-level" | "copy-env" | "remove" | "cleanup" | "forget";
 
 export type Check = { ok: boolean; text: string; why: string | null };
 
