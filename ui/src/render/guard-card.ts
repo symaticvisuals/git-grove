@@ -16,17 +16,13 @@ function notes(state: GuardState): string[] {
 }
 
 /**
- * The onboarding card that offers the agent guard, while it is absent, stale or in a settings file grove cannot read,
+ * The onboarding card about the agent guard, while it is absent, stale or in a settings file grove cannot read,
  * unless "Not now" put it off for that same status, so a guard that later goes stale shows it once more. It says what
  * the guard does and, when they apply, that it points at an old path, that the file turns hooks off, and why grove
- * will not install it, in which case Install is left out.
+ * will not edit the file.
  */
 export function guardCard(guard: Load<GuardState> | null, dismissed: GuardStatus | null): SafeHtml {
   if (guard === null || guard.status !== "ready" || guard.data.status === "installed" || guard.data.status === dismissed) return html``;
   const state = guard.data;
-  const install =
-    state.refusal === null
-      ? html`<button class="btn primary" data-ui="guard-open" data-change="install" data-key="guard:install">${state.status === "stale" ? "Update…" : "Install…"}</button>`
-      : "";
-  return html`<section class="guard-card" aria-label="Agent guard">${ICONS.shield}<div class="gc-text"><b>${TITLE}</b><p>${BODY}</p>${notes(state).map((line) => html`<p class="gc-note">${line}</p>`)}</div><div class="gc-acts"><button class="btn" data-ui="guard-dismiss" data-status="${state.status}" data-key="guard:dismiss">Not now</button>${install}</div></section>`;
+  return html`<section class="guard-card" aria-label="Agent guard">${ICONS.shield}<div class="gc-text"><b>${TITLE}</b><p>${BODY}</p>${notes(state).map((line) => html`<p class="gc-note">${line}</p>`)}</div><div class="gc-acts"><button class="btn" data-ui="guard-dismiss" data-status="${state.status}" data-key="guard:dismiss">Not now</button></div></section>`;
 }

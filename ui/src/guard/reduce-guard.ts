@@ -38,7 +38,6 @@ export type GuardAction =
   | { type: "guard-ran"; dialog: number; receipt: GuardReceipt }
   | { type: "guard-run-failed"; dialog: number; status: number; message: string }
   | { type: "guard-again" }
-  | { type: "guard-undo" }
   | { type: "guard-close" }
   | { type: "guard-dismiss"; status: GuardStatus };
 
@@ -92,18 +91,14 @@ function step(dialog: GuardDialogState, action: GuardAction): GuardDialogState |
  * The agent guard's dialog and onboarding card after `action`; pure, and the same object when nothing changed. A
  * dialog opens only while no action dialog is, closing the palette, and previews at once. Confirm takes the plan only
  * when the id painted on its button is the plan shown, that plan has been armed, and nothing is being checked,
- * failing or blocking it. A run refused because its preview expired previews it again at once. Undo opens the
- * opposite change for review. "Not now" hides the card for the status it was shown for.
+ * failing or blocking it. A run refused because its preview expired previews it again at once. "Not now" hides the
+ * card for the status it was shown for.
  */
 export function reduceGuard(slices: GuardSlices, action: GuardAction): GuardSlices {
   if (action.type === "guard-open") return opened(slices, action.change);
   if (action.type === "guard-dismiss") return slices.guardDismissed === action.status ? slices : { ...slices, guardDismissed: action.status };
   const dialog = slices.guardDialog;
   if (dialog === null) return slices;
-  if (action.type === "guard-undo") {
-    const undo = dialog.stage === "done" ? (dialog.receipt?.undo ?? null) : null;
-    return undo === null ? slices : opened({ ...slices, guardDialog: null }, undo);
-  }
   const next = step(dialog, action);
   return next === dialog ? slices : { ...slices, guardDialog: next };
 }

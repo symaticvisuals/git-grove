@@ -68,7 +68,6 @@ function guardActions(state: State): PaletteItem[] {
   const guard = state.guard === null || state.guard.status === "loading" ? null : state.guard.data;
   if (guard === null) return [];
   const items: PaletteItem[] = [];
-  if (guard.status !== "installed") items.push({ kind: "Actions", text: "Install agent guard", hint: null, run: { guard: "install" } });
   if (guard.status === "installed" || guard.status === "stale") items.push({ kind: "Actions", text: "Uninstall agent guard", hint: null, run: { guard: "uninstall" } });
   return items;
 }
@@ -96,8 +95,8 @@ function places(state: State, repo: WireRepoView | null): PaletteItem[] {
 
 /**
  * What the palette offers for `query`: on a repo, its actions (new feature, each fix a level or deleted branch
- * needs, restack where a stack needs it, add a level, clean up, scan), then every row to go to; everywhere, Install
- * agent guard unless it is installed and Uninstall agent guard while it is in, the views and the other repos. `query` matches anywhere in an item's text, ignoring case; Actions come before Go to.
+ * needs, restack where a stack needs it, add a level, clean up, scan), then every row to go to; everywhere,
+ * Uninstall agent guard while grove's old hook is in, the views and the other repos. `query` matches anywhere in an item's text, ignoring case; Actions come before Go to.
  */
 export function paletteItems(state: State, query: string): PaletteItem[] {
   const repo = shownRepo(state);

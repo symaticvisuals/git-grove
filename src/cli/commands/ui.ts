@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { writeHookCommand } from "../../core/guard-install/hook-command.js";
+import { PLUGIN_INSTALL } from "../../core/guard-install/plugin-commands.js";
 import { groveHome } from "../../core/grove-home.js";
 import { isEphemeralBin } from "../../core/is-ephemeral-bin.js";
 import type { ServiceManager, ServiceStatus } from "../../core/service/service-manager.js";
@@ -40,7 +41,7 @@ export type UiDeps = {
 };
 
 const WAIT_MS = 5000;
-const OFFER_GUARD = "Protect your worktrees from Claude Code: use Install on the dashboard, or run git grove install-guard.\n";
+const PROTECT = `Protect your worktrees from Claude Code: ${PLUGIN_INSTALL.join(", then ")}\n`;
 const RESTART_WAIT_MS = 15_000;
 
 function firstLine(error: unknown): string {
@@ -131,7 +132,6 @@ async function startService(io: CliIo, deps: UiDeps, home: string, waitMs: numbe
       await privateHome(home);
       const installed = await deps.service.install(serviceProgramOf(deps.bin));
       io.out(`Installed a login service: ${installed.wrote}\nRemove it with: ${installed.removeWith}\n`);
-      if (await guardNotDone(deps)) io.out(OFFER_GUARD);
     }
   } catch (error) {
     io.err(`${firstLine(error)}\n`);
@@ -162,11 +162,11 @@ async function serveHere(io: CliIo, deps: UiDeps, home: string, waitMs: number):
  * start this version before it is started, and with no service this one starts as soon as the old one has stopped; an
  * old one still finishing a run after those 15 s is opened instead, saying so. A service that runs another copy keeps
  * its server, and `ui` says how to update it. With no server, the login service is installed (and says how to remove
- * it, and, when the agent guard is absent from Claude Code's settings, where to install it) or started; on a machine
- * without launchd or systemd, or from an npx cache, the server runs in this process instead, until Ctrl-C. When a
- * running server would install the agent guard into another settings file than this shell's Claude Code reads, `ui`
- * names both. The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`, or when that fails, the address is
- * printed.
+ * it) or started; on a machine without launchd or systemd, or from an npx cache, the server runs in this process
+ * instead, until Ctrl-C. When a running server would install the agent guard into another settings file than this
+ * shell's Claude Code reads, `ui` names both. On every run while the agent guard is not really on (`guardDone`), it
+ * prints one line with the plugin's install commands. The browser opens through `openUrl`; with `GIT_GROVE_NO_OPEN=1`,
+ * or when that fails, the address is printed.
  */
 export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   const home = groveHome();
@@ -179,6 +179,7 @@ export async function uiCommand(io: CliIo, deps: UiDeps): Promise<number> {
   if (info === null) info = await startService(io, deps, home, waitMs);
   const server = info === null ? await serveHere(io, deps, home, waitMs) : { port: info.port, token: await readOrCreateToken(home), foreground: false };
   if (!server.foreground) await warnOnOtherSettings(io, deps, server.port, server.token);
+  if (await guardNotDone(deps)) io.out(PROTECT);
   const url = dashboardUrl(server.port, server.token, target);
   const opened = process.env["GIT_GROVE_NO_OPEN"] !== "1" && (await deps.openUrl(url));
   io.out(opened ? `Opened the dashboard at http://127.0.0.1:${server.port}/\n` : `Open the dashboard: ${url}\n`);

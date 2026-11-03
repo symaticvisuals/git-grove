@@ -354,10 +354,8 @@ function dismissGuardCard(status: string | undefined): void {
   dispatch({ type: "guard-dismiss", status });
 }
 
-function openGuard(change: string | undefined): void {
-  const guard = state.guard === null || state.guard.status === "loading" ? null : state.guard.data;
-  const wanted = change ?? (guard?.status === "installed" ? "uninstall" : "install");
-  if (wanted === "install" || wanted === "uninstall") dispatch({ type: "guard-open", change: wanted });
+function openGuard(): void {
+  dispatch({ type: "guard-open", change: "uninstall" });
 }
 
 function isSlice(name: string | undefined): name is SliceName {
@@ -389,7 +387,7 @@ function runUi(element: HTMLElement): void {
       return;
     case "guard":
     case "guard-open":
-      openGuard(data["change"]);
+      openGuard();
       return;
     case "guard-dismiss":
       dismissGuardCard(data["status"]);

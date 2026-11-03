@@ -247,7 +247,6 @@ function step(state: State, action: UiAction): State {
     case "guard-ran":
     case "guard-run-failed":
     case "guard-again":
-    case "guard-undo":
     case "guard-close":
     case "guard-dismiss":
       return withGuard(state, action);

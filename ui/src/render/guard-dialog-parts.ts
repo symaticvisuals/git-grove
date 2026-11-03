@@ -9,7 +9,7 @@ import { timeAgo } from "./time-ago.js";
 
 export type GuardDialogParts = { head: SafeHtml; body: SafeHtml; foot: SafeHtml };
 
-const HEADING = { install: "Install the agent guard", uninstall: "Uninstall the agent guard" } as const;
+const HEADING = "Uninstall the agent guard";
 const CHECKING = html`<section><div class="async"><span class="spin" aria-hidden="true"></span>Reading the settings file…</div></section>`;
 
 function file(plan: GuardPlan): SafeHtml {
@@ -49,35 +49,25 @@ function reviewFoot(dialog: GuardDialogState): SafeHtml {
       : html`<span class="note" id="dlg-note">${ICONS.shield}<span>${safety}</span></span>`;
   const again = dialog.error === null || dialog.planning ? "" : html`<button class="btn" data-guard="again" data-key="guard:again">Preview again</button>`;
   const id = dialog.planId === null ? "" : html` data-plan="${dialog.planId}"`;
-  return html`${note}${again}<button class="btn" data-guard="close" data-key="guard:close">Cancel <kbd>Esc</kbd></button><button class="btn primary" data-guard="confirm" data-key="guard:confirm"${id} aria-describedby="dlg-note"${ready ? "" : html` disabled`}>${plan?.confirm ?? (dialog.change === "install" ? "Install" : "Uninstall")} <kbd>↵</kbd></button>`;
+  return html`${note}${again}<button class="btn" data-guard="close" data-key="guard:close">Cancel <kbd>Esc</kbd></button><button class="btn primary" data-guard="confirm" data-key="guard:confirm"${id} aria-describedby="dlg-note"${ready ? "" : html` disabled`}>${plan?.confirm ?? "Uninstall"} <kbd>↵</kbd></button>`;
 }
 
 function doneFoot(dialog: GuardDialogState): SafeHtml {
   const { receipt } = dialog;
-  const updated = receipt?.updated === true;
-  const undo = receipt === null || receipt.undo === null ? "" : html`<button class="btn" data-guard="undo" data-key="guard:undo">${ICONS.back}${updated ? "Uninstall" : "Undo"}</button>`;
   const again = receipt?.ok === false ? html`<button class="btn" data-guard="again" data-key="guard:again">Preview again</button>` : "";
-  const text =
-    receipt?.ok !== true
-      ? "Nothing was written."
-      : updated
-        ? "Uninstall takes the hook out; the old one is not put back."
-        : receipt.change === "install"
-          ? "Undo takes the hook out again and keeps your other edits."
-          : "Undo puts the hook back, after a review.";
-  return html`<span class="note">${ICONS.shield}<span>${text}</span></span>${undo}${again}<button class="btn primary" data-guard="close" data-key="guard:done">Done <kbd>↵</kbd></button>`;
+  const text = receipt?.ok !== true ? "Nothing was written." : "Your other settings and hooks were kept.";
+  return html`<span class="note">${ICONS.shield}<span>${text}</span></span>${again}<button class="btn primary" data-guard="close" data-key="guard:done">Done <kbd>↵</kbd></button>`;
 }
 
 /**
  * The agent guard dialog's header, body and footer. Reviewing: the plan's heading, why it was read again, then what
  * blocks it, or the file it writes and its backup, the JSON it adds or removes, and what else is true; the footer
- * confirms only a plan that is checked, armed and unblocked. Running: a spinner. Done: the receipt, with Undo when
- * the change can be reversed (Uninstall after an update, which does not bring the old hook back) and Preview again
+ * confirms only a plan that is checked, armed and unblocked. Running: a spinner. Done: the receipt, with Preview again
  * when it was not made.
  */
 export function guardDialogParts(dialog: GuardDialogState, now: number): GuardDialogParts {
   const plan = dialog.plan;
-  const title = plan?.title ?? HEADING[dialog.change];
+  const title = plan?.title ?? HEADING;
   const summary = plan?.summary ?? "";
   const head = html`<div class="k">Claude Code settings</div><h3 id="dlg-t">${title}</h3>${summary === "" ? "" : html`<p>${summary}</p>`}`;
   if (dialog.stage === "run") return { head, body: html`<section><div class="async"><span class="spin" aria-hidden="true"></span>Writing the settings file…</div></section>`, foot: html`<span class="note"><span class="spin" aria-hidden="true"></span><span>Writing…</span></span>` };

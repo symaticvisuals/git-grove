@@ -33,9 +33,6 @@ export function createGuardDialogHost(deps: GuardDialogHostDeps): GuardDialogHos
       case "close":
         dispatch({ type: "guard-close" });
         return;
-      case "undo":
-        dispatch({ type: "guard-undo" });
-        return;
       case "again":
         dispatch({ type: "guard-again" });
         return;

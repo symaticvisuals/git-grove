@@ -141,7 +141,7 @@ function isStrings(value: unknown): value is string[] {
 }
 
 function isGuardChange(value: unknown): value is GuardChange {
-  return value === "install" || value === "uninstall";
+  return value === "uninstall";
 }
 
 function isGuardState(value: unknown): value is GuardState {
@@ -174,12 +174,11 @@ function isGuardReceipt(value: unknown): value is GuardReceipt {
   return (
     isRecord(value) &&
     isGuardChange(value["change"]) &&
-    typeof value["updated"] === "boolean" &&
     typeof value["ok"] === "boolean" &&
     typeof value["refused"] === "boolean" &&
     typeof value["title"] === "string" &&
     isStrings(value["lines"]) &&
-    (value["undo"] === null || isGuardChange(value["undo"])) &&
+    value["undo"] === null &&
     typeof value["at"] === "number"
   );
 }

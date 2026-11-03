@@ -1,7 +1,7 @@
 import { ephemeralRefusal } from "../../core/guard-install/ephemeral-refusal.js";
 import { guardPhaseOf } from "../../core/guard-install/guard-phase-of.js";
 import { guardHookCommand } from "../../core/guard-install/guard-hook-command.js";
-import type { GuardChange, GuardPlan, GuardReceipt, GuardState, PreparedGuardChange, SettingsFile } from "../../core/guard-install/guard-install.types.js";
+import type { GuardPlan, GuardReceipt, GuardState, PreparedGuardChange, SettingsFile } from "../../core/guard-install/guard-install.types.js";
 import { readHookCommand } from "../../core/guard-install/hook-command.js";
 import { PLUGIN_INSTALL } from "../../core/guard-install/plugin-commands.js";
 import { prepareGuardChange } from "../../core/guard-install/prepare-guard-change.js";
@@ -17,8 +17,8 @@ import type { GuardSetup } from "./guard-setup.types.js";
 export type GuardInstaller = {
   /** Where the guard stands in the settings file now. */
   state(): Promise<GuardState>;
-  /** Plans `change` against the settings file as it is, and holds the plan to run once. */
-  plan(change: GuardChange): Promise<{ planId: string; plan: GuardPlan }>;
+  /** Plans taking grove's old hook out of the settings file as it is, and holds the plan to run once. */
+  plan(): Promise<{ planId: string; plan: GuardPlan }>;
   /** Runs a held plan once: 409 when it already ran, 410 when it expired or was never held. */
   run(planId: string): Promise<GuardReceipt>;
 };
@@ -28,10 +28,10 @@ type Read = { setup: GuardSetup; command: string; file: SettingsFile };
 const BY_HAND = "To add the hook yourself, run git grove install-guard.";
 
 /**
- * Installs and uninstalls the agent guard's hook in Claude Code's user settings, after a review: a plan, held in its
- * own plan cache (`createPlanCache`) and run once by id, then a receipt. Runs are made one at a time. `setup` is read
- * at each call; without one, every call is a 503. The state's `refusal` says why grove will not install from here, or
- * will not edit the file, when it cannot read it or it is read-only.
+ * Reads where the agent guard stands, and takes grove's old hook out of Claude Code's user settings after a review: a
+ * plan, held in its own plan cache (`createPlanCache`) and run once by id, then a receipt. Runs are made one at a time.
+ * `setup` is read at each call; without one, every call is a 503. The state's `refusal` says why grove will not point
+ * a hook at this bin, or will not edit the file, when it cannot read it or it is read-only.
  */
 export function createGuardInstaller(setup: (() => GuardSetup) | null, options: PlanCacheOptions = {}): GuardInstaller {
   const now = options.now ?? Date.now;
@@ -64,9 +64,9 @@ export function createGuardInstaller(setup: (() => GuardSetup) | null, options: 
         refusal: ephemeralRefusal(resolved.bin) ?? unreadable,
       };
     },
-    async plan(change) {
-      const { setup: resolved, command, file } = await read();
-      const prepared = prepareGuardChange({ change, file, command, refusal: ephemeralRefusal(resolved.bin), now: now() });
+    async plan() {
+      const { file } = await read();
+      const prepared = prepareGuardChange({ file, now: now() });
       return { planId: plans.put(prepared), plan: prepared.plan };
     },
     async run(planId) {

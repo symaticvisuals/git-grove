@@ -16,6 +16,7 @@ import { feature, level, repoView } from "./wire-fixtures.js";
 
 const PATH = "/Users/robin/.claude/settings.json";
 const COMMAND = "/opt/homebrew/bin/node /opt/grove/dist/cli/bin.js guard --claude";
+const REMOVED = JSON.stringify({ matcher: "Bash", hooks: [{ type: "command", command: COMMAND, timeout: 10 }] }, null, 2);
 const NPX = "This git grove runs from a package runner's cache (npx, pnpm dlx, bunx, yarn dlx), which may be cleared under the hook; install it first: npm i -g @deepanshugoel/git-grove";
 
 function guard(overrides: Partial<GuardState> = {}): GuardState {
@@ -41,15 +42,15 @@ function ready(state: GuardState): Load<GuardState> {
 
 function guardPlan(overrides: Partial<GuardPlan> = {}): GuardPlan {
   return {
-    change: "install",
-    title: "Install the agent guard",
-    summary: "Claude Code checks each Bash command with grove before it runs, and stops one that would lose work.",
-    confirm: "Install",
+    change: "uninstall",
+    title: "Uninstall the agent guard",
+    summary: "Takes grove's hook out of Claude Code's settings.",
+    confirm: "Uninstall",
     settingsPath: PATH,
     backupPath: `${PATH}.grove-backup`,
-    adds: JSON.stringify({ matcher: "Bash", hooks: [{ type: "command", command: COMMAND, timeout: 10 }] }, null, 2),
-    removes: [],
-    lines: ["Your other settings and hooks are kept.", "Claude Code reloads this file when it changes, so running sessions normally pick the hook up; new sessions always do."],
+    adds: null,
+    removes: [REMOVED],
+    lines: ["Your other settings and hooks are kept.", "Claude Code reloads this file when it changes, so running sessions normally drop the hook; new sessions always do."],
     warnings: [],
     blockers: [],
     readAt: 1_000,
@@ -58,7 +59,7 @@ function guardPlan(overrides: Partial<GuardPlan> = {}): GuardPlan {
 }
 
 function receipt(overrides: Partial<GuardReceipt> = {}): GuardReceipt {
-  return { change: "install", updated: false, ok: true, refused: false, title: "Installed the agent guard", lines: [`Wrote ${PATH}`], undo: "uninstall", at: 2_000, ...overrides };
+  return { change: "uninstall", ok: true, refused: false, title: "Uninstalled the agent guard", lines: [`Wrote ${PATH}`], undo: null, at: 2_000, ...overrides };
 }
 
 function plain(text: string): string {
@@ -77,8 +78,8 @@ function home(status: GuardState = guard()): State {
   return reduce(initialState({ view: "projects" }, "1.0.0"), { type: "loaded", key: "guard", result: { slice: "guard", data: status } });
 }
 
-function opened(change: "install" | "uninstall" = "install"): State {
-  return reduce(home(), { type: "guard-open", change });
+function opened(): State {
+  return reduce(home(), { type: "guard-open", change: "uninstall" });
 }
 
 function planned(state: State, overrides: Partial<GuardPlan> = {}): State {
@@ -102,22 +103,23 @@ test("the guard's state is loaded on every route", () => {
   expect(home().guard).toEqual(ready(guard()));
 });
 
-test("the card shows while the guard is absent or stale, and hides once it is installed or put off with Not now", () => {
-  const absent = plain(guardCard(ready(guard()), null).text);
+test("the card shows while the guard is absent or stale, offers no Install, and hides once it is installed or put off with Not now", () => {
+  const card = guardCard(ready(guard()), null).text;
+  const absent = plain(card);
   expect(absent).toContain("Protect worktrees from Claude Code");
   expect(absent).toContain("Claude Code checks with grove before it runs git worktree remove, rm -r or reset --hard, and stops when work would be lost.");
   expect(absent).toContain("Not now");
-  expect(absent).toContain("Install…");
+  expect(absent).not.toContain("Install…");
+  expect(card).not.toContain('data-ui="guard-open"');
   expect(guardCard(ready(guard({ status: "installed" })), null).text).toBe("");
   expect(guardCard(ready(guard()), "absent").text).toBe("");
   expect(guardCard({ status: "loading" }, null).text).toBe("");
   const stale = plain(guardCard(ready(guard({ status: "stale" })), null).text);
   expect(stale).toContain("The agent guard points at an old Node or grove path.");
-  expect(stale).toContain("Update…");
-  expect(stale).not.toContain("Install…");
+  expect(stale).not.toContain("Update…");
 });
 
-test("the card says when hooks are turned off, and for a file grove will not edit shows the server's refusal, which points to install-guard, with no Install", () => {
+test("the card says when hooks are turned off, and for a file grove will not edit shows the server's refusal", () => {
   expect(plain(guardCard(ready(guard({ hooksDisabled: true })), null).text)).toContain(
     `Hooks are turned off in ${PATH}: it sets disableAllHooks to true, so the guard will not run unless a project turns hooks back on.`,
   );
@@ -153,55 +155,54 @@ test("the header status says on or off, quietly, and opens the dialog", () => {
   expect(plain(side)).toContain("Agent guard off");
 });
 
-test("the palette offers Install agent guard unless it is installed, and Uninstall agent guard while it is in", () => {
+test("the palette offers no Install agent guard, and Uninstall agent guard while grove's old hook is in", () => {
   const texts = (status: GuardState["status"]): string[] => paletteItems(home(guard({ status })), "agent guard").map((item) => item.text);
-  expect(texts("absent")).toEqual(["Install agent guard"]);
+  expect(texts("absent")).toEqual([]);
   expect(texts("installed")).toEqual(["Uninstall agent guard"]);
-  expect(texts("stale")).toEqual(["Install agent guard", "Uninstall agent guard"]);
-  expect(paletteItems(home(), "install agent")[0]).toMatchObject({ kind: "Actions", run: { guard: "install" } });
+  expect(texts("stale")).toEqual(["Uninstall agent guard"]);
+  expect(paletteItems(home(guard({ status: "installed" })), "uninstall agent")[0]).toMatchObject({ kind: "Actions", run: { guard: "uninstall" } });
   expect(paletteItems(initialState({ view: "projects" }, "1.0.0"), "agent guard")).toEqual([]);
 });
 
-test("the dialog shows the settings path, the backup, the JSON it adds, that the rest is kept, when Claude Code picks it up, and the reformat note", () => {
+test("the dialog shows the settings path, the backup, the JSON it removes, that the rest is kept, when Claude Code drops it, and the reformat note", () => {
   const reformat = "This file is not written as 2-space JSON, so grove rewrites it with 2-space indentation. No setting changes.";
+  const waiting = opened().guardDialog;
+  if (waiting === null) throw new Error("no dialog");
+  expect(plain(guardDialogParts(waiting, 5_000).head.text)).toContain("Uninstall the agent guard");
+  expect(plain(guardDialogParts(waiting, 5_000).foot.text)).toContain("Uninstall ↵");
   const state = armed(planned(opened(), { lines: [...guardPlan().lines, reformat] }));
   const dialog = state.guardDialog;
   if (dialog === null) throw new Error("no dialog");
   const parts = guardDialogParts(dialog, 5_000);
   const body = plain(parts.body.text);
-  expect(plain(parts.head.text)).toContain("Install the agent guard");
+  expect(plain(parts.head.text)).toContain("Uninstall the agent guard");
   expect(body).toContain(`Writes ${PATH}`);
   expect(body).toContain(`Keeps the file as it is now in ${PATH}.grove-backup`);
-  expect(body).toContain('"matcher": "Bash"');
+  expect(body).toContain("Removes");
+  expect(body).not.toContain("Adds to hooks.PreToolUse");
   expect(body).toContain(COMMAND);
   expect(body).toContain("Your other settings and hooks are kept.");
-  expect(body).toContain("Claude Code reloads this file when it changes, so running sessions normally pick the hook up; new sessions always do.");
+  expect(body).toContain("Claude Code reloads this file when it changes, so running sessions normally drop the hook; new sessions always do.");
   expect(body).toContain(reformat);
   const confirm = tagOf(parts.foot.text, 'data-guard="confirm"');
   expect(confirm).toContain('data-plan="g0"');
   expect(confirm).not.toContain("disabled");
-  expect(plain(parts.foot.text)).toContain("Install ↵");
+  expect(plain(parts.foot.text)).toContain("Uninstall ↵");
   expect(tagOf(guardDialogParts({ ...dialog, armed: null }, 5_000).foot.text, 'data-guard="confirm"')).toContain("disabled");
 });
 
-test("an uninstall shows what it removes and confirms with Uninstall; a blocked plan shows why and cannot be confirmed", () => {
-  const removed = JSON.stringify({ matcher: "Bash", hooks: [{ type: "command", command: COMMAND }] }, null, 2);
-  const uninstall = armed(planned(opened("uninstall"), { change: "uninstall", title: "Uninstall the agent guard", confirm: "Uninstall", adds: null, removes: [removed] })).guardDialog;
-  if (uninstall === null) throw new Error("no dialog");
-  const parts = guardDialogParts(uninstall, 5_000);
-  expect(plain(parts.body.text)).toContain("Removes");
-  expect(plain(parts.body.text)).toContain(COMMAND);
-  expect(plain(parts.foot.text)).toContain("Uninstall ↵");
-  const blocked = armed(planned(opened(), { blockers: [NPX] }));
-  const blockedParts = guardDialogParts(blocked.guardDialog ?? uninstall, 5_000);
-  expect(plain(blockedParts.body.text)).toContain(NPX);
-  expect(tagOf(blockedParts.foot.text, 'data-guard="confirm"')).toContain("disabled");
+test("a blocked plan shows why and cannot be confirmed", () => {
+  const blocked = armed(planned(opened(), { removes: [], blockers: ["The agent guard is not installed."] }));
+  if (blocked.guardDialog === null) throw new Error("no dialog");
+  const parts = guardDialogParts(blocked.guardDialog, 5_000);
+  expect(plain(parts.body.text)).toContain("The agent guard is not installed.");
+  expect(tagOf(parts.foot.text, 'data-guard="confirm"')).toContain("disabled");
   expect(confirmed(blocked).guardDialog?.stage).toBe("review");
 });
 
-test("opening previews at once, a confirm needs the armed plan, and the receipt lands with Undo, which opens the uninstall for review", () => {
+test("opening previews at once, a confirm needs the armed plan, and the receipt lands with no Undo", () => {
   const open = opened();
-  expect(open.guardDialog).toMatchObject({ change: "install", stage: "review", planning: true, plan: null });
+  expect(open.guardDialog).toMatchObject({ change: "uninstall", stage: "review", planning: true, plan: null });
   const shown = planned(open);
   expect(confirmed(shown).guardDialog?.stage).toBe("review");
   expect(reduce(armed(shown), { type: "guard-confirm", planId: "other" }).guardDialog?.stage).toBe("review");
@@ -211,11 +212,20 @@ test("opening previews at once, a confirm needs the armed plan, and the receipt 
   expect(done.guardDialog).toMatchObject({ stage: "done", receipt: receipt() });
   if (done.guardDialog === null) throw new Error("no dialog");
   const parts = guardDialogParts(done.guardDialog, 5_000);
-  expect(plain(parts.body.text)).toContain("Installed the agent guard");
-  expect(parts.foot.text).toContain('data-guard="undo"');
-  const undo = reduce(done, { type: "guard-undo" });
-  expect(undo.guardDialog).toMatchObject({ change: "uninstall", stage: "review", planning: true });
-  expect(undo.guardDialog?.id).not.toBe(done.guardDialog?.id);
+  expect(plain(parts.body.text)).toContain("Uninstalled the agent guard");
+  expect(parts.foot.text).not.toContain('data-guard="undo"');
+  expect(plain(parts.foot.text)).not.toContain("Undo");
+  expect(plain(parts.foot.text)).toContain("Your other settings and hooks were kept.");
+});
+
+test("a receipt for a change that was not made says nothing was written and offers Preview again", () => {
+  const running = confirmed(armed(planned(opened())));
+  const done = reduce(running, { type: "guard-ran", dialog: running.guardDialog?.id ?? 0, receipt: receipt({ ok: false, refused: true, title: "Changed since you looked" }) });
+  if (done.guardDialog === null) throw new Error("no dialog");
+  const foot = guardDialogParts(done.guardDialog, 5_000).foot.text;
+  expect(plain(foot)).toContain("Nothing was written.");
+  expect(foot).toContain('data-guard="again"');
+  expect(reduce(done, { type: "guard-again" }).guardDialog).toMatchObject({ stage: "review", planning: true });
 });
 
 test("an expired plan is previewed again with a notice; another failure goes back to the review with why", () => {
@@ -231,7 +241,7 @@ test("an expired plan is previewed again with a notice; another failure goes bac
 test("the guard dialog does not open over an action dialog, the palette does not open over it, and Not now is kept", () => {
   const view = repoView({ features: [feature({ levels: [level()] })] });
   const withAction = reduce(home(), { type: "dialog-open", action: "new", ctx: { repo: view, feature: null, level: null, branch: null, targets: null, worktree: null } });
-  expect(reduce(withAction, { type: "guard-open", change: "install" }).guardDialog).toBeNull();
+  expect(reduce(withAction, { type: "guard-open", change: "uninstall" }).guardDialog).toBeNull();
   expect(reduce(opened(), { type: "palette-open" }).palette).toBeNull();
   expect(run(home(), { type: "guard-dismiss", status: "absent" }, { type: "route", route: { view: "pins" } }, { type: "route", route: { view: "projects" } }).guardDismissed).toBe("absent");
   expect(reduce(opened(), { type: "guard-close" }).guardDialog).toBeNull();
@@ -247,22 +257,10 @@ test("Not now is kept per status, so a guard that later goes stale shows the car
   const dismissed = reduce(home(), { type: "guard-dismiss", status: "absent" });
   expect(guardCard(dismissed.guard, dismissed.guardDismissed).text).toBe("");
   const stale = reduce(dismissed, { type: "loaded", key: "guard", result: { slice: "guard", data: guard({ status: "stale" }) } });
-  expect(guardCard(stale.guard, stale.guardDismissed).text).toContain("Update…");
+  expect(guardCard(stale.guard, stale.guardDismissed).text).toContain("The agent guard points at an old Node or grove path.");
   expect(guardCard(stale.guard, stale.guardDismissed).text).toContain('data-status="stale"');
   const again = reduce(stale, { type: "guard-dismiss", status: "stale" });
   expect(guardCard(again.guard, again.guardDismissed).text).toBe("");
-});
-
-test("after an update the receipt offers Uninstall, not Undo, and says the old hook is not put back", () => {
-  const running = confirmed(armed(planned(opened(), { title: "Update the agent guard" })));
-  const done = reduce(running, { type: "guard-ran", dialog: running.guardDialog?.id ?? 0, receipt: receipt({ updated: true, title: "Updated the agent guard" }) });
-  if (done.guardDialog === null) throw new Error("no dialog");
-  const foot = guardDialogParts(done.guardDialog, 5_000).foot.text;
-  const start = foot.indexOf('data-guard="undo"');
-  expect(start).toBeGreaterThan(-1);
-  expect(plain(foot.slice(foot.indexOf(">", start) + 1, foot.indexOf("</button>", start)))).toBe("Uninstall");
-  expect(plain(foot)).not.toContain("Undo");
-  expect(plain(foot)).toContain("Uninstall takes the hook out; the old one is not put back.");
 });
 
 test("closing the guard dialog gives focus back to its opener, else to the sidebar's guard status; Not now moves it to the list", () => {
